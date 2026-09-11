@@ -1,0 +1,45 @@
+{
+  "description": "Fallback hazard advisory data for demo locations. Loaded by hazard_agent when IMD/INCOIS is unavailable.",
+  "generated": "2026-09-11T12:00:00Z",
+  "locations": {
+    "thoothukudi": {
+      "advisory_timestamp": "2026-09-11T12:00:00Z",
+      "cyclone_warning": false,
+      "cyclone_name": null,
+      "cyclone_severity": null,
+      "lightning_advisory": true,
+      "lightning_details": "Isolated lightning possible over Gulf of Mannar; fishermen advised caution",
+      "rough_sea_advisory": false,
+      "rough_sea_details": null,
+      "overall_hazard_level": "low",
+      "active_warnings": ["lightning_advisory"],
+      "source_agency": "IMD Chennai"
+    },
+    "rameswaram": {
+      "advisory_timestamp": "2026-09-11T12:00:00Z",
+      "cyclone_warning": false,
+      "cyclone_name": null,
+      "cyclone_severity": null,
+      "lightning_advisory": false,
+      "lightning_details": null,
+      "rough_sea_advisory": false,
+      "rough_sea_details": null,
+      "overall_hazard_level": "none",
+      "active_warnings": [],
+      "source_agency": "IMD Chennai"
+    },
+    "chennai": {
+      "advisory_timestamp": "2026-09-11T12:00:00Z",
+      "cyclone_warning": false,
+      "cyclone_name": null,
+      "cyclone_severity": null,
+      "lightning_advisory": true,
+      "lightning_details": "Squally weather with lightning expected along N Tamil Nadu coast",
+      "rough_sea_advisory": true,
+      "rough_sea_details": "Wave height 2.0-2.5 m; fishermen advised not to venture into sea",
+      "overall_hazard_level": "moderate",
+      "active_warnings": ["lightning_advisory", "rough_sea_advisory"],
+      "source_agency": "IMD Chennai / INCOIS"
+    }
+  }
+}
