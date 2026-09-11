@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+langgraph
+langchain
+langchain-openai
+python-dotenv
+shapely
+geopandas
+httpx
+sse-starlette
