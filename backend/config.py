@@ -32,8 +32,10 @@ INCOIS_ERDDAP_BASE_URL: str = os.getenv(
 OPEN_METEO_MARINE_URL: str = "https://marine-api.open-meteo.com/v1/marine"
 OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
 
-# Optional OpenAI key (reserved for future LLM-synthesis upgrades)
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+# Groq configuration (Milestone 6)
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"
+GROQ_MODEL_QUALITY: str = "llama-3.3-70b-versatile"
 
 # ---------------------------------------------------------------------------
 # HTTP client settings

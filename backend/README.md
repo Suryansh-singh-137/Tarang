@@ -19,6 +19,9 @@ We have recently completed a series of architectural hardenings to improve expla
 - **Multi-Turn API State:** The `/query` endpoint now accepts and returns a `conversation` array (representing past turns) alongside `last_results` and `last_parsed_intent`.
 - **Selective Agent Re-Invocation:** When answering follow-up queries, the pipeline intelligently compares `changed_fields` (e.g. a user only changing the `time_window`). If a dependency field hasn't changed, the pipeline re-uses the cached agent result instead of making redundant API calls (TTL-based cache).
 
+### Milestone 6: Real LLM Integration (Groq)
+Tarang uses Groq-hosted LLMs for query understanding and answer synthesis, with deterministic fallback on failure; risk scoring and risk explanation remain fully deterministic by design, to eliminate hallucination risk in safety-critical numeric output.
+
 ## Running the API
 
 ### Setup

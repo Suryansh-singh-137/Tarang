@@ -31,6 +31,13 @@ Explainability contract (PRD §4.3):
 from __future__ import annotations
 
 from typing import Optional
+import json
+import re
+import logging
+
+import config
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
 
 from graph.state import AgentResult, EvidenceItem, ORCAState
 
@@ -446,11 +453,168 @@ def _build_geojson(
 # ---------------------------------------------------------------------------
 # Public node function
 # ---------------------------------------------------------------------------
+# Public node function (LLM Path - Milestone 6)
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+def _extract_numbers(text: str) -> set[float]:
+    """Extract all numbers from text as floats for grounding checks."""
+    matches = re.findall(r'\b\d+(?:\.\d+)?\b', text)
+    nums = set()
+    for m in matches:
+        try:
+            nums.add(float(m))
+        except ValueError:
+            pass
+    return nums
 
 def synthesis(state: ORCAState) -> dict:
     """
     LangGraph node: fuse all agent results into a cited natural-language
-    answer and a GeoJSON map payload.
+    answer and a GeoJSON map payload using Groq LLM.
+    """
+    lang = state.get("detected_language", "en")
+    intent = state.get("parsed_intent")
+
+    # Handle early-exit cases where a previous node already generated the final text
+    if intent:
+        existing_answer = state.get("final_answer_text", "")
+        is_invalid_loc = not intent.get("lat") and not intent.get("lon")
+        is_explanation = intent.get("query_type") == "risk_explanation"
+        
+        if (is_invalid_loc or is_explanation) and existing_answer:
+            return {
+                "final_answer_text": existing_answer,
+                "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
+            }
+
+    location = intent["location_name"] if intent else "the requested location"
+    lat = intent["lat"] if intent else 8.7642
+    lon = intent["lon"] if intent else 78.1348
+    
+    weather = state.get("weather_result")
+    pfz = state.get("pfz_result")
+    hazard = state.get("hazard_result")
+    geofence = state.get("geofence_result")
+    risk = state.get("risk_result")
+    evidence = state.get("evidence") or []
+
+    map_geojson = _build_geojson(
+        intent_lat=lat,
+        intent_lon=lon,
+        location_name=location,
+        pfz=pfz,
+        geofence=geofence,
+        risk=risk,
+    )
+
+    if not config.GROQ_API_KEY:
+        logger.warning("GROQ_API_KEY not set. Falling back to template synthesis.")
+        fallback_res = _fallback_synthesis(state)
+        fallback_res["map_geojson"] = map_geojson
+        fallback_res["synthesis_method"] = "template_fallback"
+        return fallback_res
+
+    # Prepare evidence context for LLM
+    evidence_payload = {
+        "weather": weather.get("data") if weather and weather.get("status") == "success" else None,
+        "pfz": pfz.get("data") if pfz and pfz.get("status") == "success" else None,
+        "hazard": hazard.get("data") if hazard and hazard.get("status") == "success" else None,
+        "geofence": geofence.get("data") if geofence and geofence.get("status") == "success" else None,
+        "risk_components": risk.get("data", {}).get("components") if risk and risk.get("status") == "success" else None,
+        "risk_score": risk.get("data", {}).get("composite_score") if risk and risk.get("status") == "success" else None,
+        "risk_label": risk.get("data", {}).get("risk_label") if risk and risk.get("status") == "success" else None,
+    }
+    
+    evidence_str = json.dumps(evidence_payload, indent=2)
+
+    # Note if any fallback data was used
+    data_quality_notes = []
+    for agent_name, res in [("weather", weather), ("pfz", pfz), ("hazard", hazard)]:
+        if res and res.get("status") == "success":
+            dq = res.get("data_quality", "live")
+            if dq == "fallback":
+                data_quality_notes.append(f"{agent_name.capitalize()} agent used cached fallback data.")
+            elif dq == "historical_proxy":
+                data_quality_notes.append(f"{agent_name.capitalize()} agent used historical proxy data.")
+    
+    dq_str = " ".join(data_quality_notes) if data_quality_notes else "All data is live."
+    
+    system_prompt = f"""You are Tarang, a marine safety decision-support assistant. Synthesize a conversational, evidence-based assessment for {location}.
+
+STRICT RULES:
+1. NEVER state a numeric value that is not present in the provided JSON data.
+2. ALWAYS refer to PFZ output as a "chlorophyll-based fishing-potential proxy", never a "PFZ advisory".
+3. ALWAYS refer to hazard output as "weather-condition hazard indicators", never a "cyclone warning".
+4. NEVER say "it is safe" or "it is not safe" as a bare claim. Always frame it as: "Tarang assesses conditions as [LABEL] risk based on current evidence".
+5. ALWAYS append this disclaimer at the end: "Disclaimer: This is a decision-support assessment, not an official safety clearance. Always follow advisories from IMD, INCOIS, and the Indian Coast Guard."
+6. The response must be in the {lang} language.
+7. Data Quality: {dq_str}. You MUST mention if any data is fallback or historical proxy.
+
+JSON Evidence:
+{evidence_str}
+"""
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("user", "Synthesize the assessment based on the provided evidence.")
+    ])
+    
+    llm = ChatGroq(
+        model=config.GROQ_MODEL_QUALITY, 
+        api_key=config.GROQ_API_KEY, 
+        temperature=0.2, 
+        max_retries=0, 
+        timeout=10.0
+    )
+    chain = prompt | llm
+    
+    try:
+        res = chain.invoke({})
+        output_text = res.content
+        
+        # Numeric grounding check
+        output_nums = _extract_numbers(output_text)
+        evidence_nums = _extract_numbers(evidence_str)
+        
+        # It's possible for LLM to write "100" from risk score/100, or numbers like "2" for factors. 
+        # For a strict grounding check, we remove common small integers/percentages/known constants.
+        safe_nums = {0, 1, 2, 3, 4, 5, 10, 100, 24}
+        ungrounded = output_nums - evidence_nums - safe_nums
+        
+        if ungrounded:
+            logger.warning(f"Numeric grounding check failed. Ungrounded numbers: {ungrounded}. Falling back to template.")
+            fallback_res = _fallback_synthesis(state)
+            fallback_res["map_geojson"] = map_geojson
+            fallback_res["synthesis_method"] = "template_fallback"
+            return fallback_res
+
+        # If parse_method fell back, we can mention it at the bottom.
+        # However, the user PRD states "surface this the same way other fallbacks are surfaced".
+        # We can just return synthesis_method in state and let the frontend/logger handle it.
+        
+        return {
+            "final_answer_text": output_text,
+            "map_geojson": map_geojson,
+            "synthesis_method": "llm",
+        }
+    except Exception as exc:
+        logger.warning(f"Groq synthesis failed ({exc}), falling back to template synthesis.")
+        fallback_res = _fallback_synthesis(state)
+        fallback_res["map_geojson"] = map_geojson
+        fallback_res["synthesis_method"] = "template_fallback"
+        return fallback_res
+
+
+# ---------------------------------------------------------------------------
+# Fallback template-based synthesis (Pre-M6 logic)
+# ---------------------------------------------------------------------------
+
+def _fallback_synthesis(state: ORCAState) -> dict:
+    """
+    Fallback LangGraph node: fuse all agent results into a cited natural-language
+    answer using string templates.
     """
     lang = state.get("detected_language", "en")
     intent = state.get("parsed_intent")
@@ -491,16 +655,6 @@ def synthesis(state: ORCAState) -> dict:
         evidence=evidence,
     )
 
-    map_geojson = _build_geojson(
-        intent_lat=lat,
-        intent_lon=lon,
-        location_name=location,
-        pfz=pfz,
-        geofence=geofence,
-        risk=risk,
-    )
-
     return {
         "final_answer_text": answer_text,
-        "map_geojson": map_geojson,
     }

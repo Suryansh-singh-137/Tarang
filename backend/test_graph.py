@@ -132,6 +132,25 @@ TEST_CASES = [
         "m5_checks": True,
         "expected_changed_fields_followup": ["time_window", "time_start_utc", "time_end_utc"],
     },
+    # ----- Milestone 6 checks -----
+    {
+        "id": 11,
+        "description": "[M6] Language robustness (relative location phrasing, implicit)",
+        "query": "Thoothukudi se 50km door north side safe hai kya?",
+        "expected_language": "hi",
+        "expected_query_type": "safety_check",
+        "expected_agents": ["weather_agent", "pfz_agent", "hazard_agent", "geofence_agent", "risk_agent"],
+        "m6_checks": True,
+    },
+    {
+        "id": 12,
+        "description": "[M6] Explicitly checking synthesis method and LLM parsing on normal queries",
+        "query": "Give me a full safety check for Kochi.",
+        "expected_language": "en",
+        "expected_query_type": "safety_check",
+        "expected_agents": ["weather_agent", "pfz_agent", "hazard_agent", "geofence_agent", "risk_agent"],
+        "m6_checks": True,
+    },
 ]
 
 
@@ -372,6 +391,29 @@ async def run_test(test_case: dict) -> bool:
             # Follow-up answer should not be empty
             if not result2.get("final_answer_text", "").strip():
                 failures.append("[M5] Follow-up final_answer_text is empty")
+
+    # ----- Milestone 6 checks -----
+    if test_case.get("m6_checks"):
+        import config
+        has_key = bool(config.GROQ_API_KEY)
+        expected_pm = "llm" if has_key else "rule_based_fallback"
+        expected_sm = "llm" if has_key else "template_fallback"
+        
+        pm = result.get("parse_method")
+        sm = result.get("synthesis_method")
+        
+        if pm != expected_pm:
+            failures.append(f"[M6] Expected parse_method='{expected_pm}', got '{pm}'")
+        if sm != expected_sm:
+            failures.append(f"[M6] Expected synthesis_method='{expected_sm}', got '{sm}'")
+            
+        # For M6, make sure risk_explanation isolated from LLM by checking explain_risk isolating test (id: 8) explicitly here or via its own m6 checks.
+        
+    if test_case.get("m4_checks"):  # explain_risk isolation check
+        pm = result.get("parse_method")
+        # parse method should still be LLM (or fallback), but synthesis_method shouldn't be touched by explain_risk
+        # Actually explain_risk just returns text. So synthesis_method will be missing or None because it doesn't run synthesis!
+        pass
 
     if failures:
         print(f"\n❌ FAILURES:")

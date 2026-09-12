@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 langgraph
 langchain
+langchain-groq
 langchain-openai
 python-dotenv
 shapely

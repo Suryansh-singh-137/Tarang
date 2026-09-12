@@ -25,7 +25,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Literal
+import logging
+
+from pydantic import BaseModel, Field
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
 
 import config
 from graph.state import ORCAState, ParsedIntent
@@ -396,10 +401,170 @@ def _compute_changed_fields(
 
 
 # ---------------------------------------------------------------------------
-# Public node function
+# Pydantic schema for Groq structured output (Milestone 6)
 # ---------------------------------------------------------------------------
 
+class ParsedIntentSchema(BaseModel):
+    detected_language: Literal["en", "hi", "ta"] = Field(description="BCP-47 language code: 'en' for English, 'hi' for Hindi (including romanised), 'ta' for Tamil (including romanised)")
+    location_name: Optional[str] = Field(description="Recognized location name exactly matching a gazetteer entry, or raw text if unknown. Null if missing.")
+    lat: Optional[float] = Field(description="Latitude of the location from the gazetteer. Null if unknown.")
+    lon: Optional[float] = Field(description="Longitude of the location from the gazetteer. Null if unknown.")
+    time_window: Literal["now", "today", "tomorrow_morning", "tomorrow_evening", "next_24h"] = Field(description="The requested time window")
+    query_type: Literal["safety_check", "pfz_lookup", "hazard_only", "weather_only", "risk_explanation", "general"] = Field(description="The type of query")
+    needs_weather: bool = Field(description="Whether weather data is needed")
+    needs_pfz: bool = Field(description="Whether PFZ data is needed")
+    needs_hazard: bool = Field(description="Whether hazard data is needed")
+    needs_geofence: bool = Field(description="Whether geofence data is needed")
+
+# ---------------------------------------------------------------------------
+# Public node function (LLM Path - Milestone 6)
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
 def detect_and_parse(state: ORCAState) -> dict:
+    """
+    LangGraph node: detect language + parse intent from raw_query using Groq LLM.
+    Falls back to deterministic rule-based parsing on failure/timeout.
+    """
+    raw = state["raw_query"]
+    last_intent = state.get("last_parsed_intent")
+    conversation_history = list(state.get("conversation_history") or [])
+
+    if not config.GROQ_API_KEY:
+        logger.warning("GROQ_API_KEY not set. Falling back to rule-based parser.")
+        return _fallback_parse(state)
+
+    # Prepare context
+    history_text = "\n".join([f"{t['role']}: {t['content']}" for t in conversation_history])
+    gazetteer_list = ", ".join([f"{k.title()} ({v[0]}, {v[1]})" for k, v in GAZETTEER.items()])
+    
+    system_prompt = f"""You are a marine safety intent parser. Extract structured intent from the user query.
+The query may be in English, Hindi (including Romanised), or Tamil (including Romanised).
+    
+RULES:
+1. Resolve location names to lat/lon ONLY from this gazetteer list: {gazetteer_list}. 
+   If the location isn't in this list, return location_name as the raw extracted text and leave lat/lon null.
+2. If there is conversation history, inherit the location and/or time_window from the last intent if they are not explicitly changed in the new query.
+3. Classify the query_type accurately. "risk_explanation" is when asking WHY the risk score is what it is (explain the factors).
+
+Last Intent Context:
+{last_intent if last_intent else 'None'}
+
+Conversation History:
+{history_text if history_text else 'None'}
+"""
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("user", "{query}")
+    ])
+    
+    llm = ChatGroq(
+        model=config.GROQ_MODEL_FAST, 
+        api_key=config.GROQ_API_KEY, 
+        temperature=0, 
+        max_retries=0, 
+        timeout=4.0
+    )
+    structured_llm = llm.with_structured_output(ParsedIntentSchema)
+    chain = prompt | structured_llm
+    
+    try:
+        res: ParsedIntentSchema = chain.invoke({"query": raw})
+        
+        # We must fill needs_risk based on query_type for backward compatibility in the pipeline
+        needs_risk = res.query_type == "safety_check"
+        
+        # For explanations, handle explicitly
+        if res.query_type == "risk_explanation":
+            time_start_utc, time_end_utc = _resolve_time_range(res.time_window)
+            
+            parsed_intent = ParsedIntent(
+                location_name=res.location_name or "Thoothukudi",
+                lat=res.lat or GAZETTEER["thoothukudi"][0],
+                lon=res.lon or GAZETTEER["thoothukudi"][1],
+                time_window=res.time_window,
+                time_start_utc=time_start_utc,
+                time_end_utc=time_end_utc,
+                query_type="risk_explanation",
+                needs_weather=False,
+                needs_pfz=False,
+                needs_hazard=False,
+                needs_geofence=False,
+                needs_risk=False,
+            )
+            
+            new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+            return {
+                "detected_language": res.detected_language,
+                "parsed_intent": parsed_intent,
+                "changed_fields": [],
+                "conversation_history": new_history,
+                "parse_method": "llm",
+            }
+            
+        # Detect invalid location logic
+        if res.location_name and res.lat is None and res.lon is None:
+            # We matched the text but it wasn't in gazetteer
+            invalid_intent = ParsedIntent(
+                location_name="Unknown", lat=None, lon=None,
+                time_window=res.time_window, time_start_utc="", time_end_utc="",
+                query_type="general", needs_weather=False, needs_pfz=False,
+                needs_hazard=False, needs_geofence=False, needs_risk=False,
+            )
+            return {
+                "detected_language": res.detected_language,
+                "parsed_intent": invalid_intent,
+                "changed_fields": [],
+                "final_answer_text": "I was unable to identify a recognised coastal location in your query. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Kochi) and I will retrieve marine and safety information for you.",
+                "parse_method": "llm",
+            }
+
+        # Resolve explicit UTC time range
+        time_start_utc, time_end_utc = _resolve_time_range(res.time_window)
+
+        # Default fallback if location completely omitted
+        loc_name = res.location_name or "Thoothukudi"
+        lat = res.lat or GAZETTEER["thoothukudi"][0]
+        lon = res.lon or GAZETTEER["thoothukudi"][1]
+
+        new_intent = ParsedIntent(
+            location_name=loc_name,
+            lat=lat,
+            lon=lon,
+            time_window=res.time_window,
+            time_start_utc=time_start_utc,
+            time_end_utc=time_end_utc,
+            query_type=res.query_type, # type: ignore
+            needs_weather=res.needs_weather,
+            needs_pfz=res.needs_pfz,
+            needs_hazard=res.needs_hazard,
+            needs_geofence=res.needs_geofence,
+            needs_risk=needs_risk,
+        )
+
+        changed_fields = _compute_changed_fields(new_intent, last_intent)
+        new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+
+        return {
+            "detected_language": res.detected_language,
+            "parsed_intent": new_intent,
+            "changed_fields": changed_fields,
+            "conversation_history": new_history,
+            "parse_method": "llm",
+        }
+        
+    except Exception as exc:
+        logger.warning(f"Groq parse failed ({exc}), falling back to rule-based parser.")
+        return _fallback_parse(state)
+
+
+# ---------------------------------------------------------------------------
+# Fallback rule-based parsing (Pre-M6 logic)
+# ---------------------------------------------------------------------------
+
+def _fallback_parse(state: ORCAState) -> dict:
     """
     LangGraph node: detect language + parse intent from raw_query.
     Returns a partial state dict to merge into ORCAState.
@@ -466,6 +631,7 @@ def detect_and_parse(state: ORCAState) -> dict:
             "parsed_intent": parsed_intent,
             "changed_fields": [],
             "conversation_history": new_history,
+            "parse_method": "rule_based_fallback",
         }
 
     # ---- Detect fictional/invalid locations ----
@@ -493,6 +659,7 @@ def detect_and_parse(state: ORCAState) -> dict:
                 "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Kochi) "
                 "and I will retrieve marine and safety information for you."
             ),
+            "parse_method": "rule_based_fallback",
         }
 
     # ---- Milestone 5: Inherit location from previous turn if not in this query ----
@@ -542,4 +709,5 @@ def detect_and_parse(state: ORCAState) -> dict:
         "parsed_intent": new_intent,
         "changed_fields": changed_fields,
         "conversation_history": new_history,
+        "parse_method": "rule_based_fallback",
     }

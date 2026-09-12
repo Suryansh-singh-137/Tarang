@@ -138,3 +138,8 @@ class ORCAState(TypedDict):
     last_parsed_intent: Optional[ParsedIntent]      # intent from the previous turn
     last_results: Dict[str, AgentResult]            # cached agent results from previous turn
     changed_fields: List[str]                       # fields that changed vs last turn
+
+    # Milestone 6: Execution transparency
+    parse_method: Literal["llm", "rule_based_fallback"]
+    synthesis_method: Literal["llm", "template_fallback"]
+
