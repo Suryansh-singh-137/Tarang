@@ -35,12 +35,12 @@ logger = logging.getLogger("orca")
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="ORCA — Marine Ecosystem Reasoning with Collaborative Agents",
+    title="Tarang — Marine Ecosystem Reasoning with Collaborative Agents",
     description=(
         "Multi-agent marine safety advisor for Indian coastal fishermen. "
-        "Powered by LangGraph."
+        "Powered by LangGraph + real INCOIS/Open-Meteo data."
     ),
-    version="1.0.0-milestone1",
+    version="2.0.0-milestone2",
 )
 
 app.add_middleware(
@@ -76,6 +76,7 @@ def _build_initial_state(query: str) -> ORCAState:
         risk_result=None,
         final_answer_text="",
         map_geojson={"type": "FeatureCollection", "features": []},
+        evidence=[],
         trace=[],
     )
 
@@ -147,6 +148,18 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
             if final_state.get("risk_result")
             else {}
         ),
+        "evidence": [
+            {
+                "claim":        ev.get("claim", ""),
+                "value":        ev.get("value"),
+                "unit":         ev.get("unit", ""),
+                "source":       ev.get("source", ""),
+                "source_time":  ev.get("source_time", ""),
+                "retrieved_at": ev.get("retrieved_at", ""),
+            }
+            for ev in (final_state.get("evidence") or [])
+        ],
+        "parsed_intent": final_state.get("parsed_intent"),
     }
 
     yield {
@@ -164,8 +177,8 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
 @app.get("/")
 def root():
     return {
-        "service": "ORCA Marine Safety Advisor",
-        "version": "1.0.0-milestone1",
+        "service": "Tarang Marine Safety Advisor",
+        "version": "2.0.0-milestone2",
         "status": "running",
         "endpoint": "POST /query",
     }

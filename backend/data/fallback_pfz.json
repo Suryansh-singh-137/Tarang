@@ -1,0 +1,96 @@
+{
+  "description": "Fallback PFZ data based on historical INCOIS Oceansat-2 chlorophyll patterns. Loaded when live ERDDAP is unavailable.",
+  "generated": "2026-09-11T06:00:00Z",
+  "default": {
+    "advisory_date": "2026-09-11",
+    "source_time": "2020-05-01T00:00:00Z",
+    "zones": [
+      {
+        "zone_id": "PFZ-FALLBACK-001",
+        "lat": 8.50,
+        "lon": 78.20,
+        "distance_km": 28,
+        "chlorophyll_mg_m3": 0.85,
+        "advisory_date": "2026-09-11",
+        "source": "fallback_pfz.json",
+        "description": "Moderate chlorophyll zone SE of Thoothukudi (fallback)"
+      }
+    ],
+    "nearest_zone_km": 28,
+    "zone_count": 1,
+    "avg_chl": 0.85,
+    "overall_productivity": "moderate"
+  },
+  "locations": {
+    "thoothukudi": {
+      "advisory_date": "2026-09-11",
+      "source_time": "2020-05-01T00:00:00Z",
+      "zones": [
+        {
+          "zone_id": "PFZ-TN-FB-001",
+          "lat": 8.72,
+          "lon": 78.32,
+          "distance_km": 22,
+          "chlorophyll_mg_m3": 0.97,
+          "advisory_date": "2026-09-11",
+          "source": "fallback_pfz.json",
+          "description": "High chlorophyll zone E of Thoothukudi (fallback)"
+        },
+        {
+          "zone_id": "PFZ-TN-FB-002",
+          "lat": 8.55,
+          "lon": 78.45,
+          "distance_km": 40,
+          "chlorophyll_mg_m3": 0.78,
+          "advisory_date": "2026-09-11",
+          "source": "fallback_pfz.json",
+          "description": "Moderate chlorophyll zone SE of Thoothukudi (fallback)"
+        }
+      ],
+      "nearest_zone_km": 22,
+      "zone_count": 2,
+      "avg_chl": 0.875,
+      "overall_productivity": "moderate"
+    },
+    "rameswaram": {
+      "advisory_date": "2026-09-11",
+      "source_time": "2020-05-01T00:00:00Z",
+      "zones": [
+        {
+          "zone_id": "PFZ-TN-FB-003",
+          "lat": 9.10,
+          "lon": 79.55,
+          "distance_km": 34,
+          "chlorophyll_mg_m3": 1.15,
+          "advisory_date": "2026-09-11",
+          "source": "fallback_pfz.json",
+          "description": "High productivity zone E of Rameswaram (fallback)"
+        }
+      ],
+      "nearest_zone_km": 34,
+      "zone_count": 1,
+      "avg_chl": 1.15,
+      "overall_productivity": "high"
+    },
+    "chennai": {
+      "advisory_date": "2026-09-11",
+      "source_time": "2020-05-01T00:00:00Z",
+      "zones": [
+        {
+          "zone_id": "PFZ-TN-FB-004",
+          "lat": 12.80,
+          "lon": 80.65,
+          "distance_km": 45,
+          "chlorophyll_mg_m3": 0.62,
+          "advisory_date": "2026-09-11",
+          "source": "fallback_pfz.json",
+          "description": "Low-moderate productivity zone SE of Chennai (fallback)"
+        }
+      ],
+      "nearest_zone_km": 45,
+      "zone_count": 1,
+      "avg_chl": 0.62,
+      "overall_productivity": "low"
+    }
+  }
+}

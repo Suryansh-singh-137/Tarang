@@ -1,7 +1,7 @@
 """
 build_graph.py
 --------------
-Wires the ORCA LangGraph StateGraph.
+Wires the Tarang LangGraph StateGraph.
 
 Graph topology:
   detect_and_parse
@@ -52,6 +52,9 @@ def _skip(agent_name: str, state: ORCAState) -> dict:
         "source": "not invoked for this query",
         "summary": f"{agent_name} was not needed for this query type.",
         "used_fallback": False,
+        "timestamp": "",
+        "error": None,
+        "evidence": [],
     }
     state_key = f"{agent_name.replace('_agent', '')}_result"
     current_trace = state.get("trace") or []

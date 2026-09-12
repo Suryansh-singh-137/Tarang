@@ -8,3 +8,4 @@ shapely
 geopandas
 httpx
 sse-starlette
+cachetools

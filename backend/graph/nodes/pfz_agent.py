@@ -3,137 +3,228 @@ pfz_agent node
 --------------
 Returns Potential Fishing Zone (PFZ) information for the queried location.
 
-Milestone 1: Returns deterministic mock PFZ advisories.
-             Milestone 2: Replace `_fetch_pfz_advisory()` with INCOIS RAG
-             retrieval (tools/incois_rag.py) + CMEMS chlorophyll/SST proxy.
+Milestone 2: Calls tools/incois_client.py (INCOIS ERDDAP Oceansat-2 CHL data)
+             with fallback to data/fallback_pfz.json.
+
+PFZ detection strategy:
+  INCOIS Oceansat-2 chlorophyll-a grid
+       ↓
+  incois_client.fetch_pfz_zones()
+       ↓
+  High-CHL cells identified as PFZ candidates
+       ↓
+  Geographic filtering (150 km radius)
+       ↓
+  Ranked zones (by CHL desc)
+       ↓
+  PFZResult → AgentResult + EvidenceItems + GeoJSON features
+
+Attribution: "INCOIS ERDDAP (Oceansat-2, chlorophyll-based PFZ proxy)"
+The synthesis layer discloses that this is a scientific proxy, not
+an official INCOIS PFZ advisory.
+
+GeoJSON coordinate order: [longitude, latitude] (RFC 7946).
 """
 
 from __future__ import annotations
 
-from graph.state import AgentResult, ORCAState
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from graph.state import AgentResult, EvidenceItem, ORCAState
+from tools.incois_client import PFZResult, fetch_pfz_zones
+
+logger = logging.getLogger("tarang.pfz")
 
 # ---------------------------------------------------------------------------
-# Mock PFZ data per location
-# Each entry represents one or more PFZ zones near the location.
-# The "zones" list feeds directly into map_geojson as Point features.
+# Fallback data
 # ---------------------------------------------------------------------------
-_FALLBACK_PFZ: dict[str, dict] = {
-    "thoothukudi": {
-        "advisory_date": "2026-09-11",
-        "advisory_timestamp": "2026-09-11T06:00:00Z",
-        "zones": [
-            {
-                "zone_id": "PFZ-TN-001",
-                "lat": 8.50,
-                "lon": 78.20,
-                "distance_km": 28,
-                "chlorophyll_mg_m3": 1.8,
-                "sst_celsius": 29.1,
-                "description": "High chlorophyll convergence zone SE of Thoothukudi",
-            },
-            {
-                "zone_id": "PFZ-TN-002",
-                "lat": 8.30,
-                "lon": 78.40,
-                "distance_km": 52,
-                "chlorophyll_mg_m3": 2.1,
-                "sst_celsius": 28.7,
-                "description": "SST gradient zone SSE of Thoothukudi",
-            },
-        ],
-        "nearest_zone_km": 28,
-        "overall_productivity": "moderate",
-    },
-    "rameswaram": {
-        "advisory_date": "2026-09-11",
-        "advisory_timestamp": "2026-09-11T06:00:00Z",
-        "zones": [
-            {
-                "zone_id": "PFZ-TN-003",
-                "lat": 9.10,
-                "lon": 79.50,
-                "distance_km": 34,
-                "chlorophyll_mg_m3": 2.4,
-                "sst_celsius": 29.8,
-                "description": "High-productivity zone E of Rameswaram",
-            }
-        ],
-        "nearest_zone_km": 34,
-        "overall_productivity": "high",
-    },
-    "chennai": {
-        "advisory_date": "2026-09-11",
-        "advisory_timestamp": "2026-09-11T06:00:00Z",
-        "zones": [
-            {
-                "zone_id": "PFZ-TN-004",
-                "lat": 12.80,
-                "lon": 80.60,
-                "distance_km": 45,
-                "chlorophyll_mg_m3": 1.2,
-                "sst_celsius": 28.3,
-                "description": "Low-moderate productivity zone SE of Chennai",
-            }
-        ],
-        "nearest_zone_km": 45,
-        "overall_productivity": "low",
-    },
-}
+_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+_FALLBACK_FILE = _DATA_DIR / "fallback_pfz.json"
 
-_DEFAULT_PFZ = {
+_DEFAULT_FALLBACK = {
     "advisory_date": "2026-09-11",
-    "advisory_timestamp": "2026-09-11T06:00:00Z",
+    "source_time": "2020-05-01T00:00:00Z",
     "zones": [
         {
-            "zone_id": "PFZ-GENERIC-001",
+            "zone_id": "PFZ-FALLBACK-001",
             "lat": 8.50,
-            "lon": 78.50,
-            "distance_km": 40,
-            "chlorophyll_mg_m3": 1.5,
-            "sst_celsius": 29.0,
-            "description": "Moderate chlorophyll zone (generic fallback)",
-        }
+            "lon": 78.20,
+            "distance_km": 28,
+            "chlorophyll_mg_m3": 0.85,
+            "advisory_date": "2026-09-11",
+            "source": "fallback_pfz.json",
+            "description": "Moderate chlorophyll zone SE of Thoothukudi (fallback)",
+        },
     ],
-    "nearest_zone_km": 40,
+    "nearest_zone_km": 28,
+    "zone_count": 1,
+    "avg_chl": 0.85,
     "overall_productivity": "moderate",
 }
 
 
-def _fetch_pfz_advisory(lat: float, lon: float) -> dict | None:
-    """
-    Milestone 2: query INCOIS RAG retriever + CMEMS chlorophyll/SST here.
-    Return None on any error so the fallback path kicks in.
-    """
-    return None  # live integration deferred to Milestone 2
+def _load_fallback(location_name: str) -> dict:
+    """Load PFZ fallback for a location."""
+    try:
+        if _FALLBACK_FILE.exists():
+            raw = json.loads(_FALLBACK_FILE.read_text(encoding="utf-8"))
+            locations = raw.get("locations", {})
+            entry = locations.get(location_name.lower())
+            if entry:
+                return entry
+            return raw.get("default", _DEFAULT_FALLBACK)
+    except Exception as exc:
+        logger.warning("[PFZ] Failed to load fallback file: %s", exc)
+    return _DEFAULT_FALLBACK.copy()
 
+
+# ---------------------------------------------------------------------------
+# Evidence builder
+# ---------------------------------------------------------------------------
+
+def _build_evidence(
+    zones: list[dict], source: str, source_time: str, retrieved_at: str,
+    query_lat: float, query_lon: float,
+) -> list[EvidenceItem]:
+    evidence: list[EvidenceItem] = []
+    if not zones:
+        return evidence
+
+    nearest_km = min(z["distance_km"] for z in zones)
+    evidence.append(EvidenceItem(
+        claim=f"Nearest PFZ indicator zone is approximately {nearest_km:.0f} km from query point",
+        value=nearest_km,
+        unit="km",
+        source=source,
+        source_time=source_time,
+        retrieved_at=retrieved_at,
+        location={"lat": query_lat, "lon": query_lon},
+    ))
+
+    for z in zones[:2]:  # top 2 zones as individual evidence items
+        evidence.append(EvidenceItem(
+            claim=(
+                f"PFZ zone at ({z['lat']:.2f}°N, {z['lon']:.2f}°E): "
+                f"chlorophyll={z.get('chlorophyll_mg_m3', '?')} mg/m³, "
+                f"distance={z['distance_km']:.0f} km"
+            ),
+            value=z.get("chlorophyll_mg_m3"),
+            unit="mg/m³",
+            source=source,
+            source_time=source_time,
+            retrieved_at=retrieved_at,
+            location={"lat": z["lat"], "lon": z["lon"]},
+        ))
+
+    return evidence
+
+
+# ---------------------------------------------------------------------------
+# GeoJSON feature builder (coordinate order: [lon, lat] per RFC 7946)
+# ---------------------------------------------------------------------------
+
+def _build_pfz_geojson_features(zones: list[dict], source: str) -> list[dict]:
+    features = []
+    for zone in zones:
+        # Explicit [longitude, latitude] — GeoJSON spec
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [zone["lon"], zone["lat"]],   # [lon, lat]
+            },
+            "properties": {
+                "feature_type": "pfz_zone",
+                "zone_id": zone.get("zone_id", "PFZ"),
+                "description": zone.get("description", ""),
+                "distance_km": zone["distance_km"],
+                "chlorophyll_mg_m3": zone.get("chlorophyll_mg_m3"),
+                "advisory_date": zone.get("advisory_date", ""),
+                "source": source,
+            },
+        })
+    return features
+
+
+# ---------------------------------------------------------------------------
+# Public node function
+# ---------------------------------------------------------------------------
 
 def pfz_agent(state: ORCAState) -> dict:
     """
-    LangGraph node: fetch/mock PFZ advisory data.
+    LangGraph node: fetch PFZ data via INCOIS ERDDAP chlorophyll proxy.
+
+    Priority:
+      1. INCOIS ERDDAP Oceansat-2 CHL (via incois_client)
+      2. fallback_pfz.json (clearly disclosed)
     """
     intent = state["parsed_intent"]
     assert intent is not None
 
     lat = intent["lat"] or 8.7642
     lon = intent["lon"] or 78.1348
-    location_name = intent["location_name"].lower()
+    location_name = intent["location_name"]
 
-    live_data = _fetch_pfz_advisory(lat, lon)
-    if live_data:
-        data = live_data
+    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    logger.info("[PFZ] Fetching zones for %s (%.4f, %.4f)", location_name, lat, lon)
+
+    # ---- Attempt live fetch ----
+    live: Optional[PFZResult] = None
+    try:
+        live = fetch_pfz_zones(lat, lon)
+    except Exception as exc:
+        logger.warning("[PFZ] Live fetch raised exception: %s", exc)
+
+    if live is not None and live.zones:
+        data = {
+            "zones": live.zones,
+            "nearest_zone_km": live.nearest_zone_km,
+            "zone_count": live.zone_count,
+            "avg_chl": live.avg_chl,
+            "source_time": live.source_time,
+            "retrieved_at": live.retrieved_at,
+            "advisory_date": live.source_time[:10] if live.source_time else "",
+            "overall_productivity": (
+                "high" if live.avg_chl >= 0.9
+                else "moderate" if live.avg_chl >= 0.5
+                else "low"
+            ),
+            "pfz_method": "chlorophyll_proxy",
+        }
         used_fallback = False
-        source = "INCOIS PFZ Advisory (live) + CMEMS Chl-a/SST"
+        source = live.source
+        source_time = live.source_time
+        logger.info(
+            "[PFZ] Live: %d zones, nearest=%.1fkm, avg_chl=%.3f mg/m³",
+            live.zone_count, live.nearest_zone_km, live.avg_chl,
+        )
     else:
-        data = _FALLBACK_PFZ.get(location_name, _DEFAULT_PFZ).copy()
+        data = _load_fallback(location_name)
+        data["pfz_method"] = "fallback"
         used_fallback = True
-        source = "INCOIS PFZ Advisory snapshot — 2026-09-11 (cached)"
+        source = "fallback_pfz.json (live INCOIS ERDDAP unavailable)"
+        source_time = data.get("source_time", "fallback")
+        logger.warning("[PFZ] Falling back to cached dataset for %s", location_name)
 
-    nearest_km = data["nearest_zone_km"]
-    productivity = data["overall_productivity"]
-    n_zones = len(data["zones"])
+    nearest_km = data.get("nearest_zone_km", 40)
+    n_zones = len(data.get("zones", []))
+    productivity = data.get("overall_productivity", "unknown")
+
     summary = (
-        f"{n_zones} PFZ zone(s) identified; nearest is {nearest_km} km away. "
-        f"Fishing productivity: {productivity}."
+        f"{n_zones} PFZ indicator zone(s) identified (chlorophyll-based); "
+        f"nearest is {nearest_km:.0f} km away. "
+        f"Fishing productivity indicator: {productivity}."
+    )
+    if used_fallback:
+        summary += " [⚠️ Using cached fallback — live INCOIS ERDDAP unavailable]"
+
+    evidence = _build_evidence(
+        data.get("zones", []), source, source_time, retrieved_at, lat, lon
     )
 
     result: AgentResult = {
@@ -143,10 +234,15 @@ def pfz_agent(state: ORCAState) -> dict:
         "source": source,
         "summary": summary,
         "used_fallback": used_fallback,
+        "timestamp": retrieved_at,
+        "error": None,
+        "evidence": evidence,
     }
 
     current_trace = state.get("trace") or []
+    current_evidence = state.get("evidence") or []
     return {
         "pfz_result": result,
         "trace": current_trace + [result],
+        "evidence": current_evidence + evidence,
     }
