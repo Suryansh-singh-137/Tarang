@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+import config
 from graph.build_graph import graph
 from graph.state import ORCAState
 
@@ -40,7 +41,7 @@ app = FastAPI(
         "Multi-agent marine safety advisor for Indian coastal fishermen. "
         "Powered by LangGraph + real INCOIS/Open-Meteo data."
     ),
-    version="2.0.0-milestone2",
+    version="3.0.0-milestone5",
 )
 
 app.add_middleware(
@@ -58,15 +59,20 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str
+    # Milestone 5: Multi-turn conversational memory
+    # The client passes back what the server returned in the previous turn.
+    conversation: list[dict] = []             # [{"role": "user"|"assistant", "content": "..."}]
+    last_parsed_intent: dict | None = None    # ParsedIntent from previous turn
+    last_results: dict[str, dict] = {}       # {agent_name: AgentResult} from previous turn
 
 
 # ---------------------------------------------------------------------------
 # Graph runner
 # ---------------------------------------------------------------------------
 
-def _build_initial_state(query: str) -> ORCAState:
+def _build_initial_state(body: QueryRequest) -> ORCAState:
     return ORCAState(
-        raw_query=query,
+        raw_query=body.query,
         detected_language="en",
         parsed_intent=None,
         weather_result=None,
@@ -78,10 +84,15 @@ def _build_initial_state(query: str) -> ORCAState:
         map_geojson={"type": "FeatureCollection", "features": []},
         evidence=[],
         trace=[],
+        # Milestone 5 fields
+        conversation_history=body.conversation[:config.MAX_CONVERSATION_TURNS],
+        last_parsed_intent=body.last_parsed_intent,  # type: ignore[arg-type]
+        last_results={k: v for k, v in body.last_results.items()},  # type: ignore[arg-type]
+        changed_fields=[],
     )
 
 
-async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
+async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
     """
     Run the LangGraph graph and yield SSE-compatible dicts.
 
@@ -89,8 +100,8 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
       - A "progress" event for each node completion (trace entry)
       - A final "result" event with the full payload
     """
-    initial_state = _build_initial_state(query)
-    logger.info(f"Starting ORCA pipeline for query: {query!r}")
+    initial_state = _build_initial_state(body)
+    logger.info(f"Starting ORCA pipeline for query: {body.query!r}")
 
     final_state: ORCAState | None = None
 
@@ -138,8 +149,35 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
         for r in (final_state.get("trace") or [])
     ]
 
+    # --- Build last_results dict for client to echo back in next turn ---
+    last_results_for_client: dict = {}
+    for agent_key in [
+        "weather_result", "pfz_result", "hazard_result", "geofence_result", "risk_result"
+    ]:
+        ar = final_state.get(agent_key)
+        if ar and ar.get("status") == "success":
+            agent_name = ar.get("agent_name", agent_key.replace("_result", "_agent"))
+            last_results_for_client[agent_name] = {
+                "agent_name":   ar.get("agent_name"),
+                "status":       ar.get("status"),
+                "data":         ar.get("data", {}),
+                "source":       ar.get("source", ""),
+                "summary":      ar.get("summary", ""),
+                "used_fallback": ar.get("used_fallback", False),
+                "data_quality": ar.get("data_quality", "live"),
+                "timestamp":    ar.get("timestamp", ""),
+                "error":        ar.get("error"),
+                "evidence":     ar.get("evidence", []),
+            }
+
+    # Append assistant reply to conversation history
+    answer_text = final_state.get("final_answer_text", "")
+    updated_history = list(final_state.get("conversation_history") or [])
+    updated_history.append({"role": "assistant", "content": answer_text[:500]})  # cap summary
+    updated_history = updated_history[-config.MAX_CONVERSATION_TURNS:]
+
     result_payload = {
-        "answer_text": final_state.get("final_answer_text", ""),
+        "answer_text": answer_text,
         "language": final_state.get("detected_language", "en"),
         "map_geojson": final_state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
         "trace": trace_for_response,
@@ -160,6 +198,11 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
             for ev in (final_state.get("evidence") or [])
         ],
         "parsed_intent": final_state.get("parsed_intent"),
+        # Milestone 5: Client must echo these back in the next request
+        "conversation_history": updated_history,
+        "last_parsed_intent":   final_state.get("parsed_intent"),
+        "last_results":         last_results_for_client,
+        "changed_fields":       final_state.get("changed_fields") or [],
     }
 
     yield {
@@ -178,9 +221,16 @@ async def _run_graph_streaming(query: str) -> AsyncIterator[dict]:
 def root():
     return {
         "service": "Tarang Marine Safety Advisor",
-        "version": "2.0.0-milestone2",
+        "version": "3.0.0-milestone5",
         "status": "running",
         "endpoint": "POST /query",
+        "milestones": [
+            "M1: Mock pipeline",
+            "M2: Live data (Open-Meteo + INCOIS)",
+            "M3: Trust & disclosure hardening",
+            "M4: Explainable risk reasoning",
+            "M5: Multi-turn conversational memory",
+        ],
     }
 
 
@@ -197,6 +247,11 @@ async def query_endpoint(body: QueryRequest, request: Request):
     Accepts a natural-language query in English, Hindi, or Tamil.
     Returns a Server-Sent Events stream.
 
+    Milestone 5: Also accepts:
+      - conversation: list of {role, content} from previous turns
+      - last_parsed_intent: ParsedIntent dict from previous turn (for location/time inheritance)
+      - last_results: {agent_name: AgentResult} from previous turn (for selective re-invocation)
+
     Final SSE event (type='result') shape:
     {
       "answer_text": "...",
@@ -206,13 +261,17 @@ async def query_endpoint(body: QueryRequest, request: Request):
         { "agent_name": "weather_agent", "status": "success", "summary": "...", "source": "..." },
         ...
       ],
-      "risk_data": { "composite_score": 35.0, "risk_label": "MODERATE", ... }
+      "risk_data": { "composite_score": 35.0, "risk_label": "MODERATE", ... },
+      "conversation_history": [...],
+      "last_parsed_intent": {...},
+      "last_results": { "weather_agent": {...}, ... },
+      "changed_fields": [...]
     }
     """
 
     async def event_generator():
         try:
-            async for event in _run_graph_streaming(body.query):
+            async for event in _run_graph_streaming(body):
                 # Respect client disconnect
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream.")

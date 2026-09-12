@@ -8,6 +8,15 @@ Milestone 2 additions:
   - Handles "invalid location" detection (unknown place → controlled error response).
   - Handles "kal shaam" (tomorrow evening) pattern.
 
+Milestone 4 additions:
+  - Classifies "risk_explanation" query type (why is the risk X, explain the score, etc.).
+
+Milestone 5 additions:
+  - Multi-turn intent inheritance: when conversation_history is non-empty, inherits
+    location and/or time_window from last_parsed_intent if not explicitly changed.
+  - Produces changed_fields list to drive selective agent re-invocation.
+  - Caps conversation_history at MAX_CONVERSATION_TURNS.
+
 Language detection uses script fingerprinting + keyword overlap heuristics.
 Location resolution uses a static coastal gazetteer.
 """
@@ -18,6 +27,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import config
 from graph.state import ORCAState, ParsedIntent
 
 # ---------------------------------------------------------------------------
@@ -139,13 +149,14 @@ _TAMIL_RE = re.compile(r"[\u0B80-\u0BFF]")
 _HINDI_ROMANISED = {
     "kal", "subah", "samudra", "jaana", "safe", "hai", "kya", "paas",
     "ke", "ke paas", "mausam", "machli", "machliyon", "aaj", "abhi",
-    "tufan", "lehar", "surakshit", "shaam",
+    "tufan", "lehar", "surakshit", "shaam", "kyun", "batao", "kyon",
+    "bata", "samjhao", "kya", "iska", "woh",
 }
 
 # Tamil keywords (romanised)
 _TAMIL_ROMANISED = {
     "kadal", "yarukku", "eppadi", "nallada", "naale", "indru",
-    "mazhai", "paadhukaappu", "meen", "pidi",
+    "mazhai", "paadhukaappu", "meen", "pidi", "yen", "vitham",
 }
 
 
@@ -155,6 +166,7 @@ _ENGLISH_STOP_WORDS = {
     "safe", "safety", "fishing", "weather", "sea", "ocean", "conditions",
     "waves", "winds", "what", "when", "how", "alerts", "warnings", "storm",
     "will", "tomorrow", "morning", "evening", "today", "now", "next",
+    "why", "explain", "because", "reason", "score", "risk",
 }
 
 
@@ -222,14 +234,43 @@ def _extract_time_window(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Risk-explanation query detection (Milestone 4)
+# ---------------------------------------------------------------------------
+
+_EXPLAIN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(why|explain|reason|because|breakdown|how.*calculated|what.*factors)\b", re.I),
+    re.compile(r"\b(kyun|kyon|samjhao|batao|kyon|iska|woh)\b", re.I),   # Hindi romanised
+    re.compile(r"\b(yen|vitham|eppadi)\b", re.I),                         # Tamil romanised
+    re.compile(r"[\u0915\u094D\u092F\u0942\u0928]"),                      # Devanagari कयून/कयों
+    re.compile(r"explain.*risk|risk.*explain|score.*why|why.*score", re.I),
+]
+
+
+def _is_risk_explanation(text: str) -> bool:
+    """Return True if the query is asking WHY the risk score is what it is."""
+    return any(pat.search(text) for pat in _EXPLAIN_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
 # Query-type + needs_* flags
 # ---------------------------------------------------------------------------
 
 def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
     """
     Returns (query_type, needs_flags_dict).
-    query_type: "safety_check" | "pfz_lookup" | "hazard_only" | "weather_only" | "general"
+    query_type: "safety_check" | "pfz_lookup" | "hazard_only" | "weather_only" |
+                "risk_explanation" | "general"
     """
+    # Milestone 4: check for explanation intent first (takes priority)
+    if _is_risk_explanation(text):
+        return "risk_explanation", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+        }
+
     text_lower = text.lower()
 
     safety_keywords = {
@@ -331,6 +372,30 @@ def _is_invalid_location(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Multi-turn: compute changed_fields (Milestone 5)
+# ---------------------------------------------------------------------------
+
+def _compute_changed_fields(
+    new_intent: ParsedIntent,
+    last_intent: Optional[ParsedIntent],
+) -> list[str]:
+    """
+    Compare new_intent against last_intent and return the list of
+    ParsedIntent fields that changed.
+
+    Returns an empty list if last_intent is None or if nothing changed.
+    """
+    if last_intent is None:
+        return []
+
+    changed: list[str] = []
+    for field in ["location_name", "lat", "lon", "time_window", "time_start_utc", "time_end_utc"]:
+        if new_intent.get(field) != last_intent.get(field):  # type: ignore[literal-required]
+            changed.append(field)
+    return changed
+
+
+# ---------------------------------------------------------------------------
 # Public node function
 # ---------------------------------------------------------------------------
 
@@ -342,6 +407,14 @@ def detect_and_parse(state: ORCAState) -> dict:
     Milestone 2:
       - Resolves time_window → explicit UTC time range
       - Flags invalid locations rather than silently defaulting
+
+    Milestone 4:
+      - Classifies "risk_explanation" queries before other checks
+
+    Milestone 5:
+      - Inherits location/time from last_parsed_intent when not explicitly provided
+      - Produces changed_fields to enable selective agent re-invocation
+      - Caps conversation_history to config.MAX_CONVERSATION_TURNS
     """
     raw = state["raw_query"]
 
@@ -350,10 +423,54 @@ def detect_and_parse(state: ORCAState) -> dict:
     time_window = _extract_time_window(raw)
     query_type, needs = _classify_query(raw)
 
-    # Detect fictional/invalid locations
+    # ---- Milestone 5: Get multi-turn context ----
+    last_intent: Optional[ParsedIntent] = state.get("last_parsed_intent")
+    conversation_history = list(state.get("conversation_history") or [])
+
+    # ---- Milestone 4: Handle risk_explanation early ----
+    # For explanations, we reuse the last known location if no new one given
+    if query_type == "risk_explanation":
+        if location_name is None and last_intent is not None:
+            location_name = last_intent.get("location_name")
+            lat = last_intent.get("lat")
+            lon = last_intent.get("lon")
+
+        # Use last time_window if not explicitly provided in this message
+        _explicit_time = _extract_time_window(raw)
+        if _explicit_time == "next_24h" and last_intent is not None:
+            # "next_24h" is the default — if last intent had a real window, keep it
+            time_window = last_intent.get("time_window", "next_24h")
+        else:
+            time_window = _explicit_time
+
+        time_start_utc, time_end_utc = _resolve_time_range(time_window)
+
+        parsed_intent: ParsedIntent = ParsedIntent(
+            location_name=location_name or "Thoothukudi",
+            lat=lat or (GAZETTEER.get("thoothukudi", (8.7642, 78.1348))[0]),
+            lon=lon or (GAZETTEER.get("thoothukudi", (8.7642, 78.1348))[1]),
+            time_window=time_window,
+            time_start_utc=time_start_utc,
+            time_end_utc=time_end_utc,
+            query_type="risk_explanation",
+            **needs,  # type: ignore[misc]
+        )
+
+        # Cap conversation history
+        new_history = (conversation_history + [{"role": "user", "content": raw}])[
+            -config.MAX_CONVERSATION_TURNS:
+        ]
+
+        return {
+            "detected_language": detected_language,
+            "parsed_intent": parsed_intent,
+            "changed_fields": [],
+            "conversation_history": new_history,
+        }
+
+    # ---- Detect fictional/invalid locations ----
     if _is_invalid_location(raw) and location_name is None:
-        # Return a special state that synthesis can handle gracefully
-        parsed_intent: ParsedIntent = {
+        invalid_intent: ParsedIntent = {
             "location_name": "Unknown",
             "lat": None,
             "lon": None,
@@ -369,7 +486,8 @@ def detect_and_parse(state: ORCAState) -> dict:
         }
         return {
             "detected_language": detected_language,
-            "parsed_intent": parsed_intent,
+            "parsed_intent": invalid_intent,
+            "changed_fields": [],
             "final_answer_text": (
                 "I was unable to identify a recognised coastal location in your query. "
                 "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Kochi) "
@@ -377,15 +495,30 @@ def detect_and_parse(state: ORCAState) -> dict:
             ),
         }
 
-    # If no location found, default to Thoothukudi (demo anchor)
+    # ---- Milestone 5: Inherit location from previous turn if not in this query ----
+    if location_name is None and last_intent is not None:
+        location_name = last_intent.get("location_name")
+        lat = last_intent.get("lat")
+        lon = last_intent.get("lon")
+
+    # If still no location, default to Thoothukudi (demo anchor)
     if location_name is None:
         location_name = "Thoothukudi"
         lat, lon = GAZETTEER["thoothukudi"]
 
+    # ---- Milestone 5: Inherit time_window from last turn if this query uses default ----
+    # Only inherit if the new query has no explicit temporal signal
+    _explicit_time = _extract_time_window(raw)
+    _has_explicit_time = any(pat.search(raw) for pat, _ in _TIME_PATTERNS)
+    if not _has_explicit_time and last_intent is not None:
+        time_window = last_intent.get("time_window", "next_24h")
+    else:
+        time_window = _explicit_time
+
     # Resolve explicit UTC time range
     time_start_utc, time_end_utc = _resolve_time_range(time_window)
 
-    parsed_intent = ParsedIntent(
+    new_intent = ParsedIntent(
         location_name=location_name,
         lat=lat,
         lon=lon,
@@ -396,7 +529,17 @@ def detect_and_parse(state: ORCAState) -> dict:
         **needs,  # type: ignore[misc]
     )
 
+    # ---- Compute changed_fields (M5) ----
+    changed_fields = _compute_changed_fields(new_intent, last_intent)
+
+    # Cap conversation history
+    new_history = (conversation_history + [{"role": "user", "content": raw}])[
+        -config.MAX_CONVERSATION_TURNS:
+    ]
+
     return {
         "detected_language": detected_language,
-        "parsed_intent": parsed_intent,
+        "parsed_intent": new_intent,
+        "changed_fields": changed_fields,
+        "conversation_history": new_history,
     }

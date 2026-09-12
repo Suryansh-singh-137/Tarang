@@ -12,6 +12,12 @@ why the score is what it is.
 Milestone 2: Updated to emit new AgentResult fields (timestamp, error, evidence)
              and to source weights from config.py.
 
+Milestone 3: Emits data_quality = "live" (always — deterministic computation).
+
+Milestone 4: Emits structured RiskComponent breakdown per factor so that
+             synthesis and explain_risk can name top contributors in plain
+             language without re-computing. Also emits evidence_coverage.
+
 Risk scale: 0.0 (safe) → 100.0 (extreme risk)
   0-25:  LOW    — generally manageable conditions
   26-50: MODERATE — exercise caution
@@ -31,7 +37,7 @@ import logging
 from datetime import datetime, timezone
 
 import config
-from graph.state import AgentResult, EvidenceItem, ORCAState
+from graph.state import AgentResult, EvidenceItem, ORCAState, RiskComponent
 
 logger = logging.getLogger("tarang.risk")
 
@@ -140,6 +146,8 @@ def risk_agent(state: ORCAState) -> dict:
     """
     LangGraph node: compute deterministic weighted risk score.
     Uses real normalised values from weather, hazard, and geofence agents.
+
+    Milestone 4: Builds structured RiskComponent list for explainability.
     """
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -147,20 +155,32 @@ def risk_agent(state: ORCAState) -> dict:
     hazard  = state.get("hazard_result")
     geofence = state.get("geofence_result")
 
-    # ---- Extract component values with safe defaults ----
-    wave_height_m  = (weather["data"]["wave_height_m"]  if weather else 2.0)
-    wind_speed_kmh = (weather["data"]["wind_speed_kmh"] if weather else 30.0)
+    # ---- Track how many signals are available (for evidence_coverage) ----
+    available_signals = 0
+    total_signals = 4
 
-    if hazard:
+    # ---- Extract component values with safe defaults ----
+    if weather and weather.get("status") == "success":
+        wave_height_m  = weather["data"]["wave_height_m"]
+        wind_speed_kmh = weather["data"]["wind_speed_kmh"]
+        available_signals += 2  # wave + wind are separate signals
+    else:
+        wave_height_m  = 2.0
+        wind_speed_kmh = 30.0
+
+    if hazard and hazard.get("status") == "success":
         hazard_level    = hazard["data"].get("overall_hazard_level", "none")
         active_warnings = hazard["data"].get("active_warnings", [])
+        available_signals += 1
     else:
         hazard_level    = "none"
         active_warnings = []
 
     dist_to_imbl_km = (
-        geofence["data"]["distance_to_imbl_km"] if geofence else 60.0
+        geofence["data"]["distance_to_imbl_km"] if geofence and geofence.get("status") == "success" else 60.0
     )
+    if geofence and geofence.get("status") == "success":
+        available_signals += 1
 
     logger.info(
         "[Risk] Inputs: wave=%.2fm wind=%.1fkm/h hazard=%s boundary=%.1fkm",
@@ -168,26 +188,73 @@ def risk_agent(state: ORCAState) -> dict:
     )
 
     # ---- Component scores ----
-    component_scores = {
+    weights = config.RISK_WEIGHTS
+    raw_scores = {
         "wave_height":        _wave_score(wave_height_m),
         "wind_speed":         _wind_score(wind_speed_kmh),
         "hazard_level":       _hazard_score(hazard_level, active_warnings),
         "boundary_proximity": _boundary_proximity_score(dist_to_imbl_km),
     }
 
-    # ---- Weighted composite (sourced from config) ----
-    weights = config.RISK_WEIGHTS
-    composite = sum(component_scores[k] * weights[k] for k in weights)
+    # ---- Weighted composite ----
+    composite = sum(raw_scores[k] * weights[k] for k in weights)
     composite = round(composite, 1)
     label = _risk_label(composite)
 
-    logger.info("[Risk] Score=%.1f (%s)", composite, label)
+    logger.info("[Risk] Score=%.1f (%s) signals=%d/%d", composite, label, available_signals, total_signals)
+
+    # ---- Milestone 4: Build structured RiskComponent breakdown ----
+    component_meta = {
+        "wave_height": {
+            "label": "Wave Height",
+            "raw_value": wave_height_m,
+            "raw_unit": "m",
+        },
+        "wind_speed": {
+            "label": "Wind Speed",
+            "raw_value": wind_speed_kmh,
+            "raw_unit": "km/h",
+        },
+        "hazard_level": {
+            "label": "Hazard Level",
+            "raw_value": hazard_level,
+            "raw_unit": "category",
+        },
+        "boundary_proximity": {
+            "label": "Boundary Proximity",
+            "raw_value": dist_to_imbl_km,
+            "raw_unit": "km",
+        },
+    }
+
+    components: list[RiskComponent] = []
+    for key, raw_score in raw_scores.items():
+        w = weights[key]
+        meta = component_meta[key]
+        components.append(RiskComponent(
+            label=meta["label"],
+            raw_value=meta["raw_value"],
+            raw_unit=meta["raw_unit"],
+            component_score=raw_score,
+            weight=w,
+            contribution=round(raw_score * w, 2),
+            max_possible=round(w * 100.0, 1),
+        ))
+
+    # Sort by contribution descending (highest contributor first)
+    components.sort(key=lambda c: c["contribution"], reverse=True)
+
+    evidence_coverage = f"{available_signals}/{total_signals}"
 
     data = {
         "composite_score": composite,
         "risk_label": label,
-        "component_scores": component_scores,
+        # Legacy flat component_scores kept for backward compatibility
+        "component_scores": {k: v for k, v in raw_scores.items()},
         "weights": weights,
+        # Milestone 4: structured breakdown
+        "components": [dict(c) for c in components],
+        "evidence_coverage": evidence_coverage,
         "inputs": {
             "wave_height_m":      wave_height_m,
             "wind_speed_kmh":     wind_speed_kmh,
@@ -206,10 +273,8 @@ def risk_agent(state: ORCAState) -> dict:
 
     summary = (
         f"Overall decision-support risk score: {composite}/100 ({label}). "
-        f"Components — waves: {component_scores['wave_height']:.0f}, "
-        f"wind: {component_scores['wind_speed']:.0f}, "
-        f"hazards: {component_scores['hazard_level']:.0f}, "
-        f"boundary: {component_scores['boundary_proximity']:.0f}."
+        f"Top factor: {components[0]['label']} (contribution: {components[0]['contribution']:.1f}/100). "
+        f"Evidence coverage: {evidence_coverage} signal types."
     )
 
     evidence: list[EvidenceItem] = [
@@ -231,6 +296,7 @@ def risk_agent(state: ORCAState) -> dict:
         "source": "Tarang Risk Model v1 (deterministic weighted formula)",
         "summary": summary,
         "used_fallback": False,
+        "data_quality": "live",   # deterministic computation, always "live"
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

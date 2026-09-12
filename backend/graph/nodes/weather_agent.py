@@ -3,8 +3,10 @@ weather_agent node
 ------------------
 Returns sea-state / atmospheric conditions for the queried location.
 
-Milestone 2: Calls tools/cmems_client.py (Open-Meteo Marine + Forecast API)
+Milestone 2: Calls tools/marine_weather_client.py (Open-Meteo Marine + Forecast API)
              with fallback to data/fallback_weather.json.
+
+Milestone 3: Emits data_quality = "live" or "fallback".
 
 Data flow:
   Open-Meteo Marine + Forecast API
@@ -27,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from graph.state import AgentResult, EvidenceItem, ORCAState
-from tools.cmems_client import MarineConditions, fetch_marine_conditions
+from tools.marine_weather_client import MarineConditions, fetch_marine_conditions
 
 logger = logging.getLogger("tarang.weather")
 
@@ -128,7 +130,7 @@ def weather_agent(state: ORCAState) -> dict:
     LangGraph node: fetch marine conditions and normalise to AgentResult.
 
     Priority:
-      1. Open-Meteo Marine + Forecast API (via cmems_client)
+      1. Open-Meteo Marine + Forecast API (via marine_weather_client)
       2. fallback_weather.json (clearly disclosed)
     """
     intent = state["parsed_intent"]
@@ -211,6 +213,7 @@ def weather_agent(state: ORCAState) -> dict:
         "source": source,
         "summary": summary,
         "used_fallback": used_fallback,
+        "data_quality": "fallback" if used_fallback else "live",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

@@ -114,6 +114,7 @@ def geofence_agent(state: ORCAState) -> dict:
         "source": source,
         "summary": summary,
         "used_fallback": not used_geojson,
+        "data_quality": "live" if used_geojson else "fallback",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

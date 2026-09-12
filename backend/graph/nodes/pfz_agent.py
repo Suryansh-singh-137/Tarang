@@ -5,6 +5,8 @@ Returns Potential Fishing Zone (PFZ) information for the queried location.
 
 Milestone 2: Calls tools/incois_client.py (INCOIS ERDDAP Oceansat-2 CHL data)
              with fallback to data/fallback_pfz.json.
+Milestone 3: Emits data_quality = "historical_proxy" always — INCOIS Oceansat-2
+             data is real satellite data but historical, not a live real-time advisory.
 
 PFZ detection strategy:
   INCOIS Oceansat-2 chlorophyll-a grid
@@ -234,6 +236,9 @@ def pfz_agent(state: ORCAState) -> dict:
         "source": source,
         "summary": summary,
         "used_fallback": used_fallback,
+        # Always historical_proxy: INCOIS Oceansat-2 is satellite data with coverage gaps,
+        # not a real-time official PFZ advisory — regardless of live vs. fallback.
+        "data_quality": "historical_proxy",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

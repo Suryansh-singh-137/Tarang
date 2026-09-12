@@ -10,6 +10,13 @@ Milestone 2 additions:
   - PFZ proxy attribution: clarifies chlorophyll-based PFZ indicator
   - Hazard limitation: notes that cyclone advisories require IMD/INCOIS check
 
+Milestone 3 additions:
+  - data_quality third-state: Live / Fallback / Historical Proxy per agent
+  - PFZ proxy label hardened: always disclosed as chlorophyll-based historical proxy
+  - Synthesis MUST NOT emit unqualified "it is safe" or "it is not safe";
+    all risk assessments must be qualified as decision-support only.
+  - Top risk contributors named immediately after the risk badge (M4).
+
 Explainability contract (PRD §4.3):
   - Every sentence in final_answer_text MUST be attributable to a source
     in trace[].
@@ -18,6 +25,7 @@ Explainability contract (PRD §4.3):
   - If no hazard warning was found, phrase it as "no relevant warning found
     in the available data", NOT as a safety guarantee.
   - Synthesis MUST NOT invent measurements, timestamps, or sources.
+  - Synthesis MUST NOT emit unqualified 'it is safe' or 'it is not safe'.
 """
 
 from __future__ import annotations
@@ -34,36 +42,46 @@ _PHRASES: dict[str, dict[str, str]] = {
     "en": {
         "preamble": "Here is Tarang's marine safety assessment for {location} ({time_window}):",
         "weather_intro": "🌊 Marine Conditions",
-        "pfz_intro": "🐟 Fishing Zone Intelligence (PFZ)",
-        "hazard_intro": "⚠️ Hazard Advisories",
+        "pfz_intro": "🐟 Fishing Potential Indicator (Chlorophyll Proxy)",
+        "hazard_intro": "⚠️ Weather Condition Hazard Indicators",
         "geofence_intro": "🗺️ Maritime Boundary",
         "risk_intro": "📊 Overall Risk Assessment",
         "evidence_intro": "📋 Data Sources & Evidence",
-        "data_status_intro": "📡 Data Freshness",
+        "data_status_intro": "📡 Data Freshness & Quality",
         "skipped": "ℹ️ {agent} was not needed for this query.",
         "error": "❌ {agent} encountered an error; {aspect} could not be determined.",
         "fallback_note": "⚠️ **Fallback data used**: {agents}. Live source(s) were unreachable. Results reflect the latest cached dataset.",
-        "pfz_proxy_note": "ℹ️ PFZ zones are derived from INCOIS Oceansat-2 chlorophyll-a data (scientific proxy). For official PFZ advisories, consult the INCOIS portal directly.",
-        "cyclone_note": "ℹ️ Cyclone warnings: real-time cyclone advisories require direct consultation with IMD (imd.gov.in) or INCOIS.",
+        "pfz_proxy_note": (
+            "ℹ️ **Data Quality Note**: Fishing potential zones above are derived from INCOIS Oceansat-2 "
+            "chlorophyll-a historical satellite data — this is a scientific proxy indicator, "
+            "not a real-time official INCOIS PFZ advisory. "
+            "For official PFZ advisories, consult the INCOIS portal at incois.gov.in."
+        ),
+        "cyclone_note": "ℹ️ **Cyclone advisory**: Real-time cyclone warnings require direct consultation with IMD (imd.gov.in) or INCOIS (incois.gov.in). The above represents weather-condition hazard indicators only.",
         "disclaimer": (
             "⚠️ **Disclaimer**: This is a decision-support assessment, not an official safety clearance. "
-            "Always follow advisories from IMD, INCOIS, and the Indian Coast Guard."
+            "Tarang assesses available conditions as a navigational aid — always follow "
+            "advisories from IMD, INCOIS, and the Indian Coast Guard before departing."
         ),
     },
     "hi": {
         "preamble": "{location} के लिए Tarang का समुद्री सुरक्षा आकलन ({time_window}):",
         "weather_intro": "🌊 समुद्री स्थिति",
-        "pfz_intro": "🐟 मछली पकड़ने के क्षेत्र (PFZ)",
-        "hazard_intro": "⚠️ खतरे की चेतावनियाँ",
+        "pfz_intro": "🐟 मछली पकड़ने के क्षेत्र सूचक (क्लोरोफिल आधारित)",
+        "hazard_intro": "⚠️ मौसम संबंधी खतरे के संकेतक",
         "geofence_intro": "🗺️ समुद्री सीमा",
         "risk_intro": "📊 कुल जोखिम आकलन",
         "evidence_intro": "📋 डेटा स्रोत और साक्ष्य",
-        "data_status_intro": "📡 डेटा की ताज़गी",
+        "data_status_intro": "📡 डेटा की ताज़गी और गुणवत्ता",
         "skipped": "ℹ️ {agent} इस प्रश्न के लिए आवश्यक नहीं था।",
         "error": "❌ {agent} में त्रुटि हुई; {aspect} निर्धारित नहीं किया जा सका।",
         "fallback_note": "⚠️ **फ़ॉलबैक डेटा उपयोग किया गया**: {agents}। लाइव स्रोत उपलब्ध नहीं था।",
-        "pfz_proxy_note": "ℹ️ PFZ क्षेत्र INCOIS Oceansat-2 क्लोरोफिल डेटा पर आधारित हैं।",
-        "cyclone_note": "ℹ️ चक्रवात चेतावनियों के लिए IMD/INCOIS से सीधे जाँचें।",
+        "pfz_proxy_note": (
+            "ℹ️ **डेटा गुणवत्ता नोट**: मछली पकड़ने के क्षेत्र INCOIS Oceansat-2 "
+            "क्लोरोफिल-a ऐतिहासिक उपग्रह डेटा पर आधारित वैज्ञानिक सूचक हैं — "
+            "यह आधिकारिक INCOIS PFZ परामर्श नहीं है।"
+        ),
+        "cyclone_note": "ℹ️ **चक्रवात परामर्श**: वास्तविक समय की चक्रवात चेतावनियों के लिए IMD/INCOIS से सीधे जाँचें।",
         "disclaimer": (
             "⚠️ **अस्वीकरण**: यह एक निर्णय-सहायता आकलन है, आधिकारिक सुरक्षा मंजूरी नहीं। "
             "IMD, INCOIS और भारतीय तटरक्षक बल की सलाह का पालन करें।"
@@ -72,17 +90,21 @@ _PHRASES: dict[str, dict[str, str]] = {
     "ta": {
         "preamble": "{location} க்கான Tarang கடல் பாதுகாப்பு மதிப்பீடு ({time_window}):",
         "weather_intro": "🌊 கடல் நிலைகள்",
-        "pfz_intro": "🐟 மீன்பிடி வலயங்கள் (PFZ)",
-        "hazard_intro": "⚠️ அபாய எச்சரிக்கைகள்",
+        "pfz_intro": "🐟 மீன்பிடி திறன் சுட்டி (குளோரோஃபில் அடிப்படை)",
+        "hazard_intro": "⚠️ வானிலை ஆபத்து சுட்டிகள்",
         "geofence_intro": "🗺️ கடல் எல்லை",
-        "risk_intro": "📊 ஒட்டுமொத்த அபாய மதிப்பீடு",
+        "risk_intro": "📊 ஒட்டுமொத்த ஆபத்து மதிப்பீடு",
         "evidence_intro": "📋 தரவு மூலங்கள்",
-        "data_status_intro": "📡 தரவு புதுமை",
+        "data_status_intro": "📡 தரவு புதுமை மற்றும் தரம்",
         "skipped": "ℹ️ {agent} இந்தக் கேள்விக்கு தேவையில்லை.",
         "error": "❌ {agent} பிழை ஏற்பட்டது; {aspect} தீர்மானிக்க முடியவில்லை.",
         "fallback_note": "⚠️ **தற்காலிக தரவு பயன்படுத்தப்பட்டது**: {agents}.",
-        "pfz_proxy_note": "ℹ️ PFZ வலயங்கள் INCOIS Oceansat-2 குளோரோஃபில் தரவை அடிப்படையாகக் கொண்டவை.",
-        "cyclone_note": "ℹ️ புயல் எச்சரிக்கைகளுக்கு IMD/INCOIS-ஐ நேரடியாக சரிபார்க்கவும்.",
+        "pfz_proxy_note": (
+            "ℹ️ **தரவு தர குறிப்பு**: மீன்பிடி வலயங்கள் INCOIS Oceansat-2 குளோரோஃபில்-a "
+            "வரலாற்று செயற்கைக்கோள் தரவை அடிப்படையாகக் கொண்ட வைஞ்ஞானிக சுட்டி "
+            "— இது அதிகாரப்பூர்வ INCOIS PFZ ஆலோசனை அல்ல."
+        ),
+        "cyclone_note": "ℹ️ **புயல் ஆலோசனை**: நேரடி புயல் எச்சரிக்கைகளுக்கு IMD/INCOIS-ஐ நேரடியாக சரிபார்க்கவும்.",
         "disclaimer": (
             "⚠️ **மறுப்பு**: இது ஒரு முடிவு-ஆதரவு மதிப்பீடு, அதிகாரப்பூர்வ பாதுகாப்பு அனுமதி அல்ல. "
             "IMD, INCOIS மற்றும் இந்திய கடலோர காவலர் ஆலோசனைகளை பின்பற்றவும்."
@@ -166,7 +188,20 @@ def _render_template(
         }
         badge = badge_map.get(d["risk_label"], d["risk_label"])
         lines.append(f"## {badge}")
-        lines.append(f"**Risk score: {d['composite_score']}/100**  *(decision-support only)*")
+        lines.append(f"**Risk score: {d['composite_score']}/100**  *(decision-support only — not an official safety clearance)*")
+
+        # Milestone 4: Name the top 1-2 contributing factors
+        components = d.get("components", [])
+        if components:
+            top = components[0]
+            coverage = d.get("evidence_coverage", "?")
+            top_label = top.get("label", "")
+            top_contrib = top.get("contribution", 0)
+            lines.append(
+                f"*Primary risk driver: **{top_label}** "
+                f"(contributing {top_contrib:.1f}/100 to the total). "
+                f"Evidence coverage: {coverage} signal types.*"
+            )
         lines.append("")
 
     # ---- Weather ----
@@ -267,12 +302,13 @@ def _render_template(
         d = risk["data"]
         cs = d["component_scores"]
         lines.append(f"Score: **{d['composite_score']}/100 ({d['risk_label']})**")
-        lines.append(f"| Factor | Score |")
-        lines.append(f"|--------|-------|")
-        lines.append(f"| Waves  | {cs['wave_height']:.0f}/100 |")
-        lines.append(f"| Wind   | {cs['wind_speed']:.0f}/100 |")
-        lines.append(f"| Hazards | {cs['hazard_level']:.0f}/100 |")
-        lines.append(f"| Boundary proximity | {cs['boundary_proximity']:.0f}/100 |")
+        lines.append(f"| Factor | Component Score | Weight | Contribution |")
+        lines.append(f"|--------|-----------------|--------|--------------|")
+        for comp in d.get("components", []):
+            lines.append(
+                f"| {comp['label']} | {comp['component_score']:.0f}/100 "
+                f"| {comp['weight']*100:.0f}% | {comp['contribution']:.1f} |"
+            )
         lines.append(f"")
         lines.append(f"{d['recommendation']}")
     lines.append("")
@@ -297,20 +333,24 @@ def _render_template(
     # ---- Data freshness ----
     lines.append(f"**{p['data_status_intro']}**")
     fallback_agents = []
-    for agent, result_key in [
+    for agent_name, result_key in [
         ("Weather", weather), ("PFZ", pfz), ("Hazard", hazard), ("Geofence", geofence)
     ]:
         if result_key and result_key.get("status") == "success":
-            fb = result_key.get("used_fallback", False)
-            icon = "⚠️ Fallback" if fb else "✓ Live"
-            lines.append(f"• {agent}: {icon}")
-            if fb:
-                fallback_agents.append(agent.lower())
+            dq = result_key.get("data_quality", "live")
+            if dq == "live":
+                icon = "✓ Live"
+            elif dq == "historical_proxy":
+                icon = "📅 Historical Proxy"
+            else:
+                icon = "⚠️ Fallback"
+                fallback_agents.append(agent_name.lower())
+            lines.append(f"• {agent_name}: {icon}")
         elif result_key and result_key.get("status") == "skipped":
-            lines.append(f"• {agent}: ℹ️ Not required")
+            lines.append(f"• {agent_name}: ℹ️ Not required")
         elif result_key and result_key.get("status") == "error":
-            lines.append(f"• {agent}: ❌ Unavailable")
-            fallback_agents.append(agent.lower())
+            lines.append(f"• {agent_name}: ❌ Unavailable")
+            fallback_agents.append(agent_name.lower())
     lines.append("• Geospatial: ✓ Computed")
     lines.append("")
 
@@ -415,13 +455,16 @@ def synthesis(state: ORCAState) -> dict:
     lang = state.get("detected_language", "en")
     intent = state.get("parsed_intent")
 
-    # Handle invalid-location case (detect_and_parse already set final_answer_text)
-    if intent and not intent.get("lat") and not intent.get("lon"):
+    # Handle early-exit cases where a previous node already generated the final text
+    if intent:
         existing_answer = state.get("final_answer_text", "")
-        if existing_answer:
+        is_invalid_loc = not intent.get("lat") and not intent.get("lon")
+        is_explanation = intent.get("query_type") == "risk_explanation"
+        
+        if (is_invalid_loc or is_explanation) and existing_answer:
             return {
                 "final_answer_text": existing_answer,
-                "map_geojson": {"type": "FeatureCollection", "features": []},
+                "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
             }
 
     location   = intent["location_name"] if intent else "the requested location"

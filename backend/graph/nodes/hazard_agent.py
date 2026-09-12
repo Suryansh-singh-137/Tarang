@@ -5,6 +5,7 @@ Returns actionable marine/weather hazard advisories for the queried location.
 
 Milestone 2: Calls tools/hazard_client.py (Open-Meteo WMO weather-code
              interpretation) with fallback to data/fallback_hazards.json.
+Milestone 3: Emits data_quality = "live" or "fallback".
 
 Key design requirement from the PRD:
   Absence of a retrieved warning MUST be phrased as
@@ -250,6 +251,7 @@ def hazard_agent(state: ORCAState) -> dict:
         "source": source,
         "summary": summary,
         "used_fallback": used_fallback,
+        "data_quality": "fallback" if used_fallback else "live",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

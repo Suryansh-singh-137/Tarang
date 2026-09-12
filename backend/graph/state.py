@@ -8,6 +8,15 @@ Milestone 2 additions:
   - EvidenceItem: structured factual claim with source + timestamp
   - ParsedIntent gains: time_start_utc, time_end_utc for explicit temporal resolution
   - ORCAState gains: evidence (accumulated list from all agents)
+
+Milestone 3 additions:
+  - AgentResult gains: data_quality ("live" | "fallback" | "historical_proxy")
+  - RiskComponent: per-factor breakdown struct
+  - RiskResult: structured risk result with component-level transparency
+
+Milestone 5 additions:
+  - ParsedIntent gains: query_type extended to include "risk_explanation"
+  - ORCAState gains: conversation_history, last_parsed_intent, last_results, changed_fields
 """
 
 from __future__ import annotations
@@ -33,6 +42,22 @@ class EvidenceItem(TypedDict):
     location: Optional[Dict[str, float]]  # {"lat": ..., "lon": ...} if applicable
 
 
+class RiskComponent(TypedDict):
+    """
+    Per-factor contribution to the composite risk score.
+
+    Milestone 4: emitted by risk_agent so synthesis and explain_risk can
+    name the top contributors in plain language without re-computing.
+    """
+    label: str          # "Wave Height", "Wind Speed", "Hazard Level", "Boundary Proximity"
+    raw_value: float    # actual measured value (e.g. 1.2 for 1.2 m waves)
+    raw_unit: str       # unit of raw_value ("m", "km/h", "category", "km")
+    component_score: float  # 0–100 score for this factor
+    weight: float       # weight applied (from config.RISK_WEIGHTS)
+    contribution: float # component_score * weight  (0–100 scale)
+    max_possible: float # weight * 100  (maximum possible contribution of this factor)
+
+
 class AgentResult(TypedDict):
     """Structured output from every specialist agent.
 
@@ -40,6 +65,12 @@ class AgentResult(TypedDict):
       - timestamp:    when the agent completed its data retrieval (ISO-8601 UTC)
       - error:        non-None only when status == "error"
       - evidence:     list of EvidenceItem; empty list when status == "skipped"
+
+    Milestone 3 additions:
+      - data_quality: "live"             — freshly fetched from the live API this request
+                      "fallback"         — live API unavailable; using cached/static backup data
+                      "historical_proxy" — data is real but from historical/satellite dataset;
+                                          not a real-time advisory (e.g. INCOIS Oceansat-2 CHL)
     """
 
     agent_name: str
@@ -48,6 +79,7 @@ class AgentResult(TypedDict):
     source: str             # human-readable citation string
     summary: str            # one-line plain-language summary
     used_fallback: bool     # True when live data was unavailable
+    data_quality: Literal["live", "fallback", "historical_proxy"]  # M3: data provenance label
     timestamp: str          # ISO-8601 UTC retrieval time (or "" if skipped)
     error: Optional[str]    # error message when status == "error"
     evidence: List[EvidenceItem]  # structured claims for synthesis
@@ -59,6 +91,9 @@ class ParsedIntent(TypedDict):
     Milestone 2 additions:
       - time_start_utc: explicit UTC ISO-8601 start of the requested time window
       - time_end_utc:   explicit UTC ISO-8601 end of the requested time window
+
+    Milestone 5 additions:
+      - query_type extended with "risk_explanation"
     """
 
     location_name: str
@@ -67,12 +102,18 @@ class ParsedIntent(TypedDict):
     time_window: str        # e.g. "tomorrow_morning", "now", "next_24h"
     time_start_utc: str     # e.g. "2026-09-13T00:30:00Z"
     time_end_utc: str       # e.g. "2026-09-13T06:30:00Z"
-    query_type: Literal["safety_check", "pfz_lookup", "general"]
+    query_type: Literal["safety_check", "pfz_lookup", "general", "risk_explanation"]
     needs_weather: bool
     needs_pfz: bool
     needs_hazard: bool
     needs_geofence: bool
     needs_risk: bool
+
+
+class ConversationTurn(TypedDict):
+    """A single turn in the conversation history (user or assistant)."""
+    role: Literal["user", "assistant"]
+    content: str
 
 
 class ORCAState(TypedDict):
@@ -90,3 +131,10 @@ class ORCAState(TypedDict):
     map_geojson: Dict[str, Any]
     evidence: List[EvidenceItem]        # accumulated across all agents
     trace: List[AgentResult]            # ordered list of every agent that ran
+
+    # Milestone 5: Multi-turn conversational memory
+    # These are passed in from the client and threaded through state.
+    conversation_history: List[ConversationTurn]    # last ≤6 turns of dialogue
+    last_parsed_intent: Optional[ParsedIntent]      # intent from the previous turn
+    last_results: Dict[str, AgentResult]            # cached agent results from previous turn
+    changed_fields: List[str]                       # fields that changed vs last turn

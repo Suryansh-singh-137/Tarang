@@ -1,5 +1,5 @@
 {
-  "description": "Fallback weather data for demo locations. Loaded by weather_agent when CMEMS is unavailable.",
+  "description": "Fallback weather data for demo locations. Loaded by weather_agent when the Open-Meteo Marine API is unavailable.",
   "generated": "2026-09-11T18:00:00Z",
   "locations": {
     "thoothukudi": {
