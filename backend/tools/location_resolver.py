@@ -1,184 +1,308 @@
-import requests
+"""
+location_resolver.py
+--------------------
+Two-tier location resolution for Tarang M8.
+
+Tier 1: In-memory gazetteer (~70 major Indian coastal places, ports, harbours, islands).
+         Bootstrapped from data/coastal_places.json on first import.
+Tier 2: Nominatim OpenStreetMap geocoder (India-only, rate-limited, cached).
+
+Resolution result includes:
+  - location_name, latitude, longitude
+  - source:     "gazetteer" | "geocoder" | "none"
+  - status:     "success" | "inland" | "unresolved"
+  - location_confidence: "high" | "medium" | "low"
+  - location_source: same as source (alias for clarity)
+
+The LLM MUST NOT invent coordinates. All coordinates come from this module.
+"""
+
+from __future__ import annotations
+
+import json
 import logging
-from typing import Optional, Dict, Any, Tuple
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+import httpx
+from cachetools import TTLCache
+
+logger = logging.getLogger("tarang.location")
 
 # ---------------------------------------------------------------------------
-# Static coastal gazetteer (Tier 1)
+# Coastal States / Union Territories (for coastal validation)
 # ---------------------------------------------------------------------------
-GAZETTEER: Dict[str, Tuple[float, float]] = {
-    # Tamil Nadu
-    "thoothukudi": (8.7642, 78.1348),
-    "tuticorin": (8.7642, 78.1348),
-    "thoothukudi coast": (8.7642, 78.1348),
-    "rameswaram": (9.2881, 79.3129),
-    "nagapattinam": (10.7672, 79.8449),
-    "chennai": (13.0827, 80.2707),
-    "kanyakumari": (8.0883, 77.5385),
-    "cuddalore": (11.7480, 79.7714),
-    "pondicherry": (11.9416, 79.8083),
-    "mandapam": (9.2667, 79.1167),
-    # Kerala
-    "thiruvananthapuram": (8.5241, 76.9366),
-    # "kochi" removed for testing Tier 2 geocoder fallback
-    "kozhikode": (11.2588, 75.7804),
-    "alappuzha": (9.4981, 76.3388),
-    "kasaragod": (12.4996, 74.9869),
-    # Karnataka
-    "mangaluru": (12.9141, 74.8560),
-    "karwar": (14.8160, 74.1240),
-    # Andhra Pradesh
-    "visakhapatnam": (17.6868, 83.2185),
-    "kakinada": (16.9891, 82.2475),
-    # Maharashtra / Goa
-    "mumbai": (19.0760, 72.8777),
-    "goa": (15.2993, 74.1240),
-    "ratnagiri": (16.9944, 73.3000),
-    # Odisha
-    # "puri" removed for testing Tier 2 geocoder fallback
-    "paradip": (20.3164, 86.6111),
-    # West Bengal
-    "digha": (21.6267, 87.5081),
-    "sagar island": (21.6538, 88.0720),
-    # Lakshadweep / A&N
-    "port blair": (11.6234, 92.7265),
-    "kavaratti": (10.5669, 72.6420),
-}
-
-# Coastal States / Union Territories in India for validation
-COASTAL_STATES_UT = {
+COASTAL_STATES_UT: set[str] = {
     "gujarat", "maharashtra", "goa", "karnataka", "kerala",
     "tamil nadu", "andhra pradesh", "odisha", "west bengal",
-    "andaman and nicobar", "lakshadweep", "puducherry",
-    "daman and diu", "dadra and nagar haveli"
+    "andaman and nicobar", "andaman & nicobar", "lakshadweep",
+    "puducherry", "pondicherry",
+    "daman and diu", "dadra and nagar haveli and daman and diu",
+    "dadra and nagar haveli", "dadra & nagar haveli",
 }
 
-# In-memory cache for Tier 2 geocoder results
-_GEOCODE_CACHE: Dict[str, Dict[str, Any]] = {}
+# ---------------------------------------------------------------------------
+# Gazetteer — populated from coastal_places.json + hardcoded essentials
+# ---------------------------------------------------------------------------
+# Format: {lowercase_name: (lat, lon)}
+GAZETTEER: Dict[str, Tuple[float, float]] = {}
 
-def is_coastal(address_details: Dict[str, str]) -> bool:
-    """Check if the resolved address is in a coastal state."""
-    state = address_details.get("state", "").lower()
-    if not state:
-        return True # Default to true if Nominatim doesn't return a state but returns result
-    
-    # Simple substring check (e.g., "Tamil Nadu" in "Tamil Nadu")
-    for coastal_state in COASTAL_STATES_UT:
-        if coastal_state in state:
+_PLACES_FILE = Path(__file__).parent.parent / "data" / "coastal_places.json"
+
+# Hardcoded essentials (always available even if JSON file is missing)
+_HARDCODED: Dict[str, Tuple[float, float]] = {
+    "thoothukudi":       (8.7642, 78.1348),
+    "tuticorin":         (8.7642, 78.1348),
+    "chennai":           (13.0827, 80.2707),
+    "mumbai":            (18.9388, 72.8354),
+    "kochi":             (9.9312, 76.2673),
+    "cochin":            (9.9312, 76.2673),
+    "kolkata":           (22.5726, 88.3639),
+    "visakhapatnam":     (17.6868, 83.2185),
+    "vizag":             (17.6868, 83.2185),
+    "mangaluru":         (12.8706, 74.8422),
+    "mangalore":         (12.8706, 74.8422),
+    "goa":               (15.4909, 73.8278),
+    "port blair":        (11.6234, 92.7265),
+    "kavaratti":         (10.5669, 72.6420),
+    "thiruvananthapuram": (8.5241, 76.9366),
+    "trivandrum":        (8.5241, 76.9366),
+    "kozhikode":         (11.2588, 75.7804),
+    "calicut":           (11.2588, 75.7804),
+    "alappuzha":         (9.4981, 76.3388),
+    "alleppey":          (9.4981, 76.3388),
+    "kollam":            (8.8932, 76.6141),
+    "kannur":            (11.8745, 75.3704),
+    "puri":              (19.8135, 85.8312),
+    "paradip":           (20.3200, 86.6108),
+    "paradeep":          (20.3200, 86.6108),
+    "karwar":            (14.8136, 74.1302),
+    "diu":               (20.7141, 70.9889),
+    "porbandar":         (21.6417, 69.6293),
+    "rameswaram":        (9.2881, 79.3129),
+    "rameshwaram":       (9.2881, 79.3129),
+    "mandapam":          (9.2758, 79.1263),
+    "nagapattinam":      (10.7672, 79.8449),
+    "cuddalore":         (11.7480, 79.7714),
+    "pondicherry":       (11.9416, 79.8083),
+    "puducherry":        (11.9416, 79.8083),
+    "kakinada":          (16.9891, 82.2475),
+    "digha":             (21.6281, 87.5081),
+    "sagar island":      (21.6500, 88.0800),
+    "haldia":            (22.0667, 88.0786),
+    "krishnapatnam":     (14.2500, 80.1167),
+    "ennore":            (13.2140, 80.3244),
+    "kanyakumari":       (8.0883, 77.5385),
+    "ratnagiri":         (16.9944, 73.3000),
+    "mahabalipuram":     (12.6269, 80.1927),
+    "karaikal":          (10.9254, 79.8380),
+    "nellore":           (14.4426, 79.9865),
+    "machilipatnam":     (16.1875, 81.1389),
+    "gopalpur":          (19.2680, 84.9020),
+    "minicoy":           (8.2833, 73.0333),
+    "agatti":            (10.8487, 72.1977),
+    "bhavnagar":         (21.7645, 72.1519),
+    "jamnagar":          (22.4707, 70.0577),
+    "veraval":           (20.9019, 70.3630),
+    "kandla":            (23.0333, 70.2167),
+    "surat":             (21.1702, 72.8311),
+    "daman":             (20.3974, 72.8328),
+    "okha":              (22.4700, 69.0700),
+    "dwarka":            (22.2394, 68.9679),
+    "mandvi":            (22.8290, 69.3582),
+    "udupi":             (13.3409, 74.7421),
+    "bhatkal":           (13.9724, 74.5563),
+    "kasaragod":         (12.4996, 74.9869),
+    "varkala":           (8.7379, 76.7160),
+    "beypore":           (11.1743, 75.8103),
+    "ponnani":           (10.7750, 75.9250),
+    "thalassery":        (11.7500, 75.4900),
+    "tellicherry":       (11.7500, 75.4900),
+    "ernakulam":         (9.9816, 76.2999),
+    "malvan":            (16.0601, 73.4668),
+    "alibag":            (18.6453, 72.8789),
+    "mormugao":          (15.4083, 73.8003),
+    "vasco da gama":     (15.3980, 73.8107),
+    "vasco":             (15.3980, 73.8107),
+    "panaji":            (15.4909, 73.8278),
+    "havelock island":   (11.9792, 93.0086),
+    "bhubaneswar":       (20.2961, 85.8245),
+}
+
+GAZETTEER.update(_HARDCODED)
+
+# Load supplemental entries from coastal_places.json
+try:
+    if _PLACES_FILE.exists():
+        _raw = json.loads(_PLACES_FILE.read_text(encoding="utf-8"))
+        for _p in _raw.get("places", []):
+            _key = _p["name"].lower()
+            _coord = (float(_p["lat"]), float(_p["lon"]))
+            GAZETTEER.setdefault(_key, _coord)
+            for _alias in _p.get("aliases", []):
+                GAZETTEER.setdefault(_alias.lower(), _coord)
+        logger.info("Loaded %d gazetteer entries from coastal_places.json", len(GAZETTEER))
+except Exception as _e:
+    logger.warning("Could not load coastal_places.json: %s — using hardcoded entries", _e)
+
+# ---------------------------------------------------------------------------
+# In-memory Nominatim cache (24-hour TTL per entry, max 512 entries)
+# ---------------------------------------------------------------------------
+_GEOCODE_CACHE: TTLCache = TTLCache(maxsize=512, ttl=86400)
+
+# Rate limiting: Nominatim policy = max 1 req/s
+_LAST_NOMINATIM_CALL: float = 0.0
+
+
+def _nominatim_rate_limit() -> None:
+    """Sleep if needed to respect Nominatim's 1 req/s policy."""
+    global _LAST_NOMINATIM_CALL
+    elapsed = time.monotonic() - _LAST_NOMINATIM_CALL
+    if elapsed < 1.1:
+        time.sleep(1.1 - elapsed)
+    _LAST_NOMINATIM_CALL = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# Coastal validation helper
+# ---------------------------------------------------------------------------
+
+def _is_coastal_address(address: Dict[str, str]) -> bool:
+    """Return True if the Nominatim address is in a known Indian coastal state/UT."""
+    state = address.get("state", "").lower()
+    county = address.get("county", "").lower()
+    # Check direct state match
+    for cs in COASTAL_STATES_UT:
+        if cs in state or cs in county:
             return True
     return False
 
+
+# ---------------------------------------------------------------------------
+# Public resolver
+# ---------------------------------------------------------------------------
+
 def resolve_location(query: str) -> Dict[str, Any]:
     """
-    Resolve a location name to coordinates using a two-tier system:
-    Tier 1: Static Gazetteer
-    Tier 2: Nominatim OSM Geocoding API
-    
+    Resolve a location query to coordinates using a two-tier system.
+
+    Args:
+        query: Raw text (e.g. "Kochi", "near Thoothukudi", "Is it safe in Diu?")
+
     Returns:
-        dict: {
-            "location_name": str,
-            "latitude": float or None,
-            "longitude": float or None,
-            "source": "gazetteer" | "geocoder" | "none",
-            "status": "success" | "inland" | "unresolved"
+        {
+            "location_name":      str,
+            "latitude":           float | None,
+            "longitude":          float | None,
+            "source":             "gazetteer" | "geocoder" | "none",
+            "location_source":    same as source,
+            "status":             "success" | "inland" | "unresolved",
+            "location_confidence": "high" | "medium" | "low",
         }
     """
     query_lower = query.lower().strip()
 
-    # Tier 1: Gazetteer lookup
+    # ── Tier 1: Gazetteer lookup ─────────────────────────────────────────────
     for place, (lat, lon) in GAZETTEER.items():
         if place in query_lower:
+            logger.info("[Location] Gazetteer hit: '%s' → (%.4f, %.4f)", place, lat, lon)
             return {
-                "location_name": place.title(),
-                "latitude": lat,
-                "longitude": lon,
-                "source": "gazetteer",
-                "status": "success"
+                "location_name":       place.title(),
+                "latitude":            lat,
+                "longitude":           lon,
+                "source":              "gazetteer",
+                "location_source":     "gazetteer",
+                "status":              "success",
+                "location_confidence": "high",
             }
 
-    # Cache lookup
+    # ── Cache lookup ─────────────────────────────────────────────────────────
     if query_lower in _GEOCODE_CACHE:
-        logger.info(f"Using cached geocode result for '{query}'")
+        logger.info("[Location] Cache hit for '%s'", query)
         return _GEOCODE_CACHE[query_lower]
 
-    # Tier 2: Nominatim Geocoder
-    logger.info(f"Location '{query}' not in gazetteer. Querying Nominatim...")
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        "q": query,
-        "format": "json",
-        "limit": 1,
-        "countrycodes": "in",
-        "addressdetails": 1
-    }
-    headers = {
-        "User-Agent": "Tarang-App"
-    }
+    # ── Tier 2: Nominatim ───────────────────────────────────────────────────
+    logger.info("[Location] '%s' not in gazetteer; querying Nominatim", query)
+
+    # Use the first capitalised word(s) as the search term — strip verb phrases
+    # e.g. "Is it safe near Diu?" → try "Diu" first
+    words = [w for w in query.split() if w[0].isupper()] if any(c.isupper() for c in query) else []
+    search_term = " ".join(words) if words else query
+
+    _nominatim_rate_limit()
 
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=5.0)
-        response.raise_for_status()
-        data = response.json()
-        
-        if not data:
-            result = {
-                "location_name": query,
-                "latitude": None,
-                "longitude": None,
-                "source": "none",
-                "status": "unresolved"
-            }
-            _GEOCODE_CACHE[query_lower] = result
-            return result
+        with httpx.Client(timeout=8.0) as client:
+            resp = client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q":              search_term,
+                    "format":         "json",
+                    "limit":          1,
+                    "countrycodes":   "in",
+                    "addressdetails": 1,
+                },
+                headers={"User-Agent": "Tarang-MarineSafetyApp/1.0 (contact@tarang.app)"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.warning("[Location] Nominatim request failed for '%s': %s", query, exc)
+        _fail = {"location_name": query, "latitude": None, "longitude": None,
+                 "source": "none", "location_source": "none",
+                 "status": "unresolved", "location_confidence": "low"}
+        _GEOCODE_CACHE[query_lower] = _fail
+        return _fail
 
-        place = data[0]
-        
-        address = place.get("address", {})
-        country_code = address.get("country_code", "").lower()
-        
-        if country_code != "in":
-            result = {
-                "location_name": query,
-                "latitude": None,
-                "longitude": None,
-                "source": "none",
-                "status": "unresolved"
-            }
-            return result
+    if not data:
+        logger.info("[Location] Nominatim: no results for '%s'", search_term)
+        _result = {"location_name": query, "latitude": None, "longitude": None,
+                   "source": "none", "location_source": "none",
+                   "status": "unresolved", "location_confidence": "low"}
+        _GEOCODE_CACHE[query_lower] = _result
+        return _result
 
-        lat = float(place.get("lat"))
-        lon = float(place.get("lon"))
-        display_name = place.get("name", query.title())
-        
-        # Coastal relevance check
-        if not is_coastal(address):
-            result = {
-                "location_name": display_name,
-                "latitude": lat,
-                "longitude": lon,
-                "source": "geocoder",
-                "status": "inland"
-            }
-            _GEOCODE_CACHE[query_lower] = result
-            return result
+    hit = data[0]
+    address = hit.get("address", {})
+    country_code = address.get("country_code", "").lower()
 
-        result = {
-            "location_name": display_name,
-            "latitude": lat,
-            "longitude": lon,
-            "source": "geocoder",
-            "status": "success"
+    # Validate India
+    if country_code != "in":
+        _result = {"location_name": query, "latitude": None, "longitude": None,
+                   "source": "none", "location_source": "none",
+                   "status": "unresolved", "location_confidence": "low"}
+        _GEOCODE_CACHE[query_lower] = _result
+        return _result
+
+    lat = float(hit["lat"])
+    lon = float(hit["lon"])
+    display_name = hit.get("name") or hit.get("display_name", query.title()).split(",")[0].strip()
+
+    # Coastal check
+    if not _is_coastal_address(address):
+        logger.info("[Location] '%s' resolved to inland location", query)
+        _result = {
+            "location_name":       display_name,
+            "latitude":            lat,
+            "longitude":           lon,
+            "source":              "geocoder",
+            "location_source":     "geocoder",
+            "status":              "inland",
+            "location_confidence": "medium",
         }
-        _GEOCODE_CACHE[query_lower] = result
-        return result
+        _GEOCODE_CACHE[query_lower] = _result
+        return _result
 
-    except Exception as e:
-        logger.error(f"Geocoding failed for '{query}': {e}")
-        return {
-            "location_name": query,
-            "latitude": None,
-            "longitude": None,
-            "source": "none",
-            "status": "unresolved"
-        }
+    _result = {
+        "location_name":       display_name,
+        "latitude":            lat,
+        "longitude":           lon,
+        "source":              "geocoder",
+        "location_source":     "geocoder",
+        "status":              "success",
+        "location_confidence": "medium",  # geocoder is less certain than gazetteer
+    }
+    _GEOCODE_CACHE[query_lower] = _result
+    logger.info("[Location] Nominatim resolved: '%s' → %s (%.4f, %.4f)", query, display_name, lat, lon)
+    return _result

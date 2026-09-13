@@ -17,6 +17,11 @@ Milestone 3 additions:
 Milestone 5 additions:
   - ParsedIntent gains: query_type extended to include "risk_explanation"
   - ORCAState gains: conversation_history, last_parsed_intent, last_results, changed_fields
+
+Milestone 8 additions:
+  - EvidenceItem gains: provenance_tier (optional, for display)
+  - DataQualityReport: per-agent data quality descriptor
+  - ORCAState gains: data_quality_reports, risk_sufficient_data flag
 """
 
 from __future__ import annotations
@@ -32,6 +37,9 @@ class EvidenceItem(TypedDict):
 
     Every numerical fact in the synthesis should trace back to an EvidenceItem.
     The synthesis LLM must not invent values not present in evidence[].
+
+    Milestone 8 addition:
+      - provenance_tier: authority tier string (e.g. "global_model", "proxy")
     """
     claim: str              # human-readable description: "Wave height is 1.8 m"
     value: Any              # the numerical or categorical value
@@ -40,6 +48,7 @@ class EvidenceItem(TypedDict):
     source_time: str        # ISO-8601 UTC: when the data was valid/observed
     retrieved_at: str       # ISO-8601 UTC: when we fetched it
     location: Optional[Dict[str, float]]  # {"lat": ..., "lon": ...} if applicable
+    provenance_tier: Optional[str]        # M8: authority tier (from ProvenanceTier enum value)
 
 
 class RiskComponent(TypedDict):
@@ -116,6 +125,26 @@ class ConversationTurn(TypedDict):
     content: str
 
 
+class DataQualityReport(TypedDict):
+    """
+    Per-agent data quality report (Milestone 8).
+
+    Summarises provenance, freshness, and trust level for one agent's result.
+    Appended to ORCAState.data_quality_reports by each agent.
+    """
+    agent_name:       str          # e.g. "weather_agent"
+    source_key:       str          # registry key e.g. "open_meteo"
+    source:           str          # citation string
+    provenance_tier:  str          # ProvenanceTier enum value
+    is_official:      bool         # authoritative Indian government source?
+    is_proxy:         bool         # derived indicator?
+    is_fallback:      bool         # live fetch failed?
+    is_stale:         bool         # data older than domain threshold?
+    freshness_hours:  float        # age of data at retrieval time
+    quality_score:    float        # 0.0–1.0 composite score
+    warnings:         List[str]    # human-readable quality warnings
+
+
 class ORCAState(TypedDict):
     """Full mutable state shared across all nodes in the graph."""
 
@@ -142,4 +171,8 @@ class ORCAState(TypedDict):
     # Milestone 6: Execution transparency
     parse_method: Literal["llm", "rule_based_fallback"]
     synthesis_method: Literal["llm", "template_fallback"]
+
+    # Milestone 8: Data quality tracking
+    data_quality_reports: List[DataQualityReport]  # one per agent that ran
+    risk_sufficient_data: Optional[bool]            # False → risk returned UNKNOWN
 

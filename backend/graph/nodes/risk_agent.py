@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 
 import config
 from graph.state import AgentResult, EvidenceItem, ORCAState, RiskComponent
+from tools.data_validator import all_critical_data_available
 
 logger = logging.getLogger("tarang.risk")
 
@@ -154,6 +155,55 @@ def risk_agent(state: ORCAState) -> dict:
     weather = state.get("weather_result")
     hazard  = state.get("hazard_result")
     geofence = state.get("geofence_result")
+    dq_reports = state.get("data_quality_reports") or []
+
+    # -----------------------------------------------------------------------
+    # M8 Phase F: Fail-Closed Validation
+    # -----------------------------------------------------------------------
+    critical_data_ok = all_critical_data_available(dq_reports)
+
+    if not critical_data_ok:
+        logger.warning("[Risk] CRITICAL DATA MISSING/STALE/PROXY. Failing closed.")
+        data = {
+            "composite_score": None,
+            "risk_label": "UNKNOWN",
+            "component_scores": {},
+            "weights": config.RISK_WEIGHTS,
+            "components": [],
+            "evidence_coverage": "insufficient",
+            "inputs": {},
+            "recommendation": (
+                "UNKNOWN: Unable to determine safe conditions due to missing, stale, "
+                "or proxy data. Do NOT go to sea until official live data is available. "
+                "Consult local port authorities immediately."
+            ),
+            "data_sources_live": {
+                "weather": False,
+                "hazard": False,
+                "geofence": False,
+            },
+        }
+        summary = "Risk assessment unavailable (UNKNOWN) due to missing or stale critical data."
+        
+        result: AgentResult = {
+            "agent_name": "risk_agent",
+            "status": "insufficient_data",
+            "data": data,
+            "source": "Tarang Risk Model v1 (Fail-Closed)",
+            "summary": summary,
+            "used_fallback": True,
+            "data_quality": "fallback",
+            "timestamp": retrieved_at,
+            "error": "CRITICAL_DATA_UNAVAILABLE",
+            "evidence": [],
+        }
+
+        current_trace = state.get("trace") or []
+        return {
+            "risk_result": result,
+            "trace": current_trace + [result],
+            "risk_sufficient_data": False,
+        }
 
     # ---- Track how many signals are available (for evidence_coverage) ----
     available_signals = 0
@@ -308,4 +358,5 @@ def risk_agent(state: ORCAState) -> dict:
         "risk_result": result,
         "trace": current_trace + [result],
         "evidence": current_evidence + evidence,
+        "risk_sufficient_data": True,
     }

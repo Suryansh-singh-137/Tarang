@@ -1,25 +1,27 @@
 """
 incois_client.py
 ----------------
-INCOIS ERDDAP client for Milestone 2.
+INCOIS ERDDAP client for Tarang.
 
 Data retrieved:
   - Chlorophyll-a (CHL, mg/m³) from INCOIS Oceansat-2 dataset
   - Sea Surface Temperature (SST, °C) from NOAA AVHRR/AMSR dataset
 
-PFZ detection strategy:
-  High chlorophyll concentration indicates phytoplankton blooms which
-  attract fish.  Grid cells with CHL >= CHL_PFZ_THRESHOLD (default 0.5
-  mg/m³) are treated as potential fishing zones.
+PFZ strategy (M8):
+  TIER 1 (probe): Official INCOIS PFZ advisory text endpoint.
+                  If available and parseable, use it with is_official_pfz=True.
+  TIER 2 (fallback): ERDDAP Oceansat-2 chlorophyll-a proxy.
+                  Always labelled is_official_pfz=False, is_proxy=True.
 
-  This is a scientific proxy for INCOIS PFZ advisories.  The synthesis
-  layer explicitly labels results as "INCOIS ERDDAP (chlorophyll-based
-  PFZ indicator)" and advises consulting official INCOIS advisories.
+  IMPORTANT: The INCOIS Oceansat-2 ERDDAP dataset has historical coverage
+  (satellite data ending ~2020). It MUST NEVER be presented as a current
+  real-time PFZ advisory. Only official INCOIS PFZ data qualifies as
+  "official" and only if retrieved from the operational advisory endpoint.
 
 ERDDAP query format:
   griddap JSON: /erddap/griddap/<dataset>.json?<var>[(last)][(lat_min):(lat_max)][(lon_min):(lon_max)]
 
-Caching: in-memory TTL cache, 4-hour TTL (satellite passes are infrequent).
+Caching: in-memory TTL cache, 60-min TTL (M8 reduced from 4h).
 
 Data freshness:
   - source_time:  the timestamp of the latest available satellite pass
@@ -66,6 +68,30 @@ class ChlPoint:
 
 
 @dataclass
+class PFZZoneDetail:
+    """
+    M8: Full provenance-aware PFZ zone descriptor.
+
+    is_official_pfz: True ONLY when data came from INCOIS operational advisory.
+    is_proxy:        True when CHL or other derived indicator used.
+    source_type:     "official_operational" | "ocean_color_proxy" | "historical_fallback"
+    """
+    lat:             float
+    lon:             float
+    distance_km:     float
+    direction:       Optional[str]
+    depth_m:         Optional[float]
+    advisory_date:   Optional[str]
+    valid_until:     Optional[str]
+    source:          str
+    source_type:     str        # e.g. "ocean_color_proxy"
+    is_official_pfz: bool       # True only for INCOIS operational advisory
+    is_proxy:        bool
+    freshness_hours: float
+    quality:         str        # "high" | "medium" | "low" | "historical"
+
+
+@dataclass
 class PFZResult:
     """Normalised PFZ zone data derived from chlorophyll analysis."""
     zones: list[dict]       # list of zone dicts (lat, lon, distance_km, chl, etc.)
@@ -74,8 +100,58 @@ class PFZResult:
     avg_chl: float
     source_time: str        # satellite pass time
     retrieved_at: str
+    is_official_pfz: bool = False  # M8: always False for ERDDAP CHL proxy
+    is_proxy: bool = True          # M8: always True for ERDDAP CHL
+    source_type: str = "ocean_color_proxy"  # M8: provenance label
     source: str = "INCOIS ERDDAP (Oceansat-2, chlorophyll-based PFZ proxy)"
     used_fallback: bool = False
+
+
+# ---------------------------------------------------------------------------
+# M8: Official INCOIS PFZ advisory probe (Tier 1)
+# ---------------------------------------------------------------------------
+
+_INCOIS_PFZ_TEXT_URL = "https://www.incois.gov.in/portal/pfz/pfz.jsp"
+
+def fetch_official_pfz_advisory(
+    query_lat: float, query_lon: float
+) -> Optional[PFZResult]:
+    """
+    Probe the INCOIS official PFZ advisory service (Tier 1).
+
+    INCOIS provides PFZ advisories operationally for Indian coastal sectors.
+    However, as of M8 investigation, no stable machine-readable JSON/WFS
+    endpoint was found. The advisory is served via a WebGIS portal and
+    downloadable in visual formats.
+
+    This function probes the known URL and will return None (indicating
+    the official source is unavailable in machine-readable form). Future
+    versions can be upgraded here when a stable API is confirmed.
+
+    Per PRD §11: No browser scraping. If no stable machine-readable
+    interface is available, document and use next-best source.
+
+    Returns:
+        None — official PFZ not currently accessible programmatically.
+    """
+    logger.info(
+        "[PFZ] Probing official INCOIS PFZ advisory (Tier 1) for lat=%.4f lon=%.4f",
+        query_lat, query_lon,
+    )
+    # NOTE: INCOIS PFZ advisory endpoint research (M8):
+    # - https://www.incois.gov.in/portal/pfz/pfz.jsp — HTML WebGIS portal
+    # - No stable JSON/GeoJSON/WFS endpoint confirmed via network inspection
+    # - Advisory PDFs/images available but not machine-parseable without scraping
+    # Future: Monitor INCOIS developer API portal for machine-readable PFZ release
+    logger.info(
+        "[PFZ] Official INCOIS PFZ: no stable machine-readable endpoint available. "
+        "Falling back to ERDDAP CHL proxy (Tier 2). "
+        "Advisory URL: %s",
+        _INCOIS_PFZ_TEXT_URL,
+    )
+    return None
+
+
 
 
 # ---------------------------------------------------------------------------

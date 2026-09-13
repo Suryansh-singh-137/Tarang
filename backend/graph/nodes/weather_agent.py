@@ -28,7 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from graph.state import AgentResult, EvidenceItem, ORCAState
+from graph.state import AgentResult, DataQualityReport, EvidenceItem, ORCAState
+from tools.data_validator import make_data_quality
 from tools.marine_weather_client import MarineConditions, fetch_marine_conditions
 
 logger = logging.getLogger("tarang.weather")
@@ -94,6 +95,7 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             source_time=source_time,
             retrieved_at=retrieved_at,
             location=loc,
+            provenance_tier="global_model",
         ))
 
     if data.get("wind_speed_kmh") is not None:
@@ -105,6 +107,7 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             source_time=source_time,
             retrieved_at=retrieved_at,
             location=loc,
+            provenance_tier="global_model",
         ))
 
     if data.get("sea_state"):
@@ -116,6 +119,7 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             source_time=source_time,
             retrieved_at=retrieved_at,
             location=loc,
+            provenance_tier="global_model",
         ))
 
     return evidence
@@ -206,6 +210,30 @@ def weather_agent(state: ORCAState) -> dict:
 
     evidence = _build_evidence(data, source, source_time, retrieved_at, lat, lon)
 
+    # M8: DataQuality report
+    source_key = "open_meteo" if not used_fallback else "fallback_static"
+    dq = make_data_quality(
+        source_key=source_key,
+        source=source,
+        retrieved_at=retrieved_at,
+        data_timestamp=data.get("source_time", source_time),
+        is_fallback=used_fallback,
+        is_proxy=False,
+    )
+    dq_report: DataQualityReport = {
+        "agent_name":      "weather_agent",
+        "source_key":      dq.source_key,
+        "source":          dq.source,
+        "provenance_tier": dq.provenance_tier.value,
+        "is_official":     dq.is_official,
+        "is_proxy":        dq.is_proxy,
+        "is_fallback":     dq.is_fallback,
+        "is_stale":        dq.is_stale,
+        "freshness_hours": dq.freshness_hours,
+        "quality_score":   dq.quality_score,
+        "warnings":        dq.warnings,
+    }
+
     result: AgentResult = {
         "agent_name": "weather_agent",
         "status": "success",
@@ -219,10 +247,12 @@ def weather_agent(state: ORCAState) -> dict:
         "evidence": evidence,
     }
 
-    current_trace = state.get("trace") or []
-    current_evidence = state.get("evidence") or []
+    current_trace      = state.get("trace") or []
+    current_evidence   = state.get("evidence") or []
+    current_dq_reports = state.get("data_quality_reports") or []
     return {
         "weather_result": result,
         "trace": current_trace + [result],
         "evidence": current_evidence + evidence,
+        "data_quality_reports": current_dq_reports + [dq_report],
     }
