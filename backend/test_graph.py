@@ -151,6 +151,60 @@ TEST_CASES = [
         "expected_agents": ["weather_agent", "pfz_agent", "hazard_agent", "geofence_agent", "risk_agent"],
         "m6_checks": True,
     },
+    # ----- Location tests -----
+    {
+        "id": 13,
+        "description": "[Location] Thoothukudi -> gazetteer",
+        "query": "Thoothukudi",
+        "expected_language": "en",
+        "expected_query_type": "general",
+        "m_location_check": True,
+        "expected_location_name": "Thoothukudi",
+        "expected_final_valid": True,
+    },
+    {
+        "id": 14,
+        "description": "[Location] Diu -> geocoder",
+        "query": "Diu",
+        "expected_language": "en",
+        "m_location_check": True,
+        "expected_location_name": "Diu",
+        "expected_final_valid": True,
+    },
+    {
+        "id": 15,
+        "description": "[Location] Puri -> geocoder",
+        "query": "Puri",
+        "expected_language": "en",
+        "m_location_check": True,
+        "expected_location_name": "Puri",
+        "expected_final_valid": True,
+    },
+    {
+        "id": 16,
+        "description": "[Location] Kochi -> geocoder",
+        "query": "Kochi",
+        "expected_language": "en",
+        "m_location_check": True,
+        "expected_location_name": "Kochi",
+        "expected_final_valid": True,
+    },
+    {
+        "id": 17,
+        "description": "[Location] Delhi -> inland",
+        "query": "Delhi",
+        "m_location_check": True,
+        "expected_final_valid": False,
+        "expected_error_keyword": "inland",
+    },
+    {
+        "id": 18,
+        "description": "[Location] Wakanda -> unresolved",
+        "query": "Wakanda",
+        "m_location_check": True,
+        "expected_final_valid": False,
+        "expected_error_keyword": "unable to identify",
+    },
 ]
 
 
@@ -414,6 +468,21 @@ async def run_test(test_case: dict) -> bool:
         # parse method should still be LLM (or fallback), but synthesis_method shouldn't be touched by explain_risk
         # Actually explain_risk just returns text. So synthesis_method will be missing or None because it doesn't run synthesis!
         pass
+
+    # ----- Location checks -----
+    if test_case.get("m_location_check"):
+        if test_case.get("expected_final_valid"):
+            loc_name = (result.get("parsed_intent") or {}).get("location_name", "")
+            expected_name = test_case.get("expected_location_name", "")
+            if expected_name.lower() not in loc_name.lower():
+                failures.append(f"[Location] Expected location '{expected_name}', got '{loc_name}'")
+            if not result.get("final_answer_text"):
+                failures.append("[Location] Expected valid final answer, got empty")
+        else:
+            answer = result.get("final_answer_text", "").lower()
+            keyword = test_case.get("expected_error_keyword", "").lower()
+            if keyword not in answer:
+                failures.append(f"[Location] Expected error keyword '{keyword}' in final answer, got '{answer}'")
 
     if failures:
         print(f"\n❌ FAILURES:")

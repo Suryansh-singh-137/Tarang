@@ -34,6 +34,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 import config
 from graph.state import ORCAState, ParsedIntent
+from tools.location_resolver import resolve_location, GAZETTEER
 
 # ---------------------------------------------------------------------------
 # Timezone offset for India (IST = UTC+5:30)
@@ -100,49 +101,6 @@ def _resolve_time_range(time_window: str) -> tuple[str, str]:
     return _to_utc_iso(start), _to_utc_iso(end)
 
 
-# ---------------------------------------------------------------------------
-# Static coastal gazetteer (Indian coastal towns + common PFZ region names)
-# Extend this dict before the demo with every location you plan to demo.
-# lat/lon are approximate centroid values.
-# ---------------------------------------------------------------------------
-GAZETTEER: dict[str, tuple[float, float]] = {
-    # Tamil Nadu
-    "thoothukudi": (8.7642, 78.1348),
-    "tuticorin": (8.7642, 78.1348),
-    "thoothukudi coast": (8.7642, 78.1348),
-    "rameswaram": (9.2881, 79.3129),
-    "nagapattinam": (10.7672, 79.8449),
-    "chennai": (13.0827, 80.2707),
-    "kanyakumari": (8.0883, 77.5385),
-    "cuddalore": (11.7480, 79.7714),
-    "pondicherry": (11.9416, 79.8083),
-    "mandapam": (9.2667, 79.1167),
-    # Kerala
-    "thiruvananthapuram": (8.5241, 76.9366),
-    "kochi": (9.9312, 76.2673),
-    "kozhikode": (11.2588, 75.7804),
-    "alappuzha": (9.4981, 76.3388),
-    "kasaragod": (12.4996, 74.9869),
-    # Karnataka
-    "mangaluru": (12.9141, 74.8560),
-    "karwar": (14.8160, 74.1240),
-    # Andhra Pradesh
-    "visakhapatnam": (17.6868, 83.2185),
-    "kakinada": (16.9891, 82.2475),
-    # Maharashtra / Goa
-    "mumbai": (19.0760, 72.8777),
-    "goa": (15.2993, 74.1240),
-    "ratnagiri": (16.9944, 73.3000),
-    # Odisha
-    "puri": (19.8103, 85.8314),
-    "paradip": (20.3164, 86.6111),
-    # West Bengal
-    "digha": (21.6267, 87.5081),
-    "sagar island": (21.6538, 88.0720),
-    # Lakshadweep / A&N
-    "port blair": (11.6234, 92.7265),
-    "kavaratti": (10.5669, 72.6420),
-}
 
 # ---------------------------------------------------------------------------
 # Language detection: keyword / script fingerprint heuristic
@@ -197,17 +155,7 @@ def _detect_language(text: str) -> str:
     return "en"
 
 
-# ---------------------------------------------------------------------------
-# Gazetteer lookup
-# ---------------------------------------------------------------------------
 
-def _resolve_location(text: str) -> tuple[Optional[str], Optional[float], Optional[float]]:
-    """Return (location_name, lat, lon) by fuzzy-matching the text against the gazetteer."""
-    text_lower = text.lower()
-    for place, (lat, lon) in GAZETTEER.items():
-        if place in text_lower:
-            return place.title(), lat, lon
-    return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -506,20 +454,41 @@ Conversation History:
             
         # Detect invalid location logic
         if res.location_name and res.lat is None and res.lon is None:
-            # We matched the text but it wasn't in gazetteer
-            invalid_intent = ParsedIntent(
-                location_name="Unknown", lat=None, lon=None,
-                time_window=res.time_window, time_start_utc="", time_end_utc="",
-                query_type="general", needs_weather=False, needs_pfz=False,
-                needs_hazard=False, needs_geofence=False, needs_risk=False,
-            )
-            return {
-                "detected_language": res.detected_language,
-                "parsed_intent": invalid_intent,
-                "changed_fields": [],
-                "final_answer_text": "I was unable to identify a recognised coastal location in your query. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Kochi) and I will retrieve marine and safety information for you.",
-                "parse_method": "llm",
-            }
+            # We matched the text but it wasn't in gazetteer. Let's use the Tier 2 geocoder.
+            loc_result = resolve_location(res.location_name)
+            
+            if loc_result["status"] == "success":
+                res.location_name = loc_result["location_name"]
+                res.lat = loc_result["latitude"]
+                res.lon = loc_result["longitude"]
+            elif loc_result["status"] == "inland":
+                invalid_intent = ParsedIntent(
+                    location_name="Unknown", lat=None, lon=None,
+                    time_window=res.time_window, time_start_utc="", time_end_utc="",
+                    query_type="general", needs_weather=False, needs_pfz=False,
+                    needs_hazard=False, needs_geofence=False, needs_risk=False,
+                )
+                return {
+                    "detected_language": res.detected_language,
+                    "parsed_intent": invalid_intent,
+                    "changed_fields": [],
+                    "final_answer_text": f"The location '{res.location_name}' appears to be inland. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you.",
+                    "parse_method": "llm",
+                }
+            else:
+                invalid_intent = ParsedIntent(
+                    location_name="Unknown", lat=None, lon=None,
+                    time_window=res.time_window, time_start_utc="", time_end_utc="",
+                    query_type="general", needs_weather=False, needs_pfz=False,
+                    needs_hazard=False, needs_geofence=False, needs_risk=False,
+                )
+                return {
+                    "detected_language": res.detected_language,
+                    "parsed_intent": invalid_intent,
+                    "changed_fields": [],
+                    "final_answer_text": "I was unable to identify a recognised coastal location in your query. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you.",
+                    "parse_method": "llm",
+                }
 
         # Resolve explicit UTC time range
         time_start_utc, time_end_utc = _resolve_time_range(res.time_window)
@@ -584,7 +553,13 @@ def _fallback_parse(state: ORCAState) -> dict:
     raw = state["raw_query"]
 
     detected_language = _detect_language(raw)
-    location_name, lat, lon = _resolve_location(raw)
+    
+    loc_result = resolve_location(raw)
+    location_name = loc_result["location_name"] if loc_result["status"] == "success" else None
+    lat = loc_result["latitude"] if loc_result["status"] == "success" else None
+    lon = loc_result["longitude"] if loc_result["status"] == "success" else None
+    loc_status = loc_result["status"]
+    
     time_window = _extract_time_window(raw)
     query_type, needs = _classify_query(raw)
 
@@ -635,6 +610,33 @@ def _fallback_parse(state: ORCAState) -> dict:
         }
 
     # ---- Detect fictional/invalid locations ----
+    if loc_status == "inland":
+        invalid_intent: ParsedIntent = {
+            "location_name": "Unknown",
+            "lat": None,
+            "lon": None,
+            "time_window": time_window,
+            "time_start_utc": "",
+            "time_end_utc": "",
+            "query_type": "general",
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+        }
+        return {
+            "detected_language": detected_language,
+            "parsed_intent": invalid_intent,
+            "changed_fields": [],
+            "final_answer_text": (
+                "The requested location appears to be inland. "
+                "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
+                "and I will retrieve marine and safety information for you."
+            ),
+            "parse_method": "rule_based_fallback",
+        }
+        
     if _is_invalid_location(raw) and location_name is None:
         invalid_intent: ParsedIntent = {
             "location_name": "Unknown",
@@ -656,7 +658,7 @@ def _fallback_parse(state: ORCAState) -> dict:
             "changed_fields": [],
             "final_answer_text": (
                 "I was unable to identify a recognised coastal location in your query. "
-                "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Kochi) "
+                "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
                 "and I will retrieve marine and safety information for you."
             ),
             "parse_method": "rule_based_fallback",
