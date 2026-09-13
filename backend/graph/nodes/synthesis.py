@@ -214,9 +214,10 @@ def _render_template(
 
     # ---- Weather ----
     lines.append(f"**{p['weather_intro']}**")
-    if weather is None or weather["status"] == "error":
+    if weather is None or weather.get("status") in ("error", "insufficient_data") or weather.get("execution_status") == "failed" or weather.get("data_status") == "unavailable" or not weather.get("data"):
         lines.append(p["error"].format(agent="Weather agent", aspect="sea conditions"))
-    elif weather["status"] == "skipped":
+        lines.append("Live marine weather conditions could not be retrieved.")
+    elif weather.get("status") == "skipped":
         lines.append(p["skipped"].format(agent="Weather agent"))
     else:
         d = weather["data"]
@@ -233,12 +234,10 @@ def _render_template(
         if d.get("visibility_km"):
             lines.append(f"• Visibility: {d['visibility_km']} km")
         lines.append(f"  *(Source: {weather['source']})*")
-        if weather.get("used_fallback"):
-            lines.append("  ⚠️ *(Cached fallback — live data unavailable)*")
     lines.append("")
 
     # ---- Ocean Tides & Water Level ----
-    if ocean and ocean.get("status") == "success":
+    if ocean and ocean.get("status") == "success" and ocean.get("data"):
         od = ocean.get("data", {})
         lines.append(f"**🌊 Ocean Tides & Water Level (Chart Datum)**")
         lines.append(f"• Current water level: **{od.get('water_level_m', 0.0):.2f} m** above CD ({od.get('current_phase', 'Normal')})")
@@ -250,13 +249,17 @@ def _render_template(
             lines.append(f"• Tidal Current: ~{od['tidal_stream_knots']} knots")
         lines.append(f"  *(Source: {ocean['source']})*")
         lines.append("")
-
+    elif ocean and ocean.get("status") in ("error", "insufficient_data") or (ocean and ocean.get("execution_status") == "failed"):
+        lines.append(f"**🌊 Ocean Tides & Water Level**")
+        lines.append(p["error"].format(agent="Ocean agent", aspect="tidal data"))
+        lines.append("")
 
     # ---- PFZ ----
     lines.append(f"**{p['pfz_intro']}**")
-    if pfz is None or pfz["status"] == "error":
+    if pfz is None or pfz.get("status") in ("error", "insufficient_data") or pfz.get("execution_status") == "failed" or pfz.get("data_status") == "unavailable" or not pfz.get("data"):
         lines.append(p["error"].format(agent="PFZ agent", aspect="fishing zones"))
-    elif pfz["status"] == "skipped":
+        lines.append("Potential fishing zone advisory/chlorophyll proxy could not be retrieved.")
+    elif pfz.get("status") == "skipped":
         lines.append(p["skipped"].format(agent="PFZ agent"))
     else:
         d = pfz["data"]
@@ -275,17 +278,15 @@ def _render_template(
                 f"({z['distance_km']:.0f} km, CHL={z.get('chlorophyll_mg_m3', '?')} mg/m³)"
             )
         lines.append(f"  *(Source: {pfz['source']})*")
-        if pfz.get("used_fallback"):
-            lines.append("  ⚠️ *(Cached fallback — live INCOIS ERDDAP unavailable)*")
         lines.append(p["pfz_proxy_note"])
     lines.append("")
 
     # ---- Hazard ----
     lines.append(f"**{p['hazard_intro']}**")
-    if hazard is None or hazard["status"] == "error":
+    if hazard is None or hazard.get("status") in ("error", "insufficient_data") or hazard.get("execution_status") == "failed" or hazard.get("data_status") == "unavailable" or not hazard.get("data"):
         lines.append(p["error"].format(agent="Hazard agent", aspect="hazard advisories"))
-        lines.append("Risk assessment proceeds without hazard intelligence.")
-    elif hazard["status"] == "skipped":
+        lines.append("Hazard advisories could not be retrieved.")
+    elif hazard.get("status") == "skipped":
         lines.append(p["skipped"].format(agent="Hazard agent"))
     else:
         d = hazard["data"]
@@ -302,16 +303,14 @@ def _render_template(
             for h in d.get("hazards", []):
                 lines.append(f"• **{h['title']}** ({h['severity']}): {h['detail']}")
         lines.append(f"  *(Source: {hazard['source']})*")
-        if hazard.get("used_fallback"):
-            lines.append("  ⚠️ *(Cached fallback — live data unavailable)*")
         lines.append(p["cyclone_note"])
     lines.append("")
 
     # ---- Geofence ----
     lines.append(f"**{p['geofence_intro']}**")
-    if geofence is None or geofence["status"] == "error":
+    if geofence is None or geofence.get("status") == "error":
         lines.append(p["error"].format(agent="Geofence agent", aspect="boundary data"))
-    elif geofence["status"] == "skipped":
+    elif geofence.get("status") == "skipped":
         lines.append(p["skipped"].format(agent="Geofence agent"))
     else:
         lines.append(f"{geofence['summary']}  *(Source: {geofence['source']})*")
@@ -319,21 +318,26 @@ def _render_template(
 
     # ---- Risk breakdown ----
     lines.append(f"**{p['risk_intro']}**")
-    if risk is None or risk["status"] == "error":
-        lines.append(p["error"].format(agent="Risk agent", aspect="risk score"))
-    elif risk["status"] == "skipped":
+    if risk is None or risk.get("status") in ("error", "insufficient_data") or risk.get("execution_status") == "failed" or risk.get("data_status") == "unavailable" or risk.get("data", {}).get("risk_label") == "UNKNOWN":
+        lines.append("Score: **UNKNOWN** (insufficient critical marine data)")
+        rec = risk.get("data", {}).get("recommendation") if risk and risk.get("data") else None
+        if rec:
+            lines.append(rec)
+        else:
+            lines.append("⚠️ Unable to determine safety. Do NOT venture to sea until live data is available.")
+    elif risk.get("status") == "skipped":
         lines.append(p["skipped"].format(agent="Risk agent"))
     else:
         d = risk["data"]
-        cs = d["component_scores"]
-        lines.append(f"Score: **{d['composite_score']}/100 ({d['risk_label']})**")
+        cs = d.get("component_scores", {})
+        lines.append(f"Score: **{d.get('composite_score')}/100 ({d.get('risk_label')})**")
         for comp in d.get("components", []):
             lines.append(
                 f"• **{comp['label']}**: {comp['component_score']:.0f}/100 "
                 f"(Weight: {comp['weight']*100:.0f}%, Contribution: {comp['contribution']:.1f} pts)"
             )
         lines.append("")
-        lines.append(f"{d['recommendation']}")
+        lines.append(f"{d.get('recommendation', '')}")
     lines.append("")
 
     # ---- Evidence section ----
@@ -357,21 +361,21 @@ def _render_template(
     lines.append(f"**{p['data_status_intro']}**")
     fallback_agents = []
     for agent_name, result_key in [
-        ("Weather", weather), ("PFZ", pfz), ("Hazard", hazard), ("Geofence", geofence)
+        ("Weather", weather), ("Ocean/Tides", ocean), ("PFZ", pfz), ("Hazard", hazard), ("Geofence", geofence)
     ]:
-        if result_key and result_key.get("status") == "success":
-            dq = result_key.get("data_quality", "live")
+        if result_key and result_key.get("execution_status") == "success" and result_key.get("status") == "success":
+            dq = result_key.get("data_status") or result_key.get("data_quality", "live")
             if dq == "live":
                 icon = "✓ Live"
-            elif dq == "historical_proxy":
-                icon = "📅 Historical Proxy"
+            elif dq in ("historical_proxy", "cached"):
+                icon = "📅 Historical Proxy" if dq == "historical_proxy" else "💾 Cached"
             else:
                 icon = "⚠️ Fallback"
                 fallback_agents.append(agent_name.lower())
             lines.append(f"• {agent_name}: {icon}")
-        elif result_key and result_key.get("status") == "skipped":
+        elif result_key and (result_key.get("status") == "skipped" or result_key.get("execution_status") == "skipped"):
             lines.append(f"• {agent_name}: ℹ️ Not required")
-        elif result_key and result_key.get("status") == "error":
+        elif result_key and (result_key.get("status") in ("error", "insufficient_data") or result_key.get("execution_status") == "failed" or result_key.get("data_status") == "unavailable"):
             lines.append(f"• {agent_name}: ❌ Unavailable")
             fallback_agents.append(agent_name.lower())
     lines.append("• Geospatial: ✓ Computed")

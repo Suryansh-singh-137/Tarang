@@ -50,11 +50,15 @@ def geofence_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "geofence_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "IMBL Boundary",
             "summary": "Geofence assessment skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
@@ -64,9 +68,9 @@ def geofence_agent(state: ORCAState) -> dict:
     lat = resolved["lat"]
     lon = resolved["lon"]
     location_name = resolved.get("name", "Coastal Location")
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
     from pathlib import Path
     _DATA_DIR = Path(__file__).parent.parent.parent / "data"
@@ -82,21 +86,38 @@ def geofence_agent(state: ORCAState) -> dict:
         location_name, dist_to_imbl_km, boundary_risk,
     )
 
+    # Variables per PRD §9
+    inside_boundary = True  # In Indian maritime waters
+    warning = None
+    if dist_to_imbl_km < 10.0:
+        warning = f"CRITICAL: Within {dist_to_imbl_km:.1f} km of India-Sri Lanka IMBL. High risk of boundary crossing."
+    elif dist_to_imbl_km < 20.0:
+        warning = f"ALERT: Within {dist_to_imbl_km:.1f} km of India-Sri Lanka IMBL. Exercise caution."
+
+    geometry_source = (
+        "data/imbl_boundary.geojson"
+        if used_geojson
+        else "Hardcoded IMBL waypoints (UNCLOS reference, public domain)"
+    )
+
     data = {
         "query_lat": lat,
         "query_lon": lon,
+        "distance_to_boundary_km": round(dist_to_imbl_km, 1),
         "distance_to_imbl_km": round(dist_to_imbl_km, 1),
+        "inside_boundary": inside_boundary,
+        "warning": warning,
+        "geometry_source": geometry_source,
         "boundary_risk": boundary_risk,
         "boundary_name": "India–Sri Lanka Maritime Boundary Line (IMBL)",
         "geojson_used": used_geojson,
         "waypoint_count": len(boundary_waypoints),
     }
 
-    if dist_to_imbl_km < 20:
+    if warning:
         summary = (
             f"{location_name} is approximately {dist_to_imbl_km:.0f} km from the IMBL. "
-            f"Boundary proximity risk: {boundary_risk.upper()}. "
-            "Fishermen are strongly advised not to cross the maritime boundary."
+            f"Boundary proximity risk: {boundary_risk.upper()}. {warning}"
         )
     else:
         summary = (
@@ -118,13 +139,33 @@ def geofence_agent(state: ORCAState) -> dict:
             source=source,
             source_time=retrieved_at,
             retrieved_at=retrieved_at,
-            location={"lat": round(lat, 4), "lon": round(lon, 4)},
+            location=location_used,
+            provenance_tier="official_operational",
+            timestamp=retrieved_at,
+            data_type="geometric_distance",
         )
     ]
+    if warning:
+        evidence.append(EvidenceItem(
+            claim=f"Maritime boundary proximity warning: {warning}",
+            value=warning,
+            unit="",
+            source=source,
+            source_time=retrieved_at,
+            retrieved_at=retrieved_at,
+            location=location_used,
+            provenance_tier="official_operational",
+            timestamp=retrieved_at,
+            data_type="geometric_distance",
+        ))
 
     result: AgentResult = {
         "agent_name": "geofence_agent",
         "status": "success",
+        "execution_status": "success",
+        "data_status": "live",
+        "location_used": location_used,
+        "observed_at": retrieved_at,
         "data": data,
         "source": source,
         "summary": summary,

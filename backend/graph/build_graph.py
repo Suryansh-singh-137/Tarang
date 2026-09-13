@@ -281,7 +281,8 @@ def _explain_risk_node(state: ORCAState) -> dict:
 
 def _status_validator_node(state: ORCAState) -> dict:
     """
-    Computes decoupled execution_status and overall_data_status across all specialist agents.
+    Computes decoupled execution_status and overall_data_status across all specialist agents,
+    and strictly validates the Location Integrity Invariant (PRD §4).
     execution_status: 'success' | 'partial' | 'failed' | 'skipped'
     overall_data_status: 'live' | 'cached' | 'mixed' | 'unavailable'
     """
@@ -298,14 +299,33 @@ def _status_validator_node(state: ORCAState) -> dict:
     trace = state.get("trace") or []
     executed = [r for r in trace if r.get("status") != "skipped"]
 
+    # PRD §4: Mandatory Location Integrity Invariant
+    canonical_lat = resolved["lat"]
+    canonical_lon = resolved["lon"]
+    location_integrity_violation = False
+    for r in executed:
+        loc_used = r.get("location_used")
+        if loc_used and "lat" in loc_used and "lon" in loc_used:
+            dlat = abs(loc_used["lat"] - canonical_lat)
+            dlon = abs(loc_used["lon"] - canonical_lon)
+            if dlat > 0.001 or dlon > 0.001:
+                logger.error(
+                    "[LocationIntegrity] VIOLATION in %s: used (%.4f, %.4f) vs canonical (%.4f, %.4f)",
+                    r.get("agent_name"), loc_used["lat"], loc_used["lon"], canonical_lat, canonical_lon
+                )
+                r["status"] = "error"
+                r["execution_status"] = "failed"
+                r["error"] = "LOCATION_INTEGRITY_VIOLATION"
+                location_integrity_violation = True
+
     if not executed:
         exec_status: ExecutionStatus = "skipped"
         data_status: DataStatus = "unavailable"
     else:
-        successes = [r for r in executed if r.get("status") == "success"]
-        errors = [r for r in executed if r.get("status") in ("error", "insufficient_data")]
+        successes = [r for r in executed if r.get("status") == "success" and r.get("execution_status") != "failed"]
+        errors = [r for r in executed if r.get("status") in ("error", "insufficient_data") or r.get("execution_status") == "failed"]
 
-        if len(errors) == 0:
+        if len(errors) == 0 and not location_integrity_violation:
             exec_status = "success"
         elif len(successes) > 0:
             exec_status = "partial"
@@ -313,16 +333,16 @@ def _status_validator_node(state: ORCAState) -> dict:
             exec_status = "failed"
 
         # Check data quality among successful agents
-        qualities = [r.get("data_quality", "live") for r in successes]
-        has_fallback = any(q == "fallback" for q in qualities)
+        qualities = [r.get("data_status", r.get("data_quality", "live")) for r in successes]
+        has_cached = any(q in ("cached", "fallback", "historical_proxy") for q in qualities)
         has_live = any(q == "live" for q in qualities)
-        has_proxy = any(q == "historical_proxy" for q in qualities)
+        has_unavailable = any(q == "unavailable" for q in qualities)
 
         if not successes:
             data_status = "unavailable"
-        elif has_fallback and not has_live:
+        elif has_cached and not has_live:
             data_status = "cached"
-        elif has_live and not has_fallback and not has_proxy:
+        elif has_live and not has_cached and not has_unavailable:
             data_status = "live"
         else:
             data_status = "mixed"

@@ -100,6 +100,9 @@ def _build_evidence(
         source_time=source_time,
         retrieved_at=retrieved_at,
         location={"lat": query_lat, "lon": query_lon},
+        provenance_tier="proxy",
+        timestamp=source_time,
+        data_type="satellite_proxy",
     ))
 
     for z in zones[:2]:  # top 2 zones as individual evidence items
@@ -115,6 +118,9 @@ def _build_evidence(
             source_time=source_time,
             retrieved_at=retrieved_at,
             location={"lat": z["lat"], "lon": z["lon"]},
+            provenance_tier="proxy",
+            timestamp=source_time,
+            data_type="satellite_proxy",
         ))
 
     return evidence
@@ -154,10 +160,7 @@ def _build_pfz_geojson_features(zones: list[dict], source: str) -> list[dict]:
 def pfz_agent(state: ORCAState) -> dict:
     """
     LangGraph node: fetch PFZ data via INCOIS ERDDAP chlorophyll proxy.
-
-    Priority:
-      1. INCOIS ERDDAP Oceansat-2 CHL (via incois_client)
-      2. fallback_pfz.json (clearly disclosed)
+    Strictly consumes state.resolved_location and enforces V2.1 contract.
     """
     resolved = state.get("resolved_location")
     if not resolved or not resolved.get("coastal"):
@@ -165,11 +168,15 @@ def pfz_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "pfz_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "INCOIS",
             "summary": "PFZ analysis skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
@@ -179,6 +186,7 @@ def pfz_agent(state: ORCAState) -> dict:
     lat = resolved["lat"]
     lon = resolved["lon"]
     location_name = resolved.get("name", "Coastal Location")
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -207,6 +215,7 @@ def pfz_agent(state: ORCAState) -> dict:
         source_key = "incois_pfz_official"
         source_type = "official_operational"
         data_quality_label = "live"
+        data_status: DataStatus = "live"
     elif live is not None and live.zones:
         active = live
         is_official_pfz = False
@@ -214,53 +223,76 @@ def pfz_agent(state: ORCAState) -> dict:
         source_key = "incois_chl_proxy"
         source_type = "ocean_color_proxy"
         data_quality_label = "historical_proxy"
+        data_status: DataStatus = "cached"
     else:
-        active = None
-        is_official_pfz = False
-        is_proxy = True
-        source_key = "fallback_static"
-        source_type = "historical_fallback"
-        data_quality_label = "fallback"
-
-    if active is not None and active.zones:
-        data = {
-            "zones": active.zones,
-            "nearest_zone_km": active.nearest_zone_km,
-            "zone_count": active.zone_count,
-            "avg_chl": active.avg_chl,
-            "source_time": active.source_time,
-            "retrieved_at": active.retrieved_at,
-            "advisory_date": active.source_time[:10] if active.source_time else "",
-            "overall_productivity": (
-                "high" if active.avg_chl >= 0.9
-                else "moderate" if active.avg_chl >= 0.5
-                else "low"
-            ),
-            "pfz_method": "official_advisory" if is_official_pfz else "chlorophyll_proxy",
-            # M8 provenance fields
-            "is_official_pfz": is_official_pfz,
-            "is_proxy": is_proxy,
-            "source_type": source_type,
+        # PRD §6 & §20: Eliminate silent fallback fabrication on live failure
+        logger.warning("[PFZ] Live PFZ / ERDDAP unavailable for %s — failing without fabrication", location_name)
+        result: AgentResult = {
+            "agent_name": "pfz_agent",
+            "status": "error",
+            "execution_status": "failed",
+            "data_status": "unavailable",
+            "location_used": location_used,
+            "observed_at": None,
+            "data": {},
+            "source": "INCOIS ERDDAP",
+            "summary": f"Potential fishing zone (PFZ) data unavailable for {location_name}.",
+            "used_fallback": False,
+            "data_quality": "unavailable",
+            "timestamp": retrieved_at,
+            "error": "LIVE_PFZ_UNAVAILABLE",
+            "evidence": [],
         }
-        used_fallback = False
-        source = active.source
-        source_time = active.source_time
-        logger.info(
-            "[PFZ] %s: %d zones, nearest=%.1fkm (official=%s proxy=%s)",
-            source_type, active.zone_count, active.nearest_zone_km,
-            is_official_pfz, is_proxy,
-        )
+        dq_report: DataQualityReport = {
+            "agent_name":      "pfz_agent",
+            "source_key":      "incois_chl_proxy",
+            "source":          "INCOIS ERDDAP",
+            "provenance_tier": "proxy",
+            "is_official":     False,
+            "is_proxy":        True,
+            "is_fallback":     False,
+            "is_stale":        True,
+            "freshness_hours": 9999.0,
+            "quality_score":   0.0,
+            "warnings":        ["Live INCOIS ERDDAP fetch failed; dataset unavailable."],
+        }
+        current_trace = state.get("trace") or []
+        current_evidence = state.get("evidence") or []
+        current_dq_reports = state.get("data_quality_reports") or []
+        return {
+            "pfz_result": result,
+            "trace": current_trace + [result],
+            "evidence": current_evidence,
+            "data_quality_reports": current_dq_reports + [dq_report],
+        }
 
-    else:
-        data = _load_fallback(location_name)
-        data["pfz_method"] = "fallback"
-        data["is_official_pfz"] = False
-        data["is_proxy"] = True
-        data["source_type"] = "historical_fallback"
-        used_fallback = True
-        source = "fallback_pfz.json (live INCOIS ERDDAP unavailable)"
-        source_time = data.get("source_time", "fallback")
-        logger.warning("[PFZ] Falling back to cached dataset for %s", location_name)
+    data = {
+        "zones": active.zones,
+        "nearest_zone_km": active.nearest_zone_km,
+        "zone_count": active.zone_count,
+        "avg_chl": active.avg_chl,
+        "source_time": active.source_time,
+        "retrieved_at": active.retrieved_at,
+        "advisory_date": active.source_time[:10] if active.source_time else "",
+        "overall_productivity": (
+            "high" if active.avg_chl >= 0.9
+            else "moderate" if active.avg_chl >= 0.5
+            else "low"
+        ),
+        "pfz_method": "official_advisory" if is_official_pfz else "chlorophyll_proxy",
+        # M8 provenance fields
+        "is_official_pfz": is_official_pfz,
+        "is_proxy": is_proxy,
+        "source_type": source_type,
+    }
+    used_fallback = False
+    source = active.source
+    source_time = active.source_time
+    logger.info(
+        "[PFZ] %s: %d zones, nearest=%.1fkm (official=%s proxy=%s)",
+        source_type, active.zone_count, active.nearest_zone_km,
+        is_official_pfz, is_proxy,
+    )
 
     nearest_km = data.get("nearest_zone_km", 40)
     n_zones = len(data.get("zones", []))
@@ -276,10 +308,8 @@ def pfz_agent(state: ORCAState) -> dict:
     )
     if is_official_pfz_flag:
         summary += " [Source: INCOIS official PFZ advisory]"
-    elif is_proxy_flag and not used_fallback:
+    elif is_proxy_flag:
         summary += " [⚠️ Scientific proxy (INCOIS Oceansat-2 CHL) — NOT an official PFZ advisory. Historical data.]"
-    if used_fallback:
-        summary += " [⚠️ Using cached fallback — live INCOIS ERDDAP unavailable]"
 
     evidence = _build_evidence(
         data.get("zones", []), source, source_time, retrieved_at, lat, lon
@@ -291,7 +321,7 @@ def pfz_agent(state: ORCAState) -> dict:
         source=source,
         retrieved_at=retrieved_at,
         data_timestamp=source_time,
-        is_fallback=used_fallback,
+        is_fallback=False,
         is_proxy=is_proxy_flag,
     )
     dq_report: DataQualityReport = {
@@ -311,12 +341,15 @@ def pfz_agent(state: ORCAState) -> dict:
     result: AgentResult = {
         "agent_name": "pfz_agent",
         "status": "success",
+        "execution_status": "success",
+        "data_status": data_status,
+        "location_used": location_used,
+        "observed_at": source_time,
         "data": data,
         "source": source,
         "summary": summary,
-        "used_fallback": used_fallback,
-        # Always historical_proxy unless official Tier 1 succeeded
-        "data_quality": "live" if is_official_pfz_flag else ("fallback" if used_fallback else "historical_proxy"),
+        "used_fallback": False,
+        "data_quality": "live" if is_official_pfz_flag else "historical_proxy",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

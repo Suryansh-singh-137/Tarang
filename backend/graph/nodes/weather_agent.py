@@ -96,6 +96,8 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             retrieved_at=retrieved_at,
             location=loc,
             provenance_tier="global_model",
+            timestamp=source_time,
+            data_type="forecast",
         ))
 
     if data.get("wind_speed_kmh") is not None:
@@ -108,6 +110,8 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             retrieved_at=retrieved_at,
             location=loc,
             provenance_tier="global_model",
+            timestamp=source_time,
+            data_type="forecast",
         ))
 
     if data.get("sea_state"):
@@ -120,10 +124,11 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             retrieved_at=retrieved_at,
             location=loc,
             provenance_tier="global_model",
+            timestamp=source_time,
+            data_type="forecast",
         ))
 
     if data.get("pressure_msl_hpa") is not None:
-
         evidence.append(EvidenceItem(
             claim=f"Atmospheric surface pressure (MSL) is {data['pressure_msl_hpa']} hPa",
             value=data["pressure_msl_hpa"],
@@ -133,6 +138,8 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             retrieved_at=retrieved_at,
             location=loc,
             provenance_tier="global_model",
+            timestamp=source_time,
+            data_type="forecast",
         ))
 
     return evidence
@@ -145,7 +152,7 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
 def weather_agent(state: ORCAState) -> dict:
     """
     LangGraph node: fetch marine conditions and normalise to AgentResult.
-    Strictly consumes state.resolved_location.
+    Strictly consumes state.resolved_location and enforces V2.1 contract.
     """
     resolved = state.get("resolved_location")
     if not resolved or not resolved.get("coastal"):
@@ -153,11 +160,15 @@ def weather_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "weather_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "Open-Meteo Marine + Forecast",
             "summary": "Weather assessment skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
@@ -167,6 +178,7 @@ def weather_agent(state: ORCAState) -> dict:
     lat = resolved["lat"]
     lon = resolved["lon"]
     location_name = resolved.get("name", "Coastal Location")
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
 
     intent = state.get("parsed_intent")
     time_window = intent.get("time_window", "next_24h") if intent else "next_24h"
@@ -183,35 +195,67 @@ def weather_agent(state: ORCAState) -> dict:
     except Exception as exc:
         logger.warning("[Weather] Live fetch failed with exception: %s", exc)
 
-    if live is not None:
-        data = {
-            "wave_height_m": live.wave_height_m,
-            "wave_direction_deg": live.wave_direction_deg,
-            "wind_speed_kmh": live.wind_speed_kmh,
-            "wind_speed_ms": live.wind_speed_ms,
-            "wind_direction_deg": live.wind_direction_deg,
-            "sea_state": live.sea_state,
-            "sst_celsius": live.sst_celsius,
-            "visibility_km": live.visibility_km,
-            "pressure_msl_hpa": live.pressure_msl_hpa,
-            "forecast_time": live.forecast_time,
-            "source_time": live.source_time,
-            "retrieved_at": live.retrieved_at,
+    if live is None:
+        # PRD §5 & §20: Eliminate silent fallback fabrication on live failure
+        logger.warning("[Weather] Live marine weather unavailable for %s — failing without fabrication", location_name)
+        result: AgentResult = {
+            "agent_name": "weather_agent",
+            "status": "error",
+            "execution_status": "failed",
+            "data_status": "unavailable",
+            "location_used": location_used,
+            "observed_at": None,
+            "data": {},
+            "source": "Open-Meteo Marine + Forecast",
+            "summary": f"Live marine weather data unavailable for {location_name}.",
+            "used_fallback": False,
+            "data_quality": "unavailable",
+            "timestamp": retrieved_at,
+            "error": "LIVE_WEATHER_UNAVAILABLE",
+            "evidence": [],
         }
-        used_fallback = False
-        source = live.source
-        source_time = live.source_time
-        logger.info(
-            "[Weather] Live data: wave=%.2fm wind=%.1fkm/h msl=%s sea=%s (source=%s)",
-            live.wave_height_m, live.wind_speed_kmh, live.pressure_msl_hpa, live.sea_state, source,
-        )
+        dq_report: DataQualityReport = {
+            "agent_name":      "weather_agent",
+            "source_key":      "open_meteo",
+            "source":          "Open-Meteo Marine + Forecast",
+            "provenance_tier": "global_model",
+            "is_official":     False,
+            "is_proxy":        False,
+            "is_fallback":     False,
+            "is_stale":        True,
+            "freshness_hours": 9999.0,
+            "quality_score":   0.0,
+            "warnings":        ["Live marine weather fetch failed; source unavailable."],
+        }
+        current_trace = state.get("trace") or []
+        current_evidence = state.get("evidence") or []
+        current_dq_reports = state.get("data_quality_reports") or []
+        return {
+            "weather_result": result,
+            "trace": current_trace + [result],
+            "evidence": current_evidence,
+            "data_quality_reports": current_dq_reports + [dq_report],
+        }
 
-    else:
-        data = _load_fallback(location_name)
-        used_fallback = True
-        source = "fallback_weather.json (live source unavailable)"
-        source_time = data.get("source_time", "fallback")
-        logger.warning("[Weather] Using fallback data for %s", location_name)
+    data = {
+        "wave_height_m": live.wave_height_m,
+        "wave_direction_deg": live.wave_direction_deg,
+        "wind_speed_kmh": live.wind_speed_kmh,
+        "wind_speed_ms": live.wind_speed_ms,
+        "wind_direction_deg": live.wind_direction_deg,
+        "sea_state": live.sea_state,
+        "visibility_km": live.visibility_km,
+        "pressure_msl_hpa": live.pressure_msl_hpa,
+        "forecast_time": live.forecast_time,
+        "source_time": live.source_time,
+        "retrieved_at": live.retrieved_at,
+    }
+    source = live.source
+    source_time = live.source_time
+    logger.info(
+        "[Weather] Live data: wave=%.2fm wind=%.1fkm/h msl=%s sea=%s (source=%s)",
+        live.wave_height_m, live.wind_speed_kmh, live.pressure_msl_hpa, live.sea_state, source,
+    )
 
     wave = data["wave_height_m"]
     wind = data["wind_speed_kmh"]
@@ -233,19 +277,16 @@ def weather_agent(state: ORCAState) -> dict:
         f"wind {wind} km/h ({wind_dir_label}), "
         f"sea state: {sea}."
     )
-    if used_fallback:
-        summary += " [⚠️ Using cached fallback — live source unavailable]"
 
     evidence = _build_evidence(data, source, source_time, retrieved_at, lat, lon)
 
     # M8: DataQuality report
-    source_key = "open_meteo" if not used_fallback else "fallback_static"
     dq = make_data_quality(
-        source_key=source_key,
+        source_key="open_meteo",
         source=source,
         retrieved_at=retrieved_at,
-        data_timestamp=data.get("source_time", source_time),
-        is_fallback=used_fallback,
+        data_timestamp=source_time,
+        is_fallback=False,
         is_proxy=False,
     )
     dq_report: DataQualityReport = {
@@ -265,11 +306,15 @@ def weather_agent(state: ORCAState) -> dict:
     result: AgentResult = {
         "agent_name": "weather_agent",
         "status": "success",
+        "execution_status": "success",
+        "data_status": "live",
+        "location_used": location_used,
+        "observed_at": source_time,
         "data": data,
         "source": source,
         "summary": summary,
-        "used_fallback": used_fallback,
-        "data_quality": "fallback" if used_fallback else "live",
+        "used_fallback": False,
+        "data_quality": "live",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

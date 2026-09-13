@@ -103,7 +103,9 @@ def _compute_tidal_state(lat: float, lon: float, query_dt_utc: datetime) -> Dict
     return {
         "station_name": station_name,
         "water_level_m": current_water_level,
-        "datum": "Chart Datum (CD)",
+        "datum": "Chart Datum",
+        "data_type": "harmonic_prediction",
+        "prediction_type": "harmonic_prediction",
         "current_phase": current_phase,
         "next_high_tide": {
             "time_utc": next_high_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -124,18 +126,11 @@ def _compute_tidal_state(lat: float, lon: float, query_dt_utc: datetime) -> Dict
 def ocean_agent(state: ORCAState) -> dict:
     """
     LangGraph node: Computes water levels, tidal cycles, and tidal currents.
-    Reads strictly from state.resolved_location.
+    Reads strictly from state.resolved_location and enforces V2.1 contract.
     """
     resolved = state.get("resolved_location")
     raw_query = state.get("raw_query", "").lower()
     intent = state.get("parsed_intent")
-
-    # Check if this agent is needed or relevant
-    needs_ocean = False
-    if intent and intent.get("needs_ocean"):
-        needs_ocean = True
-    elif any(k in raw_query for k in ["tide", "tides", "water level", "high tide", "low tide", "jwar", "bhata", "alahi", "sea level"]):
-        needs_ocean = True
 
     # If location is missing, inland, or not coastal -> skip
     if not resolved or not resolved.get("coastal"):
@@ -143,11 +138,15 @@ def ocean_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "ocean_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "INCOIS / Survey of India",
             "summary": "Tidal analysis skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
@@ -157,6 +156,7 @@ def ocean_agent(state: ORCAState) -> dict:
     lat = resolved["lat"]
     lon = resolved["lon"]
     loc_name = resolved.get("name", "Coastal Point")
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     query_dt_utc = datetime.now(timezone.utc)
@@ -184,8 +184,10 @@ def ocean_agent(state: ORCAState) -> dict:
                 source=tide_data["source"],
                 source_time=retrieved_at,
                 retrieved_at=retrieved_at,
-                location={"lat": lat, "lon": lon},
-                provenance_tier="official_model",
+                location=location_used,
+                provenance_tier="official_operational",
+                timestamp=retrieved_at,
+                data_type="harmonic_prediction",
             ),
             EvidenceItem(
                 claim=f"Next high tide is at {n_high} ({h_high:.1f} m CD)",
@@ -194,8 +196,10 @@ def ocean_agent(state: ORCAState) -> dict:
                 source=tide_data["source"],
                 source_time=retrieved_at,
                 retrieved_at=retrieved_at,
-                location={"lat": lat, "lon": lon},
-                provenance_tier="official_model",
+                location=location_used,
+                provenance_tier="official_operational",
+                timestamp=retrieved_at,
+                data_type="harmonic_prediction",
             ),
             EvidenceItem(
                 claim=f"Next low tide is at {n_low} ({h_low:.1f} m CD)",
@@ -204,8 +208,10 @@ def ocean_agent(state: ORCAState) -> dict:
                 source=tide_data["source"],
                 source_time=retrieved_at,
                 retrieved_at=retrieved_at,
-                location={"lat": lat, "lon": lon},
-                provenance_tier="official_model",
+                location=location_used,
+                provenance_tier="official_operational",
+                timestamp=retrieved_at,
+                data_type="harmonic_prediction",
             ),
         ]
 
@@ -213,7 +219,7 @@ def ocean_agent(state: ORCAState) -> dict:
             "agent_name": "ocean_agent",
             "source_key": "incois_soi_tide_harmonic",
             "source": tide_data["source"],
-            "provenance_tier": "official_model",
+            "provenance_tier": "official_operational",
             "is_official": True,
             "is_proxy": False,
             "is_fallback": False,
@@ -226,6 +232,10 @@ def ocean_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "ocean_agent",
             "status": "success",
+            "execution_status": "success",
+            "data_status": "live",
+            "location_used": location_used,
+            "observed_at": retrieved_at,
             "data": tide_data,
             "source": tide_data["source"],
             "summary": summary,
@@ -252,11 +262,15 @@ def ocean_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "ocean_agent",
             "status": "error",
+            "execution_status": "failed",
+            "data_status": "unavailable",
+            "location_used": location_used,
+            "observed_at": None,
             "data": {},
             "source": "INCOIS / Survey of India",
             "summary": f"Could not compute tidal data: {exc}",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": retrieved_at,
             "error": str(exc),
             "evidence": [],

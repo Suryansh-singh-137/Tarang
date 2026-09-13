@@ -187,6 +187,8 @@ def _merge_gdacs_into_hazard(
         retrieved_at=retrieved_at,
         location={"lat": nearest.lat, "lon": nearest.lon},
         provenance_tier="scientific_model",
+        timestamp=nearest.to_date,
+        data_type="observation",
     ))
 
     logger.info(
@@ -215,6 +217,8 @@ def _build_evidence(
         retrieved_at=hazard.retrieved_at,
         location=loc,
         provenance_tier="proxy",  # Open-Meteo WMO = Tier 3/proxy
+        timestamp=hazard.source_time,
+        data_type="forecast",
     ))
 
     for h in hazard.hazards:
@@ -227,6 +231,8 @@ def _build_evidence(
             retrieved_at=hazard.retrieved_at,
             location=loc,
             provenance_tier="proxy",
+            timestamp=h.valid_from,
+            data_type="forecast",
         ))
 
     return evidence
@@ -239,12 +245,7 @@ def _build_evidence(
 def hazard_agent(state: ORCAState) -> dict:
     """
     LangGraph node: fetch/interpret hazard advisories.
-
-    M8 Priority:
-      1. IMD official warnings (stub — always None until credentials set)
-      2. GDACS active cyclones (live, spatially filtered)
-      3. Open-Meteo WMO weather-code advisory
-      4. fallback_hazards.json
+    Strictly consumes state.resolved_location and enforces V2.1 contract.
     """
     resolved = state.get("resolved_location")
     if not resolved or not resolved.get("coastal"):
@@ -252,11 +253,15 @@ def hazard_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "hazard_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "IMD / GDACS / Open-Meteo",
             "summary": "Hazard assessment skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
@@ -266,13 +271,13 @@ def hazard_agent(state: ORCAState) -> dict:
     lat = resolved["lat"]
     lon = resolved["lon"]
     location_name = resolved.get("name", "Coastal Location")
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
     intent = state.get("parsed_intent")
     time_window = intent.get("time_window", "next_24h") if intent else "next_24h"
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     logger.info("[Hazard] Fetching advisories for %s (%s)", location_name, time_window)
-
 
     # ── Tier 1: IMD official warnings (stub) ─────────────────────────────────
     imd_result: Optional[IMDAdvisoryResult] = None
@@ -298,6 +303,48 @@ def hazard_agent(state: ORCAState) -> dict:
     # ── Build base data dict ──────────────────────────────────────────────────
     gdacs_evidence: list[EvidenceItem] = []
     source_key = "open_meteo_wmo"
+
+    if live is None and (gdacs_result is None or not gdacs_result.events):
+        # PRD §8 & §20: Eliminate silent fallback fabrication on live failure
+        logger.warning("[Hazard] Live hazard data unavailable for %s — failing without fabrication", location_name)
+        result: AgentResult = {
+            "agent_name": "hazard_agent",
+            "status": "error",
+            "execution_status": "failed",
+            "data_status": "unavailable",
+            "location_used": location_used,
+            "observed_at": None,
+            "data": {},
+            "source": "Open-Meteo WMO / GDACS",
+            "summary": f"Hazard intelligence unavailable for {location_name}.",
+            "used_fallback": False,
+            "data_quality": "unavailable",
+            "timestamp": retrieved_at,
+            "error": "LIVE_HAZARDS_UNAVAILABLE",
+            "evidence": [],
+        }
+        dq_report: DataQualityReport = {
+            "agent_name":      "hazard_agent",
+            "source_key":      "open_meteo_wmo",
+            "source":          "Open-Meteo WMO",
+            "provenance_tier": "proxy",
+            "is_official":     False,
+            "is_proxy":        True,
+            "is_fallback":     False,
+            "is_stale":        True,
+            "freshness_hours": 9999.0,
+            "quality_score":   0.0,
+            "warnings":        ["Live hazard advisory fetch failed; source unavailable."],
+        }
+        current_trace = state.get("trace") or []
+        current_evidence = state.get("evidence") or []
+        current_dq_reports = state.get("data_quality_reports") or []
+        return {
+            "hazard_result": result,
+            "trace": current_trace + [result],
+            "evidence": current_evidence,
+            "data_quality_reports": current_dq_reports + [dq_report],
+        }
 
     if live is not None:
         data = {
@@ -327,29 +374,29 @@ def hazard_agent(state: ORCAState) -> dict:
         source = live.source
         source_time = live.source_time
         evidence = _build_evidence(live, source, lat, lon)
+        exec_status = "success"
         logger.info(
             "[Hazard] Open-Meteo: %d hazard(s), level=%s",
             len(live.hazards), live.overall_level,
         )
     else:
-        fb = _load_fallback(location_name)
-        data = _fallback_to_normalized(fb, retrieved_at)
-        data["source_agency"] = "fallback_hazards.json"
-        used_fallback = True
-        source = "fallback_hazards.json (live source unavailable)"
-        source_time = fb.get("advisory_timestamp", retrieved_at)
-        source_key = "fallback_static"
-        evidence = [EvidenceItem(
-            claim=f"Overall hazard level: {data.get('overall_hazard_level', 'none')} (fallback data)",
-            value=data.get("overall_hazard_level", "none"),
-            unit="",
-            source=source,
-            source_time=source_time,
-            retrieved_at=retrieved_at,
-            location={"lat": round(lat, 4), "lon": round(lon, 4)},
-            provenance_tier="historical_fallback",
-        )]
-        logger.warning("[Hazard] Falling back to cached dataset for %s", location_name)
+        # GDACS only path
+        data = {
+            "hazards": [],
+            "overall_hazard_level": "none",
+            "active_warnings": [],
+            "cyclone_warning": False,
+            "lightning_advisory": False,
+            "rough_sea_advisory": False,
+            "source_time": retrieved_at,
+            "retrieved_at": retrieved_at,
+            "source_agency": "GDACS",
+        }
+        used_fallback = False
+        source = "GDACS Tropical Cyclone Alerts"
+        source_time = retrieved_at
+        evidence = []
+        exec_status = "partial"
 
     # ── Merge GDACS into data (Tier 2 cyclone augmentation) ──────────────────
     if gdacs_result is not None and gdacs_result.events:
@@ -381,9 +428,6 @@ def hazard_agent(state: ORCAState) -> dict:
             f"Source: {data.get('source_agency', source)}, {source_time}."
         )
 
-    if used_fallback:
-        summary += " [⚠️ Using cached fallback — live source unavailable]"
-
     if gdacs_result and gdacs_result.events:
         nearest_tc = min(gdacs_result.events, key=lambda e: e.distance_km)
         summary += (
@@ -397,7 +441,7 @@ def hazard_agent(state: ORCAState) -> dict:
         source=source,
         retrieved_at=retrieved_at,
         data_timestamp=source_time,
-        is_fallback=used_fallback,
+        is_fallback=False,
         is_proxy=(source_key in ("open_meteo_wmo", "fallback_static")),
     )
     dq_report: DataQualityReport = {
@@ -417,11 +461,15 @@ def hazard_agent(state: ORCAState) -> dict:
     result: AgentResult = {
         "agent_name":    "hazard_agent",
         "status":        "success",
+        "execution_status": exec_status,
+        "data_status":   "live",
+        "location_used": location_used,
+        "observed_at":   source_time,
         "data":          data,
         "source":        source,
         "summary":       summary,
-        "used_fallback": used_fallback,
-        "data_quality":  "fallback" if used_fallback else "live",
+        "used_fallback": False,
+        "data_quality":  "live",
         "timestamp":     retrieved_at,
         "error":         None,
         "evidence":      evidence,

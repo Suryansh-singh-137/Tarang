@@ -156,16 +156,24 @@ def risk_agent(state: ORCAState) -> dict:
         result: AgentResult = {
             "agent_name": "risk_agent",
             "status": "skipped",
+            "execution_status": "skipped",
+            "data_status": "unavailable",
+            "location_used": None,
+            "observed_at": None,
             "data": {},
             "source": "Tarang Composite Risk Model v1",
             "summary": "Risk assessment skipped: location is not a verified coastal zone.",
             "used_fallback": False,
-            "data_quality": "live",
+            "data_quality": "unavailable",
             "timestamp": "",
             "error": None,
             "evidence": [],
         }
         return {"risk_result": result}
+
+    lat = resolved["lat"]
+    lon = resolved["lon"]
+    location_used = {"lat": round(lat, 4), "lon": round(lon, 4)}
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -178,15 +186,28 @@ def risk_agent(state: ORCAState) -> dict:
         f"{[{'agent': r.get('agent_name'), 'dq': r.get('data_quality'), 'fallback': r.get('used_fallback')} for r in dq_reports]}"
     )
 
-
     # -----------------------------------------------------------------------
-    # M8 Phase F: Fail-Closed Validation
+    # M8 Phase F & V2.1: Fail-Closed Validation (PRD §10 & §20)
     # -----------------------------------------------------------------------
-    critical_data_ok = all_critical_data_available(dq_reports)
-    logger.info(f"[TRACE][5] risk_agent critical_data_ok={critical_data_ok}")
+    weather_ok = (
+        weather is not None
+        and weather.get("execution_status") == "success"
+        and weather.get("data_status") == "live"
+        and bool(weather.get("data"))
+        and weather.get("data", {}).get("wave_height_m") is not None
+        and weather.get("data", {}).get("wind_speed_kmh") is not None
+    )
+    hazard_ok = (
+        hazard is not None
+        and hazard.get("execution_status") in ("success", "partial")
+        and hazard.get("data_status") == "live"
+        and bool(hazard.get("data"))
+    )
+    critical_data_ok = weather_ok and hazard_ok and all_critical_data_available(dq_reports)
+    logger.info(f"[TRACE][5] risk_agent critical_data_ok={critical_data_ok} (weather_ok={weather_ok}, hazard_ok={hazard_ok})")
 
     if not critical_data_ok:
-        logger.warning("[Risk] CRITICAL DATA MISSING/STALE/PROXY. Failing closed.")
+        logger.warning("[Risk] CRITICAL DATA MISSING/UNAVAILABLE. Failing closed with UNKNOWN.")
         data = {
             "composite_score": None,
             "risk_label": "UNKNOWN",
@@ -196,26 +217,30 @@ def risk_agent(state: ORCAState) -> dict:
             "evidence_coverage": "insufficient",
             "inputs": {},
             "recommendation": (
-                "UNKNOWN: Unable to determine safe conditions due to missing, stale, "
-                "or proxy data. Do NOT go to sea until official live data is available. "
+                "UNKNOWN: Unable to determine safe conditions due to missing or unavailable critical marine data. "
+                "Do NOT go to sea until official live data is available. "
                 "Consult local port authorities immediately."
             ),
             "data_sources_live": {
-                "weather": False,
-                "hazard": False,
-                "geofence": False,
+                "weather": weather_ok,
+                "hazard": hazard_ok,
+                "geofence": geofence.get("execution_status") == "success" if geofence else False,
             },
         }
-        summary = "Risk assessment unavailable (UNKNOWN) due to missing or stale critical data."
-        
+        summary = "Risk assessment unavailable (UNKNOWN) due to missing or unavailable critical marine weather/hazard data."
+
         result: AgentResult = {
             "agent_name": "risk_agent",
             "status": "insufficient_data",
+            "execution_status": "failed",
+            "data_status": "unavailable",
+            "location_used": location_used,
+            "observed_at": retrieved_at,
             "data": data,
             "source": "Tarang Risk Model v1 (Fail-Closed)",
             "summary": summary,
-            "used_fallback": True,
-            "data_quality": "fallback",
+            "used_fallback": False,
+            "data_quality": "unavailable",
             "timestamp": retrieved_at,
             "error": "CRITICAL_DATA_UNAVAILABLE",
             "evidence": [],
@@ -365,6 +390,10 @@ def risk_agent(state: ORCAState) -> dict:
     result: AgentResult = {
         "agent_name": "risk_agent",
         "status": "success",
+        "execution_status": "success",
+        "data_status": "live",
+        "location_used": location_used,
+        "observed_at": retrieved_at,
         "data": data,
         "source": "Tarang Risk Model v1 (deterministic weighted formula)",
         "summary": summary,

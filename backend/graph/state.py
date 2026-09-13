@@ -48,6 +48,9 @@ class EvidenceItem(TypedDict):
 
     Milestone 8 addition:
       - provenance_tier: authority tier string (e.g. "global_model", "proxy")
+    V2.1 additions:
+      - timestamp: synced with source_time (ISO-8601 UTC)
+      - data_type: category of data e.g. forecast, observation, harmonic_prediction
     """
     claim: str              # human-readable description: "Wave height is 1.8 m"
     value: Any              # the numerical or categorical value
@@ -57,6 +60,8 @@ class EvidenceItem(TypedDict):
     retrieved_at: str       # ISO-8601 UTC: when we fetched it
     location: Optional[Dict[str, float]]  # {"lat": ..., "lon": ...} if applicable
     provenance_tier: Optional[str]        # M8: authority tier (from ProvenanceTier enum value)
+    timestamp: NotRequired[Optional[str]] # V2.1: alias/synced with source_time
+    data_type: NotRequired[Optional[Literal["forecast", "observation", "harmonic_prediction", "satellite_proxy", "geometric_distance"]]]
 
 
 class RiskComponent(TypedDict):
@@ -88,6 +93,12 @@ class AgentResult(TypedDict):
                       "fallback"         — live API unavailable; using cached/static backup data
                       "historical_proxy" — data is real but from historical/satellite dataset;
                                           not a real-time advisory (e.g. INCOIS Oceansat-2 CHL)
+
+    V2.1 additions (Global Agent Contract):
+      - execution_status: "success" | "partial" | "failed" | "skipped"
+      - data_status:      "live" | "cached" | "unavailable"
+      - location_used:    {"lat": float, "lon": float} canonical coordinates used
+      - observed_at:      ISO-8601 UTC timestamp of observation/forecast validity
     """
 
     agent_name: str
@@ -96,10 +107,16 @@ class AgentResult(TypedDict):
     source: str             # human-readable citation string
     summary: str            # one-line plain-language summary
     used_fallback: bool     # True when live data was unavailable
-    data_quality: Literal["live", "fallback", "historical_proxy"]  # M3: data provenance label
+    data_quality: Literal["live", "fallback", "historical_proxy", "unavailable"]  # M3: data provenance label
     timestamp: str          # ISO-8601 UTC retrieval time (or "" if skipped)
     error: Optional[str]    # error message when status == "error"
     evidence: List[EvidenceItem]  # structured claims for synthesis
+
+    # V2.1 Global Agent Contract additions
+    execution_status: NotRequired[ExecutionStatus]
+    data_status: NotRequired[DataStatus]
+    location_used: NotRequired[Optional[Dict[str, float]]]
+    observed_at: NotRequired[Optional[str]]
 
 
 class ParsedIntent(TypedDict):

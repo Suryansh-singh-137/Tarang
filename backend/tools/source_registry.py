@@ -80,6 +80,27 @@ SOURCE_REGISTRY: dict[str, dict] = {
         ),
     },
 
+    "incois_soi_tide_harmonic": {
+        "tier":         ProvenanceTier.OFFICIAL_OPERATIONAL,
+        "domain":       "ocean",
+        "official":     True,
+        "max_age_hours": 24,
+        "description":  (
+            "INCOIS / Survey of India (SOI) Tide Tables. "
+            "Harmonic constituent tidal prediction referenced to Chart Datum (CD)."
+        ),
+    },
+
+    "imbl_boundary_geojson": {
+        "tier":         ProvenanceTier.OFFICIAL_OPERATIONAL,
+        "domain":       "geofence",
+        "official":     True,
+        "max_age_hours": 8760,
+        "description":  (
+            "International Maritime Boundary Line (IMBL) bilateral maritime agreement boundary coordinates (1974/1976)."
+        ),
+    },
+
     # ── Tier 2: Official near-real-time scientific sources ──────────────────
 
     "incois_erddap": {
