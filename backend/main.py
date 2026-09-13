@@ -116,6 +116,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         # Each chunk is {node_name: partial_state_dict}
         for node_name, state_delta in chunk.items():
             logger.info(f"Node completed: {node_name}")
+            if not state_delta:
+                continue
 
             # Emit a progress event for each new trace entry
             trace_list = state_delta.get("trace", [])

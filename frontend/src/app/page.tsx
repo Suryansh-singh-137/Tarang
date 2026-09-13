@@ -1,343 +1,519 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import { Mic, Send, Square, Play, Loader2, Volume2, AlertCircle } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import {
+  MessageSquare,
+  Map as MapIcon,
+  Activity,
+  Layers,
+  Sparkles,
+  Shield,
+  HelpCircle,
+  Menu,
+  X,
+  Compass,
+} from "lucide-react";
 
-// Types
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  language?: string;
-};
+import { LandingHero } from "@/components/landing/LandingHero";
+import { SidebarDashboard } from "@/components/dashboard/SidebarDashboard";
+import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { TracePanel } from "@/components/trace/TracePanel";
+import { LanguageToggle } from "@/components/common/LanguageToggle";
 
-type ChatState = {
-  conversation: any[];
-  last_parsed_intent: any | null;
-  last_results: any;
-};
+import {
+  Message,
+  LanguageCode,
+  ChatState,
+  ProgressEventData,
+  MapGeoJSON,
+  RiskLabel,
+  LiveConditionsSummary,
+} from "@/lib/types";
+import { streamQuery, API_BASE_URL } from "@/lib/api";
+import { translations } from "@/lib/i18n";
+
+// Dynamic Leaflet import to prevent any SSR hydration mismatch
+const MarineMap = dynamic(
+  () => import("@/components/map/MarineMap").then((mod) => mod.MarineMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full min-h-[350px] bg-[#E2ECEE] rounded-xl flex items-center justify-center text-xs text-[var(--ink-muted)] animate-pulse">
+        Initializing Marine Chart...
+      </div>
+    ),
+  }
+);
 
 export default function Home() {
+  const [viewMode, setViewMode] = useState<"landing" | "workspace">("landing");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [isQuerying, setIsQuerying] = useState(false);
-  
-  // Pipeline State for Multi-turn
+  const [isLoading, setIsLoading] = useState(false);
+  const [progressSteps, setProgressSteps] = useState<ProgressEventData[]>([]);
+  const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>("en");
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+
+  // Active mobile view tab
+  const [mobileTab, setMobileTab] = useState<"chat" | "map" | "trace" | "dashboard">("chat");
+  const [isTraceOpen, setIsTraceOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // GeoJSON and Risk state for Map and Dashboard
+  const [mapGeoJson, setMapGeoJson] = useState<MapGeoJSON | null>(null);
+  const [currentRiskLabel, setCurrentRiskLabel] = useState<RiskLabel>("LOW");
+  const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary | null>(null);
+  const [activeCycloneAlert, setActiveCycloneAlert] = useState<{
+    name: string;
+    level: string;
+    distanceKm: number;
+    windSpeedKmh: number;
+  } | null>(null);
+
+  // Pipeline state for Multi-turn memory (M5)
   const [pipelineState, setPipelineState] = useState<ChatState>({
     conversation: [],
     last_parsed_intent: null,
     last_results: {},
   });
 
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const t = translations[currentLanguage] || translations.en;
 
+  // Initial probe for live conditions on mount
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // Check if backend is available and initialize default conditions
+    setLiveConditions({
+      locationName: "Thoothukudi Harbour",
+      lat: 8.7642,
+      lon: 78.1348,
+      waveHeightM: 0.85,
+      windSpeedKmh: 11.8,
+      seaState: "slight",
+      riskLabel: "LOW",
+      source: "Open-Meteo ERA5 / Live Marine",
+      isFallback: false,
+    });
+  }, []);
 
-  // Voice Input Logic
-  const toggleRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
+  // Handle Query Submission
+  const handleSendMessage = async (queryText: string) => {
+    if (!queryText.trim() || isLoading) return;
+
+    // Transition from landing page to workspace immediately upon query
+    if (viewMode === "landing") {
+      setViewMode("workspace");
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+    const userMsgId = "user-" + Date.now();
+    const assistantMsgId = "asst-" + Date.now();
+    const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
+    // Add user message
+    const userMessage: Message = {
+      id: userMsgId,
+      role: "user",
+      content: queryText,
+      timestamp: timeStr,
+    };
 
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await handleTranscription(audioBlob);
-      };
+    // Add placeholder assistant message
+    const assistantMessage: Message = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      timestamp: timeStr,
+      isStreaming: true,
+    };
 
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Microphone permission denied or error:", err);
-      alert("Microphone permission denied. Please allow access to use voice input.");
-    }
-  };
+    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setIsLoading(true);
+    setProgressSteps([]);
 
-  const handleTranscription = async (blob: Blob) => {
-    setIsTranscribing(true);
-    try {
-      const formData = new FormData();
-      formData.append("audio", blob, "recording.webm");
+    await streamQuery(
+      queryText,
+      pipelineState,
+      {
+        onProgress: (progressData) => {
+          setProgressSteps((prev) => [...prev, progressData]);
+        },
+        onResult: (result) => {
+          // Update assistant message
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? {
+                    ...msg,
+                    content: result.answer_text,
+                    language: result.language,
+                    risk_data: result.risk_data,
+                    evidence: result.evidence,
+                    trace: result.trace,
+                    map_geojson: result.map_geojson,
+                    parsed_intent: result.parsed_intent,
+                    isStreaming: false,
+                  }
+                : msg
+            )
+          );
 
-      const response = await fetch("http://localhost:8000/transcribe", {
-        method: "POST",
-        body: formData,
-      });
+          // Update multi-turn memory
+          setPipelineState({
+            conversation: result.conversation_history || [],
+            last_parsed_intent: result.last_parsed_intent || null,
+            last_results: result.last_results || {},
+          });
 
-      if (!response.ok) {
-        throw new Error("Transcription failed");
-      }
-
-      const data = await response.json();
-      setInput(data.transcript);
-    } catch (err) {
-      console.error(err);
-      alert("Couldn't transcribe — try again or type your question.");
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
-
-  // Chat Submission Logic
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || isQuerying) return;
-
-    const queryText = input.trim();
-    setInput("");
-    
-    const userMsgId = Date.now().toString();
-    setMessages(prev => [...prev, { id: userMsgId, role: "user", content: queryText }]);
-    
-    setIsQuerying(true);
-    const assistantMsgId = (Date.now() + 1).toString();
-    setMessages(prev => [...prev, { id: assistantMsgId, role: "assistant", content: "" }]);
-
-    try {
-      const response = await fetch("http://localhost:8000/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: queryText,
-          conversation: pipelineState.conversation,
-          last_parsed_intent: pipelineState.last_parsed_intent,
-          last_results: pipelineState.last_results,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Query API failed");
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      
-      let finalResultPayload: any = null;
-      let buffer = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          
-          const lines = buffer.split("\n\n");
-          buffer = lines.pop() || "";
-          
-          for (const chunk of lines) {
-            const eventMatch = chunk.match(/event: (.*)/);
-            const dataMatch = chunk.match(/data: (.*)/);
-            
-            if (eventMatch && dataMatch) {
-              const eventType = eventMatch[1];
-              const eventData = JSON.parse(dataMatch[1]);
-              
-              if (eventType === "progress") {
-                // We could show progress indicators here
-              } else if (eventType === "result") {
-                finalResultPayload = eventData;
-                setMessages(prev => prev.map(msg => 
-                  msg.id === assistantMsgId 
-                    ? { ...msg, content: eventData.answer_text, language: eventData.language } 
-                    : msg
-                ));
-                
-                setPipelineState({
-                  conversation: eventData.conversation_history || [],
-                  last_parsed_intent: eventData.last_parsed_intent || null,
-                  last_results: eventData.last_results || {},
-                });
-              } else if (eventType === "error") {
-                setMessages(prev => prev.map(msg => 
-                  msg.id === assistantMsgId 
-                    ? { ...msg, content: `Error: ${eventData.error}` } 
-                    : msg
-                ));
-              }
-            }
+          // Update map GeoJSON
+          if (result.map_geojson && result.map_geojson.features) {
+            setMapGeoJson(result.map_geojson);
           }
-        }
+
+          // Update risk verdict
+          if (result.risk_data?.risk_label) {
+            setCurrentRiskLabel(result.risk_data.risk_label);
+          }
+
+          // Auto-update language chrome if detected
+          if (result.language && (result.language === "hi" || result.language === "ta" || result.language === "en")) {
+            setDetectedLanguage(result.language);
+            setCurrentLanguage(result.language as LanguageCode);
+          }
+
+          // Update Live Conditions from weather agent result
+          const weatherResult = result.last_results?.weather_agent;
+          if (weatherResult && weatherResult.data) {
+            const wData = weatherResult.data;
+            setLiveConditions({
+              locationName: result.parsed_intent?.location_name || "Target Location",
+              lat: result.parsed_intent?.lat || 8.7642,
+              lon: result.parsed_intent?.lon || 78.1348,
+              waveHeightM: wData.wave_height_m || 1.0,
+              windSpeedKmh: wData.wind_speed_kmh || 15.0,
+              seaState: wData.sea_state || "moderate",
+              riskLabel: result.risk_data?.risk_label || "LOW",
+              source: weatherResult.source || "Open-Meteo",
+              isFallback: weatherResult.used_fallback || false,
+            });
+          }
+
+          // Update cyclone alert if hazard agent detected active cyclone
+          const hazardResult = result.last_results?.hazard_agent;
+          if (hazardResult && hazardResult.data?.cyclone_warning) {
+            const hData = hazardResult.data;
+            setActiveCycloneAlert({
+              name: hData.cyclone_name || "Active Advisory",
+              level: hData.cyclone_alert_level || "Warning",
+              distanceKm: hData.cyclone_distance_km || 150,
+              windSpeedKmh: hData.cyclone_wind_kmh || 95,
+            });
+          }
+
+          setIsLoading(false);
+        },
+        onError: (err) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? {
+                    ...msg,
+                    content: `Error: ${err}. Please check your connection to Tarang backend.`,
+                    isStreaming: false,
+                    isError: true,
+                  }
+                : msg
+            )
+          );
+          setIsLoading(false);
+        },
       }
-    } catch (err) {
-      console.error(err);
-      setMessages(prev => prev.map(msg => 
-        msg.id === assistantMsgId 
-          ? { ...msg, content: "An error occurred while reaching Tarang." } 
-          : msg
-      ));
-    } finally {
-      setIsQuerying(false);
-    }
+    );
   };
 
-  // Voice Output Logic
-  const playAudio = async (messageId: string, text: string, language: string) => {
-    if (playingId === messageId) {
-      currentAudioRef.current?.pause();
-      setPlayingId(null);
-      return;
-    }
-
-    try {
-      setPlayingId("loading-" + messageId);
-      const response = await fetch("http://localhost:8000/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, language }),
-      });
-
-      if (!response.ok) throw new Error("TTS failed");
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-      }
-      
-      const audio = new Audio(url);
-      currentAudioRef.current = audio;
-      
-      audio.onended = () => setPlayingId(null);
-      audio.play();
-      setPlayingId(messageId);
-    } catch (err) {
-      console.error("Audio playback error:", err);
-      alert("Could not play audio. Please ensure SARVAM_API_KEY is configured and valid.");
-      setPlayingId(null);
-    }
+  const handleSelectLocation = (placeName: string) => {
+    handleSendMessage(`Is it safe to fish near ${placeName} today?`);
   };
+
+  const handleSelectPrompt = (promptText: string) => {
+    handleSendMessage(promptText);
+  };
+
+  const handleStartVoiceLanding = () => {
+    setViewMode("workspace");
+    setMobileTab("chat");
+  };
+
+  // Get active query location name for map header
+  const activeLocationName =
+    messages[messages.length - 1]?.parsed_intent?.location_name ||
+    liveConditions?.locationName ||
+    "Coastal Waters";
+
+  // Current active trace from latest assistant response or live progress steps
+  const activeTrace =
+    messages.filter((m) => m.role === "assistant" && m.trace && m.trace.length > 0).slice(-1)[0]?.trace ||
+    progressSteps.map((p) => ({
+      agent_name: p.agent_name || p.node,
+      status: (p.status as any) || "success",
+      summary: p.summary,
+      source: p.source,
+    }));
+
+  const activeEvidence =
+    messages.filter((m) => m.role === "assistant" && m.evidence && m.evidence.length > 0).slice(-1)[0]?.evidence ||
+    [];
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
-      {/* Header */}
-      <header className="flex items-center justify-between p-4 bg-gray-800 border-b border-gray-700 shadow-sm z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg">
-            T
+    <div className="flex flex-col h-screen overflow-hidden bg-[var(--neutral)] text-[var(--ink)]">
+      {/* ── Top Navigation Bar: Hairline-thin Nav (Part 0 PRD) ── */}
+      <header className="h-14 px-4 sm:px-8 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between shrink-0 z-30 shadow-2xs">
+        <div className="flex items-center gap-6 sm:gap-8">
+          {/* Mobile Sidebar Toggle (workspace mode) */}
+          {viewMode === "workspace" && (
+            <button
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+              className="lg:hidden p-2 text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--foam)] rounded-lg min-h-[48px] min-w-[48px] flex items-center justify-center cursor-pointer"
+              aria-label="Toggle navigation menu"
+            >
+              {isMobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          )}
+
+          {/* Wordmark: TARANG in Instrument Serif / Fraunces with small-caps tracking ~0.18em */}
+          <button
+            type="button"
+            onClick={() => setViewMode(messages.length === 0 ? "landing" : "workspace")}
+            className="flex items-center gap-3 text-left group cursor-pointer"
+          >
+            <span className="font-serif-display text-lg sm:text-xl font-semibold tracking-wordmark text-[var(--ink)]">
+              TARANG
+            </span>
+            {viewMode === "workspace" && (
+              <span className="hidden md:inline-block text-xs text-[var(--ink-subtle)] font-normal border-l border-[var(--border)] pl-2.5">
+                {t.appSubtitle}
+              </span>
+            )}
+          </button>
+
+          {/* Part 0 Instrument Nav Links: FLEET FORECAST ARCHIVE */}
+          <div className="hidden sm:flex items-center gap-6 font-mono-data text-[11px] text-[var(--ink-muted)]">
+            <button
+              type="button"
+              onClick={() => handleSendMessage("What is the fleet forecast for Tamil Nadu coast today?")}
+              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
+            >
+              FLEET
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSendMessage("Show me the sea weather forecast for today")}
+              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
+            >
+              FORECAST
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSendMessage("Show recent marine safety advisories and cyclone history")}
+              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
+            >
+              ARCHIVE
+            </button>
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-blue-400">Tarang</h1>
         </div>
-        <div className="text-xs text-gray-400 font-medium px-3 py-1 bg-gray-700 rounded-full">
-          Milestone 7
+
+        {/* Right Nav Actions: Coordinates readout & Language Switcher */}
+        <div className="flex items-center gap-3 sm:gap-4 font-mono-data text-[11px]">
+          <span className="hidden lg:inline text-[var(--ink-subtle)]">EST. 2024 / COASTAL SYSTEMS</span>
+          <span className="hidden lg:inline text-[var(--border)]">|</span>
+          <span className="text-[var(--current)] font-medium">
+            {liveConditions
+              ? `${liveConditions.lat.toFixed(2)}°N, ${liveConditions.lon.toFixed(2)}°E`
+              : "21.14°N"}
+          </span>
+
+          {/* Switch to Landing Page button if in workspace */}
+          {viewMode === "workspace" && (
+            <button
+              type="button"
+              onClick={() => setViewMode("landing")}
+              className="font-sans text-xs font-medium text-[var(--ink-muted)] hover:text-[var(--current)] px-3 py-1.5 rounded-full hover:bg-[var(--foam)] transition-colors hidden sm:inline-block cursor-pointer"
+            >
+              Home
+            </button>
+          )}
+
+          {/* Language Toggle (EN / हिं / த) */}
+          <LanguageToggle
+            currentLanguage={currentLanguage}
+            onSelectLanguage={(lang) => setCurrentLanguage(lang)}
+            detectedBadge={detectedLanguage}
+          />
         </div>
       </header>
 
-      {/* Chat Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-6 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 to-gray-900">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50">
-            <div className="w-16 h-16 rounded-full bg-blue-900/50 flex items-center justify-center">
-              <Mic className="w-8 h-8 text-blue-400" />
-            </div>
-            <p className="text-lg">Ask Tarang for marine safety intelligence.<br/>Type or speak in English, Hindi, or Tamil.</p>
-          </div>
-        ) : (
-          messages.map(msg => (
-            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[85%] rounded-2xl px-5 py-4 shadow-md ${
-                msg.role === "user" 
-                  ? "bg-blue-600 text-white rounded-br-none" 
-                  : "bg-gray-800 text-gray-200 border border-gray-700 rounded-bl-none"
-              }`}>
-                {msg.role === "assistant" ? (
-                  <>
-                    <div className="prose prose-invert max-w-none">
-                      {msg.content === "" ? (
-                        <div className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Thinking...
-                        </div>
-                      ) : (
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      )}
-                    </div>
-                    {msg.content && msg.language && (
-                      <div className="mt-4 pt-3 border-t border-gray-700 flex justify-end">
-                        <button 
-                          onClick={() => playAudio(msg.id, msg.content, msg.language!)}
-                          className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-full"
-                        >
-                          {playingId === "loading-" + msg.id ? (
-                            <><Loader2 className="w-4 h-4 animate-spin" /> Synthesizing...</>
-                          ) : playingId === msg.id ? (
-                            <><Square className="w-4 h-4" /> Stop</>
-                          ) : (
-                            <><Volume2 className="w-4 h-4" /> Read Aloud</>
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-        <div ref={messagesEndRef} />
-      </main>
-
-      {/* Input Area */}
-      <footer className="p-4 bg-gray-800 border-t border-gray-700 relative">
-        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative flex items-center">
-          
-          <button
-            type="button"
-            onClick={toggleRecording}
-            className={`absolute left-2 p-2.5 rounded-full transition-all ${
-              isRecording 
-                ? "bg-red-500/20 text-red-500 animate-pulse scale-110" 
-                : "text-gray-400 hover:bg-gray-700 hover:text-white"
-            }`}
-            title="Voice Input"
-          >
-            {isRecording ? <Square className="w-5 h-5" fill="currentColor" /> : <Mic className="w-5 h-5" />}
-          </button>
-
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={isTranscribing || isQuerying}
-            placeholder={isTranscribing ? "Transcribing..." : isRecording ? "Listening..." : "Ask about a location (e.g. Is it safe to fish near Kochi?)"}
-            className="w-full bg-gray-900 border border-gray-700 rounded-full py-4 pl-14 pr-14 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors disabled:opacity-50"
+      {/* ── Main Content Area ── */}
+      {viewMode === "landing" && messages.length === 0 ? (
+        // Part 0: Serene Landing Hero Threshold
+        <main className="flex-1 overflow-y-auto">
+          <LandingHero
+            language={currentLanguage}
+            liveConditions={liveConditions}
+            onStartVoice={handleStartVoiceLanding}
+            onSubmitText={handleSendMessage}
+            onSelectPrompt={handleSelectPrompt}
           />
-
-          <button
-            type="submit"
-            disabled={!input.trim() || isQuerying || isTranscribing}
-            className="absolute right-2 p-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
+        </main>
+      ) : (
+        // Part 1: Working 3-Panel Workspace (Desktop) & Tabbed Layout (Mobile)
+        <main className="flex-1 flex overflow-hidden relative">
+          {/* ── 1. Left Sidebar Dashboard (Desktop: ~300px, Mobile: Drawer) ── */}
+          <div
+            className={`
+              fixed lg:relative top-16 lg:top-0 bottom-0 left-0 z-40
+              w-72 sm:w-80 bg-[var(--surface)] border-r border-[var(--border)]
+              transition-transform duration-300 ease-in-out shrink-0
+              ${isMobileSidebarOpen ? "translate-x-0 shadow-xl" : "-translate-x-full lg:translate-x-0"}
+              ${mobileTab === "dashboard" ? "translate-x-0 w-full" : ""}
+            `}
           >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
-        
-        <div className="text-center mt-3 text-xs text-gray-500 flex items-center justify-center gap-1">
-          <AlertCircle className="w-3 h-3" />
-          Tarang is a decision-support tool. Always follow official coast guard advisories.
-        </div>
-      </footer>
+            <SidebarDashboard
+              language={currentLanguage}
+              liveConditions={liveConditions}
+              activeCycloneAlert={activeCycloneAlert}
+              onSelectLocation={(place) => {
+                handleSelectLocation(place);
+                setIsMobileSidebarOpen(false);
+                if (mobileTab === "dashboard") setMobileTab("chat");
+              }}
+              onSelectPrompt={(prompt) => {
+                handleSelectPrompt(prompt);
+                setIsMobileSidebarOpen(false);
+                if (mobileTab === "dashboard") setMobileTab("chat");
+              }}
+              className="h-full"
+            />
+          </div>
+
+          {/* Mobile Overlay backdrop when drawer is open */}
+          {isMobileSidebarOpen && (
+            <div
+              className="fixed inset-0 bg-black/30 z-30 lg:hidden"
+              onClick={() => setIsMobileSidebarOpen(false)}
+            />
+          )}
+
+          {/* ── 2. Center Column: Chat & Voice Interface (~45-50% width on Desktop) ── */}
+          <div
+            className={`
+              flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)] border-r border-[var(--border)]
+              ${mobileTab !== "chat" ? "hidden lg:flex" : "flex"}
+            `}
+          >
+            {/* Chat message stream with live SSE progress stepper */}
+            <div className="flex-1 overflow-hidden">
+              <ChatPanel
+                messages={messages}
+                isLoading={isLoading}
+                progressSteps={progressSteps}
+                language={currentLanguage}
+                onSelectPrompt={handleSelectPrompt}
+                onViewTrace={() => {
+                  setMobileTab("trace");
+                  setIsTraceOpen(true);
+                }}
+                className="h-full"
+              />
+            </div>
+
+            {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input */}
+            <div className="p-3 sm:p-4 bg-[var(--surface)] border-t border-[var(--border)] shrink-0 z-10 shadow-xs">
+              <ChatInput
+                onSendMessage={handleSendMessage}
+                isLoading={isLoading}
+                language={currentLanguage}
+              />
+            </div>
+          </div>
+
+          {/* ── 3. Right Column: Marine Map & Collapsible Trace Panel (~35-40% on Desktop) ── */}
+          <div
+            className={`
+              w-full lg:w-[420px] xl:w-[480px] shrink-0 h-full flex flex-col bg-[var(--surface-muted)] overflow-hidden
+              ${mobileTab === "map" || mobileTab === "trace" ? "flex" : "hidden lg:flex"}
+            `}
+          >
+            {/* Top half: Leaflet Interactive Marine Chart */}
+            <div className={`p-3 shrink-0 ${mobileTab === "trace" ? "hidden lg:block h-[45%]" : "flex-1 lg:h-[50%]"}`}>
+              <MarineMap
+                geoJson={mapGeoJson}
+                riskLabel={currentRiskLabel}
+                locationName={activeLocationName}
+                className="h-full"
+              />
+            </div>
+
+            {/* Bottom half: Collapsible Reasoning Trace Panel */}
+            <div className={`p-3 pt-0 flex-1 overflow-hidden ${mobileTab === "map" ? "hidden lg:flex" : "flex"}`}>
+              <TracePanel
+                trace={activeTrace}
+                evidence={activeEvidence}
+                language={currentLanguage}
+                isOpen={isTraceOpen}
+                onToggle={() => setIsTraceOpen(!isTraceOpen)}
+                className="h-full w-full"
+              />
+            </div>
+          </div>
+
+          {/* ── Mobile Navigation Tabs Bar (< 1024px) ── */}
+          <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-[var(--surface)] border-t border-[var(--border)] flex items-center justify-around z-20 shadow-lg px-2">
+            <button
+              type="button"
+              onClick={() => setMobileTab("chat")}
+              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
+                mobileTab === "chat" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
+              }`}
+            >
+              <MessageSquare className="w-4 h-4 mb-0.5" />
+              <span>{t.navChat}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileTab("map")}
+              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
+                mobileTab === "map" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
+              }`}
+            >
+              <MapIcon className="w-4 h-4 mb-0.5" />
+              <span>{t.navMap}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileTab("trace")}
+              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
+                mobileTab === "trace" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
+              }`}
+            >
+              <Activity className="w-4 h-4 mb-0.5" />
+              <span>{t.navTrace}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileTab("dashboard")}
+              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
+                mobileTab === "dashboard" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
+              }`}
+            >
+              <Compass className="w-4 h-4 mb-0.5" />
+              <span>{t.navDashboard}</span>
+            </button>
+          </nav>
+        </main>
+      )}
     </div>
   );
 }

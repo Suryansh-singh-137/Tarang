@@ -1,26 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&display=swap');
+@import "leaflet/dist/leaflet.css";
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Coastal Dawn Editorial Marine Palette */
+  --ink: #16242B;
+  --ink-muted: #52656E;
+  --ink-subtle: #8A9CA5;
+  --current: #2E8FA0;
+  --current-hover: #247584;
+  --current-light: #EBF6F7;
+  --neutral: #FCFCFA;
+  --surface: #FFFFFF;
+  --surface-muted: #F7F8F5;
+  --border: #EDEEEA;
+  --border-focus: #2E8FA0;
+  --foam: #DCEFEE;
+  --foam-glow: rgba(220, 239, 238, 0.6);
+  --dawn: #E88F5C;
+  --dawn-hover: #D77B46;
+  --dawn-glow: rgba(232, 143, 92, 0.35);
+
+  /* Semantic Safety Risk Verdict Colors */
+  --risk-low: #1B8755;
+  --risk-low-bg: #EBF7F0;
+  --risk-low-border: #C3E8D2;
+
+  --risk-moderate: #D97706;
+  --risk-moderate-bg: #FEF3C7;
+  --risk-moderate-border: #FDE68A;
+
+  --risk-high: #DC2626;
+  --risk-high-bg: #FEE2E2;
+  --risk-high-border: #FECACA;
+
+  --risk-extreme: #991B1B;
+  --risk-extreme-bg: #FEE2E2;
+  --risk-extreme-border: #FCA5A5;
+
+  --risk-unknown: #4B5563;
+  --risk-unknown-bg: #F3F4F6;
+  --risk-unknown-border: #E5E7EB;
+
+  /* Spacing Scale per PRD (Sarvam rhythm) */
+  --space-xs: 6px;
+  --space-sm: 14px;
+  --space-md: 24px;
+  --space-lg: 40px;
+  --space-xl: 60px;
+  --space-gutter: 80px;
+
+  /* Defaults for body */
+  --background: var(--neutral);
+  --foreground: var(--ink);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-current: var(--current);
+  --color-current-hover: var(--current-hover);
+  --color-current-light: var(--current-light);
+  --color-neutral: var(--neutral);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-foam: var(--foam);
+  --color-dawn: var(--dawn);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-serif: 'Instrument Serif', var(--font-fraunces), serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: var(--font-noto-sans), var(--font-noto-devanagari), var(--font-noto-tamil), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--neutral);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Instrument Serif / Fraunces display typography */
+.font-display {
+  font-family: 'Instrument Serif', var(--font-fraunces), serif;
+  letter-spacing: -0.015em;
+}
+
+.font-serif-display {
+  font-family: 'Instrument Serif', var(--font-fraunces), serif;
+}
+
+/* Monospace Micro-data styling */
+.font-mono-data {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Wordmark letter-spacing (~0.15 - 0.20em) */
+.tracking-wordmark {
+  letter-spacing: 0.18em;
+}
+
+/* Leaflet Container reset */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  font-family: var(--font-sans);
+  background-color: #E2ECEE;
+}
+
+/* Pulse animation for active mic recording */
+@keyframes mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(232, 143, 92, 0.6);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(232, 143, 92, 0);
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 143, 92, 0);
+    transform: scale(1);
+  }
+}
+
+.animate-mic-pulse {
+  animation: mic-pulse 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* Gentle drifting wave animation */
+@keyframes wave-drift {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-15px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.animate-wave-drift {
+  animation: wave-drift 4s ease-in-out infinite;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .animate-mic-pulse,
+  .animate-wave-drift {
+    animation: none;
+  }
 }
