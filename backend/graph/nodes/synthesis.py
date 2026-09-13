@@ -55,9 +55,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         "risk_intro": "📊 Overall Risk Assessment",
         "evidence_intro": "📋 Data Sources & Evidence",
         "data_status_intro": "📡 Data Freshness & Quality",
-        "skipped": "ℹ️ {agent} was not needed for this query.",
-        "error": "❌ {agent} encountered an error; {aspect} could not be determined.",
-        "fallback_note": "⚠️ **Fallback data used**: {agents}. Live source(s) were unreachable. Results reflect the latest cached dataset.",
+        "skipped": "ℹ️ {aspect} not applicable or not requested for this query.",
+        "error": "Live {aspect} data is currently unavailable for this location.",
+        "fallback_note": "⚠️ **Cached data in use**: {agents}. Live source(s) were temporarily unreachable; results reflect the latest available verified dataset.",
         "pfz_proxy_note": (
             "ℹ️ **Data Quality Note**: Fishing potential zones above are derived from INCOIS Oceansat-2 "
             "chlorophyll-a historical satellite data — this is a scientific proxy indicator, "
@@ -80,9 +80,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         "risk_intro": "📊 कुल जोखिम आकलन",
         "evidence_intro": "📋 डेटा स्रोत और साक्ष्य",
         "data_status_intro": "📡 डेटा की ताज़गी और गुणवत्ता",
-        "skipped": "ℹ️ {agent} इस प्रश्न के लिए आवश्यक नहीं था।",
-        "error": "❌ {agent} में त्रुटि हुई; {aspect} निर्धारित नहीं किया जा सका।",
-        "fallback_note": "⚠️ **फ़ॉलबैक डेटा उपयोग किया गया**: {agents}। लाइव स्रोत उपलब्ध नहीं था।",
+        "skipped": "ℹ️ {aspect} इस प्रश्न के लिए लागू या आवश्यक नहीं है।",
+        "error": "इस स्थान के लिए लाइव {aspect} डेटा वर्तमान में उपलब्ध नहीं है।",
+        "fallback_note": "⚠️ **कैश्ड डेटा उपयोग में है**: {agents}। लाइव स्रोत अस्थायी रूप से अनुपलब्ध है।",
         "pfz_proxy_note": (
             "ℹ️ **डेटा गुणवत्ता नोट**: मछली पकड़ने के क्षेत्र INCOIS Oceansat-2 "
             "क्लोरोफिल-a ऐतिहासिक उपग्रह डेटा पर आधारित वैज्ञानिक सूचक हैं — "
@@ -103,9 +103,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         "risk_intro": "📊 ஒட்டுமொத்த ஆபத்து மதிப்பீடு",
         "evidence_intro": "📋 தரவு மூலங்கள்",
         "data_status_intro": "📡 தரவு புதுமை மற்றும் தரம்",
-        "skipped": "ℹ️ {agent} இந்தக் கேள்விக்கு தேவையில்லை.",
-        "error": "❌ {agent} பிழை ஏற்பட்டது; {aspect} தீர்மானிக்க முடியவில்லை.",
-        "fallback_note": "⚠️ **தற்காலிக தரவு பயன்படுத்தப்பட்டது**: {agents}.",
+        "skipped": "ℹ️ {aspect} இந்தக் கேள்விக்கு பொருந்தாது அல்லது கோரப்படவில்லை.",
+        "error": "இந்த இடத்திற்கான நேரடி {aspect} தரவு தற்போது கிடைக்கவில்லை.",
+        "fallback_note": "⚠️ **தற்காலிக சேமிக்கப்பட்ட தரவு பயன்படுத்தப்படுகிறது**: {agents}.",
         "pfz_proxy_note": (
             "ℹ️ **தரவு தர குறிப்பு**: மீன்பிடி வலயங்கள் INCOIS Oceansat-2 குளோரோஃபில்-a "
             "வரலாற்று செயற்கைக்கோள் தரவை அடிப்படையாகக் கொண்ட வைஞ்ஞானிக சுட்டி "
@@ -215,10 +215,12 @@ def _render_template(
     # ---- Weather ----
     lines.append(f"**{p['weather_intro']}**")
     if weather is None or weather.get("status") in ("error", "insufficient_data") or weather.get("execution_status") == "failed" or weather.get("data_status") == "unavailable" or not weather.get("data"):
-        lines.append(p["error"].format(agent="Weather agent", aspect="sea conditions"))
-        lines.append("Live marine weather conditions could not be retrieved.")
+        lines.append(p["error"].format(aspect="marine weather"))
     elif weather.get("status") == "skipped":
-        lines.append(p["skipped"].format(agent="Weather agent"))
+        if weather.get("reason") == "INLAND_LOCATION":
+            lines.append("Marine weather conditions are not applicable for this inland location.")
+        else:
+            lines.append(p["skipped"].format(aspect="Weather conditions"))
     else:
         d = weather["data"]
         wave = d.get("wave_height_m", "?")
@@ -249,19 +251,14 @@ def _render_template(
             lines.append(f"• Tidal Current: ~{od['tidal_stream_knots']} knots")
         lines.append(f"  *(Source: {ocean['source']})*")
         lines.append("")
-    elif ocean and ocean.get("status") in ("error", "insufficient_data") or (ocean and ocean.get("execution_status") == "failed"):
+    elif ocean and (ocean.get("status") in ("error", "insufficient_data") or ocean.get("execution_status") == "failed"):
         lines.append(f"**🌊 Ocean Tides & Water Level**")
-        lines.append(p["error"].format(agent="Ocean agent", aspect="tidal data"))
+        lines.append(p["error"].format(aspect="ocean tide"))
         lines.append("")
 
     # ---- PFZ ----
-    lines.append(f"**{p['pfz_intro']}**")
-    if pfz is None or pfz.get("status") in ("error", "insufficient_data") or pfz.get("execution_status") == "failed" or pfz.get("data_status") == "unavailable" or not pfz.get("data"):
-        lines.append(p["error"].format(agent="PFZ agent", aspect="fishing zones"))
-        lines.append("Potential fishing zone advisory/chlorophyll proxy could not be retrieved.")
-    elif pfz.get("status") == "skipped":
-        lines.append(p["skipped"].format(agent="PFZ agent"))
-    else:
+    if pfz and pfz.get("status") == "success" and pfz.get("data"):
+        lines.append(f"**{p['pfz_intro']}**")
         d = pfz["data"]
         n_zones = len(d.get("zones", []))
         nearest = d.get("nearest_zone_km", "?")
@@ -271,7 +268,6 @@ def _render_template(
         lines.append(f"• Nearest PFZ indicator: **{nearest:.0f} km** away")
         if avg_chl:
             lines.append(f"• Average chlorophyll-a: {avg_chl:.2f} mg/m³ (productivity: {productivity})")
-        # List top 2 zones
         for z in d.get("zones", [])[:2]:
             lines.append(
                 f"  – Zone at {z['lat']:.2f}°N, {z['lon']:.2f}°E "
@@ -279,22 +275,22 @@ def _render_template(
             )
         lines.append(f"  *(Source: {pfz['source']})*")
         lines.append(p["pfz_proxy_note"])
-    lines.append("")
+        lines.append("")
+    elif pfz and (pfz.get("status") in ("error", "insufficient_data") or pfz.get("execution_status") == "failed" or pfz.get("data_status") == "unavailable"):
+        lines.append(f"**{p['pfz_intro']}**")
+        lines.append(p["error"].format(aspect="fishing zone (PFZ)"))
+        lines.append("Fishing-zone suitability could not be assessed because PFZ data is unavailable.")
+        lines.append("")
 
     # ---- Hazard ----
-    lines.append(f"**{p['hazard_intro']}**")
-    if hazard is None or hazard.get("status") in ("error", "insufficient_data") or hazard.get("execution_status") == "failed" or hazard.get("data_status") == "unavailable" or not hazard.get("data"):
-        lines.append(p["error"].format(agent="Hazard agent", aspect="hazard advisories"))
-        lines.append("Hazard advisories could not be retrieved.")
-    elif hazard.get("status") == "skipped":
-        lines.append(p["skipped"].format(agent="Hazard agent"))
-    else:
+    if hazard and hazard.get("status") == "success" and hazard.get("data"):
+        lines.append(f"**{p['hazard_intro']}**")
         d = hazard["data"]
         active = d.get("active_warnings", [])
         level = d.get("overall_hazard_level", "none")
         if not active:
             lines.append(
-                f"No relevant hazard warning found in available data "
+                f"No active high-severity hazard was detected for the monitored area "
                 f"(as of {d.get('source_time', '—')}). "
                 "This does not guarantee absence of hazard."
             )
@@ -304,33 +300,38 @@ def _render_template(
                 lines.append(f"• **{h['title']}** ({h['severity']}): {h['detail']}")
         lines.append(f"  *(Source: {hazard['source']})*")
         lines.append(p["cyclone_note"])
-    lines.append("")
+        lines.append("")
+    elif hazard and (hazard.get("status") in ("error", "insufficient_data") or hazard.get("execution_status") == "failed" or hazard.get("data_status") == "unavailable"):
+        lines.append(f"**{p['hazard_intro']}**")
+        lines.append(p["error"].format(aspect="hazard warning"))
+        lines.append("")
 
     # ---- Geofence ----
-    lines.append(f"**{p['geofence_intro']}**")
-    if geofence is None or geofence.get("status") == "error":
-        lines.append(p["error"].format(agent="Geofence agent", aspect="boundary data"))
-    elif geofence.get("status") == "skipped":
-        lines.append(p["skipped"].format(agent="Geofence agent"))
-    else:
+    if geofence and geofence.get("status") == "success" and geofence.get("summary"):
+        lines.append(f"**{p['geofence_intro']}**")
         lines.append(f"{geofence['summary']}  *(Source: {geofence['source']})*")
-    lines.append("")
+        lines.append("")
+    elif geofence and geofence.get("status") == "error":
+        lines.append(f"**{p['geofence_intro']}**")
+        lines.append(p["error"].format(aspect="boundary"))
+        lines.append("")
 
     # ---- Risk breakdown ----
     lines.append(f"**{p['risk_intro']}**")
     if risk is None or risk.get("status") in ("error", "insufficient_data") or risk.get("execution_status") == "failed" or risk.get("data_status") == "unavailable" or risk.get("data", {}).get("risk_label") == "UNKNOWN":
-        lines.append("Score: **UNKNOWN** (insufficient critical marine data)")
+        lines.append("Assessment: **UNKNOWN** (insufficient critical marine data)")
         rec = risk.get("data", {}).get("recommendation") if risk and risk.get("data") else None
         if rec:
             lines.append(rec)
         else:
             lines.append("⚠️ Unable to determine safety. Do NOT venture to sea until live data is available.")
     elif risk.get("status") == "skipped":
-        lines.append(p["skipped"].format(agent="Risk agent"))
+        if risk.get("reason") == "INLAND_LOCATION":
+            lines.append("Marine trip assessment is not applicable to inland locations.")
     else:
         d = risk["data"]
         cs = d.get("component_scores", {})
-        lines.append(f"Score: **{d.get('composite_score')}/100 ({d.get('risk_label')})**")
+        lines.append(f"Assessment: **{d.get('risk_label')} RISK** ({d.get('composite_score')}/100)")
         for comp in d.get("components", []):
             lines.append(
                 f"• **{comp['label']}**: {comp['component_score']:.0f}/100 "
@@ -343,7 +344,6 @@ def _render_template(
     # ---- Evidence section ----
     if evidence:
         lines.append(f"**{p['evidence_intro']}**")
-        # Group by source
         sources_seen: dict[str, list[str]] = {}
         for ev in evidence:
             src = ev.get("source", "Unknown")
@@ -353,40 +353,45 @@ def _render_template(
             sources_seen[src].append(claim)
         for src, claims in sources_seen.items():
             lines.append(f"• **{src}**")
-            for claim in claims[:3]:  # max 3 claims per source for readability
+            for claim in claims[:3]:
                 lines.append(f"  – {claim}")
         lines.append("")
 
-    # ---- Data freshness ----
-    lines.append(f"**{p['data_status_intro']}**")
-    fallback_agents = []
+    # ---- Data freshness summary (PRD §19) ----
+    live_count = 0
+    cached_count = 0
+    unavail_count = 0
+    cached_names = []
     for agent_name, result_key in [
         ("Weather", weather), ("Ocean/Tides", ocean), ("PFZ", pfz), ("Hazard", hazard), ("Geofence", geofence)
     ]:
         if result_key and result_key.get("execution_status") == "success" and result_key.get("status") == "success":
             dq = result_key.get("data_status") or result_key.get("data_quality", "live")
             if dq == "live":
-                icon = "✓ Live"
-            elif dq in ("historical_proxy", "cached"):
-                icon = "📅 Historical Proxy" if dq == "historical_proxy" else "💾 Cached"
+                live_count += 1
             else:
-                icon = "⚠️ Fallback"
-                fallback_agents.append(agent_name.lower())
-            lines.append(f"• {agent_name}: {icon}")
-        elif result_key and (result_key.get("status") == "skipped" or result_key.get("execution_status") == "skipped"):
-            lines.append(f"• {agent_name}: ℹ️ Not required")
+                cached_count += 1
+                cached_names.append(agent_name.lower())
         elif result_key and (result_key.get("status") in ("error", "insufficient_data") or result_key.get("execution_status") == "failed" or result_key.get("data_status") == "unavailable"):
-            lines.append(f"• {agent_name}: ❌ Unavailable")
-            fallback_agents.append(agent_name.lower())
-    lines.append("• Geospatial: ✓ Computed")
+            unavail_count += 1
+
+    lines.append(f"**{p['data_status_intro']}**")
+    if unavail_count > 0 and live_count > 0:
+        lines.append("• Overall Data Status: **Partial Assessment** (some live feeds currently unavailable)")
+    elif cached_count > 0 and unavail_count == 0:
+        lines.append("• Overall Data Status: **Using Cached Data**")
+    elif live_count > 0 and unavail_count == 0:
+        lines.append("• Overall Data Status: **Live** (Open-Meteo, INCOIS, IMD)")
+    else:
+        lines.append("• Overall Data Status: **Live marine data unavailable**")
     lines.append("")
 
-    # ---- Fallback disclosure ----
-    if fallback_agents:
-        lines.append(p["fallback_note"].format(agents=", ".join(fallback_agents)))
+    if cached_names:
+        lines.append(p["fallback_note"].format(agents=", ".join(cached_names)))
         lines.append("")
 
     lines.append(p["disclaimer"])
+    return "\n".join(lines)
     return "\n".join(lines)
 
 
@@ -575,6 +580,8 @@ STRICT RULES:
 6. The response must be in the {lang} language.
 7. Data Quality: {dq_str}. You MUST mention if any data is fallback or historical proxy.
 8. For any factor breakdowns, use clean bullet points. DO NOT emit markdown table syntax (|...|).
+9. NEVER use internal pipeline/agent failure language (e.g. 'agent encountered an error', 'pipeline failed', 'node exception', or raw codes). If data is missing, state calmly: 'Live fishing-zone data is currently unavailable for this location' or 'Live marine weather data is currently unavailable'.
+10. Follow the answer hierarchy: Direct answer & assessment first, then key reasons, warnings, and supporting data.
 
 JSON Evidence:
 {evidence_str}

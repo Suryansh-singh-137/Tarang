@@ -10,6 +10,8 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { AlertsView } from "@/components/alerts/AlertsView";
 import { TracePanel } from "@/components/trace/TracePanel";
+import { FishingZonesView } from "@/components/pfz/FishingZonesView";
+import { TripPlannerView } from "@/components/trip/TripPlannerView";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 
 import {
@@ -449,11 +451,17 @@ export default function Home() {
         <div className="flex items-center gap-3 sm:gap-4 font-mono-data text-[11px]">
           <span className="hidden lg:inline text-[var(--ink-subtle)]">EST. 2024 / COASTAL SYSTEMS</span>
           <span className="hidden lg:inline text-[var(--border)]">|</span>
-          <span className="text-[var(--current)] font-medium">
-            {liveConditions
-              ? `${liveConditions.lat.toFixed(2)}°N, ${liveConditions.lon.toFixed(2)}°E`
-              : "21.14°N"}
-          </span>
+          <button
+            type="button"
+            onClick={() => requestBrowserLocation(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium hover:bg-[var(--foam)]/80 transition-colors border border-[var(--current)]/20 cursor-pointer"
+            title={userCoords ? "GPS active. Tap to refresh location." : "Tap to detect your current location"}
+          >
+            <span className="w-2 h-2 rounded-full bg-[var(--current)] animate-pulse" />
+            <span className="truncate max-w-[150px]">
+              📍 {locationStatus === "inland" ? "Delhi (Inland)" : liveConditions?.locationName || (userCoords ? `${userCoords.lat.toFixed(2)}°N, ${userCoords.lon.toFixed(2)}°E` : "Enable GPS")}
+            </span>
+          </button>
 
           {/* Switch to Landing Page button if in workspace */}
           {viewMode === "workspace" && (
@@ -616,18 +624,20 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input */}
+                {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input + GPS Button */}
                 <div className="p-3 sm:p-4 bg-[var(--surface)] border-t border-[var(--border)] shrink-0 z-10 shadow-xs pb-16 md:pb-4">
                   <ChatInput
                     onSendMessage={handleSendMessage}
                     isLoading={isLoading}
                     language={currentLanguage}
+                    onRequestLocation={() => requestBrowserLocation(true)}
+                    hasLocation={Boolean(userCoords)}
                   />
                 </div>
               </div>
             )}
 
-            {/* Destination 2: Marine Map (Full Width) */}
+            {/* Destination 2: Marine Map (PRD §20, §22) */}
             {activeTab === "map" && (
               <div className="flex-1 h-full overflow-hidden p-2 sm:p-4 pb-16 md:pb-4 bg-[var(--neutral)]">
                 <MarineMap
@@ -639,7 +649,33 @@ export default function Home() {
               </div>
             )}
 
-            {/* Destination 3: Hazard & Alerts View (Full Width) */}
+            {/* Destination 3: Fishing Zones (PRD §20, §27) */}
+            {activeTab === "pfz" && (
+              <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+                <FishingZonesView
+                  geoJson={mapGeoJson}
+                  locationName={activeLocationName}
+                  locationStatus={locationStatus}
+                  onNavigateToMap={() => setActiveTab("map")}
+                  language={currentLanguage}
+                />
+              </div>
+            )}
+
+            {/* Destination 4: Trip Planner (PRD §20, §28) */}
+            {activeTab === "trip" && (
+              <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+                <TripPlannerView
+                  liveConditions={liveConditions}
+                  currentRiskLabel={currentRiskLabel}
+                  locationStatus={locationStatus}
+                  onNavigateToChat={() => setActiveTab("chat")}
+                  language={currentLanguage}
+                />
+              </div>
+            )}
+
+            {/* Destination 5: Hazard & Alerts View (PRD §20, §29) */}
             {activeTab === "alerts" && (
               <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
                 <AlertsView
@@ -650,7 +686,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Destination 4: Reasoning Trace View (Full Width) */}
+            {/* Evidence & Sources (PRD §14, §43) */}
             {activeTab === "trace" && (
               <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
                 <TracePanel

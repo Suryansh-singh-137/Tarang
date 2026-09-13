@@ -210,24 +210,31 @@ def _fetch_open_meteo_marine(
         vis_slice = [v for v in visibilities[slice_start:slice_end] if v is not None]
         p_slice = [v for v in pressures[slice_start:slice_end] if v is not None]
 
-        if not wh_slice or not ws_slice:
-            logger.warning("[Weather] No valid data in requested time slice")
+        if not ws_slice:
+            logger.warning("[Weather] No valid wind/forecast data in requested time slice")
             return None
 
-        avg_wave_h = round(sum(wh_slice) / len(wh_slice), 2)
+        avg_wave_h = round(sum(wh_slice) / len(wh_slice), 2) if wh_slice else 0.0
         avg_wave_d = _average_circular(wd_slice) if wd_slice else 0.0
         avg_wind_ms = round(sum(ws_slice) / len(ws_slice), 2)
         avg_wind_kmh = round(avg_wind_ms * 3.6, 1)
         avg_wind_d = _average_circular(wdir_slice) if wdir_slice else 0.0
         avg_vis_km = round(sum(vis_slice) / len(vis_slice) / 1000, 1) if vis_slice else None
         avg_pressure = round(sum(p_slice) / len(p_slice), 1) if p_slice else None
+        sea_label = _sea_state(avg_wave_h) if wh_slice else "inland (n/a)"
 
         # Forecast valid time = first hour of slice
-        valid_time = marine_times[slice_start] + "Z" if slice_start < len(marine_times) else retrieved_at
+        valid_time = (
+            (marine_times[slice_start] + "Z")
+            if (marine_times and slice_start < len(marine_times))
+            else (forecast_times[slice_start] + "Z")
+            if (forecast_times and slice_start < len(forecast_times))
+            else retrieved_at
+        )
 
         logger.info(
             "[Weather] Retrieved: wave=%.2fm wind=%.1fkm/h sea=%s msl=%.1fhPa",
-            avg_wave_h, avg_wind_kmh, _sea_state(avg_wave_h), avg_pressure or 0.0,
+            avg_wave_h, avg_wind_kmh, sea_label, avg_pressure or 0.0,
         )
 
         return MarineConditions(
@@ -236,7 +243,7 @@ def _fetch_open_meteo_marine(
             wind_speed_ms=avg_wind_ms,
             wind_speed_kmh=avg_wind_kmh,
             wind_direction_deg=avg_wind_d,
-            sea_state=_sea_state(avg_wave_h),
+            sea_state=sea_label,
             sst_celsius=None,
             visibility_km=avg_vis_km,
             pressure_msl_hpa=avg_pressure,

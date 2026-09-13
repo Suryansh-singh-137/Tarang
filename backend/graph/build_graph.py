@@ -57,14 +57,26 @@ logger = logging.getLogger("tarang.graph")
 # ---------------------------------------------------------------------------
 
 def _skip(agent_name: str, state: ORCAState) -> dict:
+    resolved = state.get("resolved_location")
+    is_inland = bool(resolved and not resolved.get("coastal"))
+    reason = "INLAND_LOCATION" if is_inland else "NOT_REQUESTED"
+    summary = (
+        f"{agent_name} is not applicable for inland location."
+        if is_inland
+        else f"{agent_name} was not needed for this query type."
+    )
+
     result: AgentResult = {
         "agent_name": agent_name,
         "status": "skipped",
+        "execution_status": "skipped",
+        "reason": reason,
         "data": {},
         "source": "not invoked for this query",
-        "summary": f"{agent_name} was not needed for this query type.",
+        "summary": summary,
         "used_fallback": False,
         "data_quality": "live",   # skipped nodes don't affect data quality
+        "data_status": "not_applicable" if is_inland else "not_required",
         "timestamp": "",
         "error": None,
         "evidence": [],
@@ -288,10 +300,10 @@ def _status_validator_node(state: ORCAState) -> dict:
     """
     resolved = state.get("resolved_location")
 
-    # If location is inland or unresolved, clarification was successfully given
-    if not resolved or not resolved.get("coastal"):
+    # If location is completely unresolved, clarification was skipped/given
+    if not resolved:
         return {
-            "execution_status": "skipped" if not resolved else "success",
+            "execution_status": "skipped",
             "overall_data_status": "unavailable",
         }
 

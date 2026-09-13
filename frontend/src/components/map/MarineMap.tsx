@@ -33,7 +33,7 @@ export const MarineMap: React.FC<Props> = ({
   }, []);
 
   useEffect(() => {
-    if (!isMounted || !hasGeoData || !mapContainerRef.current) return;
+    if (!isMounted || !mapContainerRef.current) return;
 
     let L: any;
 
@@ -42,22 +42,23 @@ export const MarineMap: React.FC<Props> = ({
 
       if (!mapInstanceRef.current && mapContainerRef.current) {
         const map = L.map(mapContainerRef.current, {
-          center: [9.5, 78.8],
-          zoom: 7,
+          center: [10.5, 78.5],
+          zoom: 6,
           zoomControl: true,
           attributionControl: false,
         });
 
-        // CartoDB Positron / Voyage light tiles matching editorial theme
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        // Standard OpenStreetMap tiles (Reliable, keyless, zero watermarks)
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 18,
-          subdomains: "abcd",
+          subdomains: ["a", "b", "c"],
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         }).addTo(map);
 
         L.control
           .attribution({
             position: "bottomright",
-            prefix: '<span class="text-[9px] text-gray-500">Tarang Marine • INCOIS • CartoDB</span>',
+            prefix: '<span class="text-[9px] text-gray-500">Tarang Marine • INCOIS • OSM</span>',
           })
           .addTo(map);
 
@@ -66,7 +67,9 @@ export const MarineMap: React.FC<Props> = ({
         geoLayerGroupRef.current = layerGroup;
       }
 
-      renderFeatures(L);
+      if (hasGeoData) {
+        renderFeatures(L);
+      }
     };
 
     initMap();
@@ -77,11 +80,11 @@ export const MarineMap: React.FC<Props> = ({
         mapInstanceRef.current = null;
       }
     };
-  }, [isMounted, hasGeoData]);
+  }, [isMounted]);
 
   // Update features whenever geoJson or riskLabel changes
   useEffect(() => {
-    if (!mapInstanceRef.current || !hasGeoData) return;
+    if (!mapInstanceRef.current) return;
     import("leaflet").then((leafletModule) => {
       renderFeatures(leafletModule.default);
     });
@@ -240,30 +243,7 @@ export const MarineMap: React.FC<Props> = ({
     }
   };
 
-  // ── Pre-query state: serene, quiet coastal placeholder (Part 1C.1) ──
-  if (!hasGeoData) {
-    return (
-      <div
-        className={`relative bg-[var(--surface)] rounded-xl overflow-hidden border border-[var(--border)] p-6 flex flex-col items-center justify-center text-center shadow-2xs ${className}`}
-        aria-label="Marine chart placeholder"
-      >
-        <div className="w-24 h-24 mb-3 opacity-80 flex items-center justify-center">
-          <ShorelineCompass size={96} />
-        </div>
-        <div className="font-serif-display text-base font-normal text-[var(--ink)] mb-1">
-          Marine Chart
-        </div>
-        <p className="font-sans text-xs text-[var(--ink-muted)] max-w-[260px] leading-relaxed">
-          Ask about conditions or select a coastal location to plot live PFZ boundaries and marine charts.
-        </p>
-        <div className="mt-4 font-mono-data text-[10px] text-[var(--ink-subtle)] bg-[var(--surface-muted)] px-3 py-1 rounded-full border border-[var(--border)]">
-          INCOIS · GDACS · OPEN-METEO
-        </div>
-      </div>
-    );
-  }
-
-  // ── Active GeoJSON chart state ──
+  // ── Active chart state ──
   return (
     <div className={`relative bg-[#E2ECEE] rounded-xl overflow-hidden border border-[var(--border)] shadow-xs flex flex-col ${className}`}>
       {/* Map Control Toolbar */}
@@ -276,23 +256,29 @@ export const MarineMap: React.FC<Props> = ({
         <div className="h-3.5 w-px bg-[var(--border)]" />
 
         {/* Dynamic badges */}
-        <div className="flex items-center gap-2 text-[11px] text-[var(--ink-muted)]">
-          {featuresCount.query && (
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-[var(--current)]" /> Query Point
-            </span>
-          )}
-          {featuresCount.pfz > 0 && (
-            <span className="flex items-center gap-1 font-medium text-[#1B8755]">
-              <Fish className="w-3 h-3" /> {featuresCount.pfz} PFZ
-            </span>
-          )}
-          {featuresCount.imbl && (
-            <span className="flex items-center gap-1 font-medium text-[#DC2626]">
-              <AlertTriangle className="w-3 h-3" /> IMBL Line
-            </span>
-          )}
-        </div>
+        {!hasGeoData ? (
+          <span className="text-[11px] text-[var(--ink-muted)]">
+            📍 Coastal Waters Overview
+          </span>
+        ) : (
+          <div className="flex items-center gap-2 text-[11px] text-[var(--ink-muted)]">
+            {featuresCount.query && (
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-[var(--current)]" /> Query Point
+              </span>
+            )}
+            {featuresCount.pfz > 0 && (
+              <span className="flex items-center gap-1 font-medium text-[#1B8755]">
+                <Fish className="w-3 h-3" /> {featuresCount.pfz} PFZ
+              </span>
+            )}
+            {featuresCount.imbl && (
+              <span className="flex items-center gap-1 font-medium text-[#DC2626]">
+                <AlertTriangle className="w-3 h-3" /> IMBL Line
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Action buttons: Info / Legend Toggle + Recenter (Part 1C.1) */}

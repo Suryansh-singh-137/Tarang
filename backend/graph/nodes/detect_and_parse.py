@@ -402,7 +402,6 @@ def _get_relative_missing_clarification_text(lang: str) -> str:
 
 
 def _get_inland_clarification_text(
-
     lang: str,
     loc_name: Optional[str] = None,
     lat: Optional[float] = None,
@@ -410,93 +409,44 @@ def _get_inland_clarification_text(
     dist_km: Optional[float] = None,
 ) -> str:
     """
-    Return user-facing clarification prompt when location is determined to be inland.
-    Replaces generic placeholder names with actual coordinates and real distance to coast.
+    Return user-facing clarification prompt when location is inland (PRD §9, §35).
     """
-    # If distance was not passed but coords are available, compute it
     if dist_km is None and lat is not None and lon is not None:
         dist_km = distance_to_nearest_coast_km(lat, lon)
 
-    is_placeholder = (
-        not loc_name
-        or loc_name.lower() in ("your coastal location", "current location", "unknown", "inland", "target location")
-        or loc_name.startswith("Location (")
-    )
-    dist_rounded = f"{round(dist_km / 10) * 10:.0f}" if dist_km is not None else None
+    dist_str = f"~{round(dist_km / 10) * 10:.0f}" if dist_km is not None else "~300+"
+    display_name = loc_name if loc_name and not loc_name.startswith("Location (") else "your current location"
 
-    # Case A: We have latitude & longitude (e.g. browser geolocation)
-    if lat is not None and lon is not None:
-        coord_str = f"{lat:.2f}°N, {lon:.2f}°E"
-        if dist_rounded:
-            if lang == "hi":
-                return (
-                    f"आप {coord_str} के पास हैं — निकटतम समुद्र तट से लगभग {dist_rounded} किमी दूर। "
-                    f"यह एक अंतर्देशीय (गैर-तटीय) स्थान है। "
-                    f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
-                    f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
-                )
-            elif lang == "ta":
-                return (
-                    f"நீங்கள் {coord_str} அருகில் உள்ளீர்கள் — அருகிலுள்ள கடற்கரையில் இருந்து சுமார் {dist_rounded} கி.மீ தொலைவில் உள்ளீர்கள். "
-                    f"இது கடற்கரை இல்லாத உள்நாட்டு பகுதியாகும். "
-                    f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், "
-                    f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
-                )
-            else:
-                return (
-                    f"You're near {coord_str} — about {dist_rounded}km from the nearest coast. "
-                    f"This isn't a coastal location. Please provide an Indian coastal location "
-                    f"(e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you."
-                )
-        else:
-            if lang == "hi":
-                return (
-                    f"आप {coord_str} के पास हैं, जो एक अंतर्देशीय (गैर-तटीय) स्थान है। "
-                    f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
-                    f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
-                )
-            elif lang == "ta":
-                return (
-                    f"நீங்கள் {coord_str} அருகில் உள்ளீர்கள், இது கடற்கரை இல்லாத உள்நாட்டு பகுதியாகும். "
-                    f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, मुंबई) குறிப்பிடவும், "
-                    f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
-                )
-            else:
-                return (
-                    f"You're near {coord_str}, which appears to be inland. "
-                    f"Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
-                    f"and I will retrieve marine and safety information for you."
-                )
-
-    # Case B: Named location from query text (e.g. "Delhi", "Bengaluru", "Jaipur")
-    name_display = loc_name if not is_placeholder else "This location"
-    if dist_rounded:
-        if lang == "hi":
-            return (
-                f"स्थान '{name_display}' अंतर्देशीय है (समुद्र तट से लगभग {dist_rounded} किमी दूर)। "
-                f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
-                f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
-            )
-        elif lang == "ta":
-            return (
-                f"'{name_display}' பகுதி ஒரு உள்நாட்டு பகுதியாகும் (கடற்கரையில் இருந்து சுமார் {dist_rounded} கி.மீ தூரம்). "
-                f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், "
-                f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
-            )
-        else:
-            return (
-                f"The location '{name_display}' is inland (about {dist_rounded}km from the coast). "
-                f"Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
-                f"and I will retrieve marine and safety information for you."
-            )
-
-    # Generic fallback
     if lang == "hi":
-        return f"'{name_display}' एक अंतर्देशीय (गैर-तटीय) स्थान प्रतीत होता है। कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### मत्स्य पालन आकलन (Fishing Assessment)\n\n"
+            f"आपकी वर्तमान स्थिति अंतर्देशीय है, इसलिए यहाँ समुद्री मत्स्य क्षेत्र और ज्वार की स्थिति लागू नहीं होती है।\n\n"
+            f"• **निकटतम समुद्र तट**: {dist_str} किमी\n"
+            f"• **मत्स्य क्षेत्र (PFZ)**: इस स्थान पर लागू नहीं\n"
+            f"• **ज्वार-भाटा (Tides)**: इस स्थान पर लागू नहीं\n\n"
+            f"मत्स्य पालन की स्थिति जांचने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, थूथुकुडी) का चयन करें।"
+        )
     elif lang == "ta":
-        return f"'{name_display}' கடற்கரை இல்லாத உள்நாட்டு பகுதியாக தெரிகிறது. தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### மீன்பிடி மதிப்பீடு (Fishing Assessment)\n\n"
+            f"உங்கள் தற்போதைய இருப்பிடம் உள்நாட்டுப் பகுதியாகும், எனவே அருகிலுள்ள கடல் மீன்பிடி மண்டலங்கள் மற்றும் அலை நிலைகள் இங்கு பொருந்தாது.\n\n"
+            f"• **அருகிலுள்ள கடற்கரை**: {dist_str} கி.மீ\n"
+            f"• **மீன்பிடி மண்டலங்கள்**: இந்த இடத்தில் பொருந்தாது\n"
+            f"• **கடல் அலைகள் (Tides)**: இந்த இடத்தில் பொருந்தாது\n\n"
+            f"மீன்பிடி நிலைமைகளை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, தூத்துக்குடி) தேர்வு செய்யவும்."
+        )
     else:
-        return f"The location '{name_display}' appears to be inland. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you."
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### Fishing Assessment\n\n"
+            f"Marine fishing conditions aren't applicable to your current inland location.\n\n"
+            f"• **Nearest coastline**: {dist_str} km\n"
+            f"• **Fishing zones**: Not applicable at this location\n"
+            f"• **Tides**: Not applicable at this location\n\n"
+            f"Choose a coastal location (such as Kochi, Mumbai, or Thoothukudi) to check fishing conditions."
+        )
 
 
 def detect_and_parse(state: ORCAState) -> dict:
@@ -621,44 +571,93 @@ def detect_and_parse(state: ORCAState) -> dict:
             "parse_method": "rule_based_fallback",
         }
 
-    # 8. Early-Exit Case C: Inland Location Flagged by Coastal Check
+    # 8. Applicability Check (PRD §4–§9)
+    from location.applicability import check_applicability
+    app_res = check_applicability(resolved, raw)
+
     if not resolved["coastal"]:
         dist_km = resolved.get("nearest_coast_km")
-        inland_text = _get_inland_clarification_text(
-            detected_lang,
-            resolved["name"],
-            resolved["lat"],
-            resolved["lon"],
-            dist_km,
-        )
-        inland_intent: ParsedIntent = {
-            "location_name": resolved["name"],
-            "lat": resolved["lat"],
-            "lon": resolved["lon"],
-            "time_window": time_window,
-            "time_start_utc": "",
-            "time_end_utc": "",
-            "query_type": query_type,
-            "needs_weather": False,
-            "needs_pfz": False,
-            "needs_hazard": False,
-            "needs_geofence": False,
-            "needs_risk": False,
-            "needs_ocean": False,
-            "location_status": "inland",
-            "distance_to_coast_km": dist_km,
-        }
-        return {
-            "detected_language": detected_lang,
-            "parsed_intent": inland_intent,
-            "device_location": device_loc,
-            "query_location": q_loc,
-            "resolved_location": resolved,
-            "location_mode": mode,
-            "changed_fields": [],
-            "final_answer_text": inland_text,
-            "parse_method": "rule_based_fallback",
-        }
+
+        # PRD §8: If user specifically asked for weather inland ("What's the weather here in Delhi?")
+        # Weather agent MUST run!
+        raw_lower = raw.lower()
+        is_explicit_weather = (
+            query_type in ("weather_only", "weather")
+            or any(w in raw_lower for w in ["weather", "mausam", "வானிலை", "temperature", "wind"])
+        ) and not any(w in raw_lower for w in ["fish", "machli", "zone", "pfz", "tide", "jwar", "மீன்"])
+
+        if is_explicit_weather:
+            # Allow weather agent to run for inland location!
+            inland_intent: ParsedIntent = ParsedIntent(
+                location_name=resolved["name"],
+                lat=resolved["lat"],
+                lon=resolved["lon"],
+                time_window=time_window,
+                time_start_utc=time_start_utc,
+                time_end_utc=time_end_utc,
+                query_type="weather_only",
+                needs_weather=True,
+                needs_pfz=False,
+                needs_hazard=False,
+                needs_geofence=False,
+                needs_risk=False,
+                needs_ocean=False,
+                location_status="inland",
+                distance_to_coast_km=dist_km,
+            )
+            changed_fields = _compute_changed_fields(inland_intent, last_intent)
+            new_history = (conversation_history + [{"role": "user", "content": raw}])[
+                -config.MAX_CONVERSATION_TURNS:
+            ]
+            return {
+                "detected_language": detected_lang,
+                "parsed_intent": inland_intent,
+                "device_location": device_loc,
+                "query_location": q_loc,
+                "resolved_location": resolved,
+                "location_mode": mode,
+                "changed_fields": changed_fields,
+                "conversation_history": new_history,
+                "last_parsed_intent": inland_intent,
+                "parse_method": "rule_based_fallback",
+            }
+        else:
+            # User asked about marine fishing / trip / ocean at an inland location (PRD §9, §35, §54)
+            inland_text = _get_inland_clarification_text(
+                detected_lang,
+                resolved["name"],
+                resolved["lat"],
+                resolved["lon"],
+                dist_km,
+            )
+            inland_intent: ParsedIntent = {
+                "location_name": resolved["name"],
+                "lat": resolved["lat"],
+                "lon": resolved["lon"],
+                "time_window": time_window,
+                "time_start_utc": "",
+                "time_end_utc": "",
+                "query_type": query_type,
+                "needs_weather": False,
+                "needs_pfz": False,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+                "location_status": "inland",
+                "distance_to_coast_km": dist_km,
+            }
+            return {
+                "detected_language": detected_lang,
+                "parsed_intent": inland_intent,
+                "device_location": device_loc,
+                "query_location": q_loc,
+                "resolved_location": resolved,
+                "location_mode": mode,
+                "changed_fields": [],
+                "final_answer_text": inland_text,
+                "parse_method": "rule_based_fallback",
+            }
 
     # 9. Case D: Coastal Location Verified
     loc_name = resolved["name"]

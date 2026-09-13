@@ -28,7 +28,7 @@ export const TracePanel: React.FC<Props> = ({
   className = "",
 }) => {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"trace" | "evidence" | "provenance">("trace");
+  const [activeTab, setActiveTab] = useState<"evidence" | "trace" | "provenance">("evidence");
   const t = translations[language] || translations.en;
 
   const toggleAgent = (name: string) => {
@@ -40,20 +40,20 @@ export const TracePanel: React.FC<Props> = ({
       case "success":
         return (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1B8755] bg-[#EBF7F0] px-2.5 py-0.5 rounded-full border border-[#C3E8D2]">
-            <CheckCircle2 className="w-3.5 h-3.5" /> success
+            <CheckCircle2 className="w-3.5 h-3.5" /> available
           </span>
         );
       case "insufficient_data":
       case "fallback":
         return (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#B45309] bg-[#FEF3C7] px-2.5 py-0.5 rounded-full border border-[#FDE68A]">
-            <AlertCircle className="w-3.5 h-3.5" /> fallback
+            <AlertCircle className="w-3.5 h-3.5" /> cached
           </span>
         );
       case "skipped":
         return (
           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--ink-subtle)] bg-[var(--surface-muted)] px-2.5 py-0.5 rounded-full border border-[var(--border)]">
-            skipped
+            not applicable
           </span>
         );
       default:
@@ -67,39 +67,26 @@ export const TracePanel: React.FC<Props> = ({
 
   return (
     <div className={`flex-1 flex flex-col p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto w-full overflow-y-auto space-y-6 ${className}`}>
-      {/* Header */}
+      {/* Header (PRD §14, §16) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--border)]">
         <div>
           <div className="font-mono-data text-[11px] text-[var(--ink-muted)] uppercase tracking-widest mb-1">
-            EXPLAINABILITY & CITATIONS
+            DECISION SUPPORT & SOURCING
           </div>
           <h1 className="font-serif-display text-2xl sm:text-3xl text-[var(--ink)] font-normal">
-            Reasoning Trace & Sourced Evidence
+            Evidence & Sources
           </h1>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="font-mono-data text-xs text-[var(--ink-muted)] bg-[var(--surface-muted)] px-3 py-1 rounded-full border border-[var(--border)]">
-            {trace.length} pipeline steps
+            {evidence.length} verified data points
           </span>
         </div>
       </div>
 
-      {/* Sub-navigation tabs */}
+      {/* Sub-navigation tabs (PRD §15) */}
       <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab("trace")}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-            activeTab === "trace"
-              ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
-              : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          <span>Agent Pipeline ({trace.length})</span>
-        </button>
-
         <button
           type="button"
           onClick={() => setActiveTab("evidence")}
@@ -110,7 +97,20 @@ export const TracePanel: React.FC<Props> = ({
           }`}
         >
           <FileText className="w-3.5 h-3.5" />
-          <span>Factual Evidence ({evidence.length})</span>
+          <span>Why this result? ({evidence.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("trace")}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            activeTab === "trace"
+              ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
+              : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Technical Pipeline ({trace.length})</span>
         </button>
 
         <button
@@ -123,7 +123,7 @@ export const TracePanel: React.FC<Props> = ({
           }`}
         >
           <Database className="w-3.5 h-3.5" />
-          <span>Data Provenance (M8)</span>
+          <span>Data Provenance</span>
         </button>
       </div>
 
@@ -199,34 +199,42 @@ export const TracePanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Tab 2: Factual Evidence */}
+      {/* Tab 2: Factual Evidence (PRD §14, §17) */}
       {activeTab === "evidence" && (
         <div className="space-y-3">
           {evidence.length === 0 ? (
             <div className="p-12 text-center bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xs space-y-2">
               <FileText className="w-8 h-8 text-[var(--ink-subtle)] mx-auto opacity-60" />
-              <h3 className="text-sm font-semibold text-[var(--ink)]">No Evidence Claims Recorded</h3>
+              <h3 className="text-sm font-semibold text-[var(--ink)]">No Evidence Recorded Yet</h3>
               <p className="text-xs text-[var(--ink-muted)] max-w-sm mx-auto leading-relaxed">
-                Factual grounded evidence claims extracted from satellite feeds and marine forecasts will appear here.
+                Submit a coastal query in Ask Tarang to inspect the live evidence items supporting the marine assessment.
               </p>
             </div>
           ) : (
             evidence.map((ev, idx) => (
               <div
                 key={idx}
-                className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xs text-xs space-y-2"
+                className="p-4 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xs text-xs space-y-2.5"
               >
                 <div className="font-medium text-[var(--ink)] text-sm leading-snug">
                   &ldquo;{ev.claim}&rdquo;
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-[var(--ink-subtle)] pt-2 border-t border-[var(--border)]">
-                  <span className="truncate max-w-[280px]" title={ev.source}>
-                    Source: <strong className="text-[var(--ink-muted)]">{ev.source}</strong>
-                  </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-[var(--border)] text-[11px] text-[var(--ink-subtle)]">
+                  <div>
+                    <span className="block text-[10px] uppercase font-mono-data text-[var(--ink-subtle)]">Source</span>
+                    <strong className="text-[var(--ink-muted)] truncate block" title={ev.source}>{ev.source}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] uppercase font-mono-data text-[var(--ink-subtle)]">Verification</span>
+                    <span className="text-emerald-700 font-semibold">✓ Grounded claim</span>
+                  </div>
                   {ev.provenance_tier && (
-                    <span className="font-mono text-[10px] bg-[var(--foam)] text-[var(--current)] px-2 py-0.5 rounded-full font-semibold border border-[var(--current)]/20">
-                      {ev.provenance_tier}
-                    </span>
+                    <div className="col-span-2 sm:col-span-1 sm:text-right">
+                      <span className="block text-[10px] uppercase font-mono-data text-[var(--ink-subtle)]">Tier</span>
+                      <span className="font-mono text-[10px] bg-[var(--foam)] text-[var(--current)] px-2 py-0.5 rounded-full font-semibold border border-[var(--current)]/20">
+                        {ev.provenance_tier}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>

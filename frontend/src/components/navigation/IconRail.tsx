@@ -1,7 +1,7 @@
 import React from "react";
-import { MessageSquare, Map as MapIcon, AlertTriangle, Compass } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Fish, Compass, AlertTriangle } from "lucide-react";
 
-export type ActiveTab = "chat" | "map" | "alerts" | "trace";
+export type ActiveTab = "chat" | "map" | "pfz" | "trip" | "alerts" | "trace";
 
 interface Props {
   activeTab: ActiveTab;
@@ -31,29 +31,32 @@ export const IconRail: React.FC<Props> = ({
   const items: NavItem[] = [
     {
       id: "chat",
-      label: "Chat",
+      label: "Ask Tarang",
       icon: MessageSquare,
     },
     {
       id: "map",
-      label: "Marine Chart",
+      label: "Marine Map",
       icon: MapIcon,
       hasIndicator: hasMapData,
       indicatorColor: "bg-[var(--current)]",
     },
     {
+      id: "pfz",
+      label: "Fishing Zones",
+      icon: Fish,
+    },
+    {
+      id: "trip",
+      label: "Trip Planner",
+      icon: Compass,
+    },
+    {
       id: "alerts",
-      label: "Hazard & Alerts",
+      label: "Safety & Alerts",
       icon: AlertTriangle,
       hasIndicator: hasActiveAlert,
       indicatorColor: "bg-[#D97706] animate-pulse",
-    },
-    {
-      id: "trace",
-      label: "Reasoning Trace",
-      icon: Compass,
-      hasIndicator: hasTraceData,
-      indicatorColor: "bg-[var(--ink-muted)]",
     },
   ];
 

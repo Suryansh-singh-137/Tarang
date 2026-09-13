@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Mic, Send, Square, Loader2, AlertCircle } from "lucide-react";
+import { Mic, Send, Square, Loader2, AlertCircle, LocateFixed } from "lucide-react";
 import { LanguageCode } from "@/lib/types";
 import { translations } from "@/lib/i18n";
 import { transcribeAudio } from "@/lib/api";
@@ -10,6 +10,8 @@ interface Props {
   language: LanguageCode;
   className?: string;
   initialValue?: string;
+  onRequestLocation?: () => void;
+  hasLocation?: boolean;
 }
 
 export const ChatInput: React.FC<Props> = ({
@@ -18,6 +20,8 @@ export const ChatInput: React.FC<Props> = ({
   language,
   className = "",
   initialValue = "",
+  onRequestLocation,
+  hasLocation = false,
 }) => {
   const [inputText, setInputText] = useState(initialValue);
   const [isRecording, setIsRecording] = useState(false);
@@ -172,6 +176,24 @@ export const ChatInput: React.FC<Props> = ({
             </span>
           )}
         </button>
+
+        {/* Dedicated GPS / Locate Button (Part of V2.2 & Direct User Request) */}
+        {onRequestLocation && (
+          <button
+            type="button"
+            onClick={onRequestLocation}
+            disabled={isLoading || isTranscribing}
+            className={`shrink-0 w-12 h-12 min-w-[48px] min-h-[48px] rounded-full flex items-center justify-center transition-all cursor-pointer border shadow-xs ${
+              hasLocation
+                ? "bg-[var(--foam)] border-[var(--current)]/40 text-[var(--current)] hover:bg-[var(--foam)]/80"
+                : "bg-[var(--surface)] border-[var(--border)] text-[var(--ink-muted)] hover:text-[var(--current)] hover:border-[var(--current)]/50"
+            }`}
+            title={hasLocation ? "GPS Location Active • Tap to refresh" : "Tap to detect your current location"}
+            aria-label="Get current location"
+          >
+            <LocateFixed className={`w-5 h-5 ${hasLocation ? "stroke-[2.2]" : "stroke-[1.8]"}`} />
+          </button>
+        )}
 
         {/* Text Input Container (Generous 48px height for outdoor touch target) */}
         <div className="relative flex-1 flex items-center">

@@ -155,8 +155,8 @@ def weather_agent(state: ORCAState) -> dict:
     Strictly consumes state.resolved_location and enforces V2.1 contract.
     """
     resolved = state.get("resolved_location")
-    if not resolved or not resolved.get("coastal"):
-        logger.info("[Weather] Skipped: resolved_location is missing or non-coastal")
+    if not resolved:
+        logger.info("[Weather] Skipped: resolved_location is missing")
         result: AgentResult = {
             "agent_name": "weather_agent",
             "status": "skipped",
@@ -166,7 +166,7 @@ def weather_agent(state: ORCAState) -> dict:
             "observed_at": None,
             "data": {},
             "source": "Open-Meteo Marine + Forecast",
-            "summary": "Weather assessment skipped: location is not a verified coastal zone.",
+            "summary": "Weather assessment skipped: location is unresolved.",
             "used_fallback": False,
             "data_quality": "unavailable",
             "timestamp": "",
