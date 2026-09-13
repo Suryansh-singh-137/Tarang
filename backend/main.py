@@ -17,12 +17,14 @@ import json
 import logging
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+import groq
 
 import config
+from tools import sarvam_tts_client
 from graph.build_graph import graph
 from graph.state import ORCAState
 
@@ -64,6 +66,10 @@ class QueryRequest(BaseModel):
     conversation: list[dict] = []             # [{"role": "user"|"assistant", "content": "..."}]
     last_parsed_intent: dict | None = None    # ParsedIntent from previous turn
     last_results: dict[str, dict] = {}       # {agent_name: AgentResult} from previous turn
+
+class SpeakRequest(BaseModel):
+    text: str
+    language: str
 
 
 # ---------------------------------------------------------------------------
@@ -285,3 +291,56 @@ async def query_endpoint(body: QueryRequest, request: Request):
             }
 
     return EventSourceResponse(event_generator())
+
+# ---------------------------------------------------------------------------
+# Voice Endpoints (Milestone 7)
+# ---------------------------------------------------------------------------
+
+@app.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...)):
+    """
+    Speech-to-Text via Groq Whisper.
+    Returns: {"transcript": "...", "detected_language_whisper": "...", "duration_seconds": float}
+    """
+    if not config.GROQ_API_KEY:
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY not configured for transcription.")
+        
+    try:
+        # Read the uploaded audio
+        audio_bytes = await audio.read()
+        
+        # We need a file-like object with a name for the Groq client
+        file_tuple = (audio.filename, audio_bytes, audio.content_type)
+        
+        client = groq.Groq(api_key=config.GROQ_API_KEY, timeout=8.0)
+        
+        # Whisper auto-detects language if not provided
+        transcription = client.audio.transcriptions.create(
+            file=file_tuple,
+            model="whisper-large-v3-turbo",
+            response_format="verbose_json"
+        )
+        
+        # The Groq verbose_json format gives duration and language
+        return {
+            "transcript": transcription.text,
+            "detected_language_whisper": getattr(transcription, "language", "unknown"),
+            "duration_seconds": getattr(transcription, "duration", 0.0)
+        }
+    except Exception as exc:
+        logger.error(f"Transcription failed: {exc}")
+        raise HTTPException(status_code=500, detail="Transcription failed. Please try again or type your question.")
+
+
+@app.post("/speak")
+def speak(body: SpeakRequest):
+    """
+    Text-to-Speech via Sarvam AI.
+    Returns streaming audio/wav bytes.
+    """
+    audio_bytes = sarvam_tts_client.synthesize_speech(body.text, body.language)
+    
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="Failed to synthesize speech.")
+        
+    return Response(content=audio_bytes, media_type="audio/wav")

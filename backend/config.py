@@ -37,6 +37,9 @@ GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"
 GROQ_MODEL_QUALITY: str = "llama-3.3-70b-versatile"
 
+# Sarvam TTS configuration (Milestone 7)
+SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")
+
 # ---------------------------------------------------------------------------
 # HTTP client settings
 # ---------------------------------------------------------------------------

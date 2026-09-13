@@ -10,3 +10,4 @@ geopandas
 httpx
 sse-starlette
 cachetools
+python-multipart
