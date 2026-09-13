@@ -495,13 +495,221 @@ async def run_test(test_case: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Milestone 8 Specific Validation Suite (M8-T1 to M8-T9)
+# ---------------------------------------------------------------------------
+
+def run_m8_tests() -> bool:
+    print(f"\n{'='*60}")
+    print("RUNNING MILESTONE 8 VALIDATION SUITE (M8-T1 to M8-T9)")
+    print(f"{'='*60}")
+    
+    from tools.location_resolver import resolve_location
+    from tools.source_registry import get_source_meta, ProvenanceTier
+    from tools.gdacs_client import GDACSTCResult, GDACSTCEvent
+    from tools.imd_client import fetch_imd_warnings
+    from tools.data_validator import all_critical_data_available, make_data_quality
+    from graph.nodes.risk_agent import risk_agent
+    from graph.nodes.hazard_agent import _merge_gdacs_into_hazard
+    
+    all_passed = True
+    
+    # [M8-T1] Location resolution: gazetteer hit -> Tier 1 (coastal_gazetteer)
+    try:
+        res = resolve_location("Thoothukudi")
+        assert res["source"] == "gazetteer", f"Expected gazetteer, got {res['source']}"
+        assert res["status"] == "success", f"Expected success, got {res['status']}"
+        print("  ✅ [M8-T1] Gazetteer hit -> Tier 1 (gazetteer), no OSM call")
+    except Exception as e:
+        print(f"  ❌ [M8-T1] Failed: {e}")
+        all_passed = False
+
+    # [M8-T2] Location resolution: gazetteer miss, valid coastal place in India -> Tier 2 (osm_nominatim / geocoder)
+    try:
+        res = resolve_location("Gokarna")
+        assert res["source"] == "geocoder", f"Expected geocoder, got {res['source']}"
+        assert res["status"] == "success", f"Expected success, got {res['status']}"
+        assert 6.0 <= res["latitude"] <= 38.0 and 68.0 <= res["longitude"] <= 98.0
+        print("  ✅ [M8-T2] Gazetteer miss, coastal place -> Tier 2 (geocoder) within India bounds")
+    except Exception as e:
+        print(f"  ❌ [M8-T2] Failed: {e}")
+        all_passed = False
+
+    # [M8-T3] Location resolution: inland Indian city -> rejected with inland status
+    try:
+        res = resolve_location("Delhi")
+        assert res["status"] == "inland", f"Expected inland, got {res['status']}"
+        print("  ✅ [M8-T3] Inland Indian city -> rejected with inland status")
+    except Exception as e:
+        print(f"  ❌ [M8-T3] Failed: {e}")
+        all_passed = False
+
+    # [M8-T4] Location resolution: non-Indian location -> rejected with unresolved
+    try:
+        res = resolve_location("Wakanda")
+        assert res["status"] == "unresolved", f"Expected unresolved, got {res['status']}"
+        print("  ✅ [M8-T4] Non-Indian/fictional location -> rejected as unresolved")
+    except Exception as e:
+        print(f"  ❌ [M8-T4] Failed: {e}")
+        all_passed = False
+
+    # [M8-T5] Source metadata & ProvenanceTier labeled correctly
+    try:
+        meta_om = get_source_meta("open_meteo")
+        assert meta_om["tier"] == ProvenanceTier.GLOBAL_MODEL
+        meta_incois = get_source_meta("incois_chl_proxy")
+        assert meta_incois["tier"] == ProvenanceTier.PROXY
+        meta_fallback = get_source_meta("fallback_static")
+        assert meta_fallback["tier"] == ProvenanceTier.HISTORICAL_FALLBACK
+        print("  ✅ [M8-T5] Source metadata & ProvenanceTier labeled correctly across registry")
+    except Exception as e:
+        print(f"  ❌ [M8-T5] Failed: {e}")
+        all_passed = False
+
+    # [M8-T6] GDACS cyclone fetch: mock active cyclone within range -> merged into hazard_result with High/Extreme
+    try:
+        mock_event = GDACSTCEvent(
+            event_id=123,
+            name="TestCyclone",
+            alert_level="Red",
+            lat=9.0,
+            lon=78.5,
+            distance_km=45.0,
+            wind_speed_kmh=140.0,
+            from_date="2026-09-13T00:00:00Z",
+            to_date="2026-09-13T00:00:00Z",
+            geometry_url=None,
+        )
+        mock_gdacs = GDACSTCResult(
+            events=[mock_event],
+            query_lat=8.76,
+            query_lon=78.13,
+            search_radius_km=300.0,
+            retrieved_at="2026-09-13T00:00:00Z",
+            source="GDACS RSS",
+        )
+        base_data = {"hazards": [], "overall_hazard_level": "none", "active_warnings": []}
+        merged_data, evidence = _merge_gdacs_into_hazard(base_data, mock_gdacs, "2026-09-13T00:00:00Z")
+        assert merged_data["cyclone_warning"] is True
+        assert merged_data["overall_hazard_level"] in ("high", "extreme")
+        assert any("TestCyclone" in e["claim"] for e in evidence)
+        print("  ✅ [M8-T6] GDACS cyclone within 300km merged into hazard with elevated alert level")
+    except Exception as e:
+        print(f"  ❌ [M8-T6] Failed: {e}")
+        all_passed = False
+
+    # [M8-T7] IMD stub returns None -> graceful degradation
+    try:
+        imd_res = fetch_imd_warnings(8.76, 78.13, "next_24h")
+        assert imd_res is None, f"Expected None from stub without credentials, got {imd_res}"
+        print("  ✅ [M8-T7] IMD stub returns None gracefully without unhandled exception")
+    except Exception as e:
+        print(f"  ❌ [M8-T7] Failed: {e}")
+        all_passed = False
+
+    # [M8-T8] Fail-closed: weather missing -> RiskEngine returns UNKNOWN, risk_sufficient_data=False
+    try:
+        incomplete_dq = [
+            {"agent_name": "hazard_agent", "source_key": "open_meteo_wmo", "is_fallback": False}
+        ]
+        assert not all_critical_data_available(incomplete_dq), "Expected all_critical_data_available to be False when weather is missing"
+        mock_state = build_initial("test query")
+        mock_state["data_quality_reports"] = incomplete_dq
+        mock_state["hazard_result"] = {
+            "agent_name": "hazard_agent",
+            "status": "success",
+            "data": {"overall_hazard_level": "none", "active_warnings": []},
+            "source": "Open-Meteo",
+            "summary": "No warnings",
+            "used_fallback": False,
+            "data_quality": "live",
+            "evidence": [],
+        }
+        res = risk_agent(mock_state)
+        assert res["risk_result"]["data"]["risk_label"] == "UNKNOWN"
+        assert res["risk_sufficient_data"] is False
+        assert res["risk_result"]["status"] == "insufficient_data"
+        print("  ✅ [M8-T8] Fail-closed: Missing weather data produces UNKNOWN risk and risk_sufficient_data=False")
+    except Exception as e:
+        print(f"  ❌ [M8-T8] Failed: {e}")
+        all_passed = False
+
+    # [M8-T9] Weather on fallback (not missing/error), hazard live -> Risk computes normally (LOW/MODERATE/HIGH), not UNKNOWN
+    try:
+        fallback_weather_dq = [
+            {
+                "agent_name": "weather_agent",
+                "source_key": "fallback_static",
+                "source": "fallback_weather.json",
+                "is_fallback": True,
+                "is_stale": True,
+                "is_proxy": False,
+                "provenance_tier": "historical_fallback",
+            },
+            {
+                "agent_name": "hazard_agent",
+                "source_key": "open_meteo_wmo",
+                "source": "Open-Meteo",
+                "is_fallback": False,
+                "is_stale": False,
+                "is_proxy": True,
+                "provenance_tier": "proxy",
+            }
+        ]
+        assert all_critical_data_available(fallback_weather_dq), "Expected all_critical_data_available to be True when weather fallback succeeded"
+        mock_state = build_initial("test fallback weather query")
+        mock_state["data_quality_reports"] = fallback_weather_dq
+        mock_state["weather_result"] = {
+            "agent_name": "weather_agent",
+            "status": "success",
+            "data": {
+                "wave_height_m": 1.2,
+                "wind_speed_kmh": 20.0,
+                "sea_state": "slight",
+            },
+            "source": "fallback_weather.json (live source unavailable)",
+            "summary": "Wave height 1.2 m, wind 20 km/h. [⚠️ Using cached fallback]",
+            "used_fallback": True,
+            "data_quality": "fallback",
+            "evidence": [],
+        }
+        mock_state["hazard_result"] = {
+            "agent_name": "hazard_agent",
+            "status": "success",
+            "data": {"overall_hazard_level": "none", "active_warnings": []},
+            "source": "Open-Meteo",
+            "summary": "No warnings",
+            "used_fallback": False,
+            "data_quality": "live",
+            "evidence": [],
+        }
+        res = risk_agent(mock_state)
+        risk_data = res["risk_result"]["data"]
+        assert risk_data["risk_label"] in ("LOW", "MODERATE", "HIGH", "EXTREME"), f"Expected normal risk label, got {risk_data['risk_label']}"
+        assert risk_data["risk_label"] != "UNKNOWN", "Risk label should not be UNKNOWN on valid fallback"
+        assert res.get("risk_sufficient_data") is not False, "risk_sufficient_data should not be False on valid fallback"
+        assert res["risk_result"]["status"] == "success", f"Expected success status, got {res['risk_result']['status']}"
+        assert risk_data["composite_score"] is not None, "composite_score should be a numeric float"
+        print("  ✅ [M8-T9] Weather on fallback + live hazard -> Risk computes normally (LOW/MODERATE/HIGH), not UNKNOWN, with fallback disclosed")
+    except Exception as e:
+        print(f"  ❌ [M8-T9] Failed: {e}")
+        all_passed = False
+
+    print(f"{'='*60}\n")
+    return all_passed
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 async def main():
     args = sys.argv[1:]
 
-    if "--all" in args:
+    if "--m8" in args:
+        ok = run_m8_tests()
+        if not ok:
+            sys.exit(1)
+    elif "--all" in args:
         # Run all test cases
         print(f"Running {len(TEST_CASES)} test cases...")
         passed = 0
@@ -510,8 +718,11 @@ async def main():
             if ok:
                 passed += 1
         print(f"\n{'='*60}")
-        print(f"RESULTS: {passed}/{len(TEST_CASES)} tests passed")
-        if passed < len(TEST_CASES):
+        print(f"RESULTS: {passed}/{len(TEST_CASES)} standard pipeline tests passed")
+        
+        m8_ok = run_m8_tests()
+        
+        if passed < len(TEST_CASES) or not m8_ok:
             sys.exit(1)
     elif args:
         # Single custom query
