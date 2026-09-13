@@ -56,8 +56,11 @@ class MarineConditions:
     forecast_time: str          # ISO-8601 UTC: valid time of first forecast hour
     source_time: str            # same as forecast_time (for evidence layer)
     retrieved_at: str           # ISO-8601 UTC: when we fetched
+    pressure_msl_hpa: Optional[float] = None
     source: str = "Open-Meteo Marine + Forecast (ERA5-ICON)"
     used_fallback: bool = False
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +168,7 @@ def _fetch_open_meteo_marine(
                 params={
                     "latitude": lat,
                     "longitude": lon,
-                    "hourly": "wind_speed_10m,wind_direction_10m,visibility",
+                    "hourly": "wind_speed_10m,wind_direction_10m,visibility,pressure_msl",
                     "wind_speed_unit": "ms",
                     "timezone": "UTC",
                     "forecast_days": forecast_days,
@@ -194,6 +197,7 @@ def _fetch_open_meteo_marine(
         wind_speeds_ms: list[Optional[float]] = forecast_data["hourly"]["wind_speed_10m"]
         wind_dirs: list[Optional[float]] = forecast_data["hourly"]["wind_direction_10m"]
         visibilities: list[Optional[float]] = forecast_data["hourly"].get("visibility", [])
+        pressures: list[Optional[float]] = forecast_data["hourly"].get("pressure_msl", [])
 
         # Determine slice: day_offset * 24 + hour range
         slice_start = day_offset * 24 + hour_start
@@ -204,6 +208,7 @@ def _fetch_open_meteo_marine(
         ws_slice = [v for v in wind_speeds_ms[slice_start:slice_end] if v is not None]
         wdir_slice = [v for v in wind_dirs[slice_start:slice_end] if v is not None]
         vis_slice = [v for v in visibilities[slice_start:slice_end] if v is not None]
+        p_slice = [v for v in pressures[slice_start:slice_end] if v is not None]
 
         if not wh_slice or not ws_slice:
             logger.warning("[Weather] No valid data in requested time slice")
@@ -215,13 +220,14 @@ def _fetch_open_meteo_marine(
         avg_wind_kmh = round(avg_wind_ms * 3.6, 1)
         avg_wind_d = _average_circular(wdir_slice) if wdir_slice else 0.0
         avg_vis_km = round(sum(vis_slice) / len(vis_slice) / 1000, 1) if vis_slice else None
+        avg_pressure = round(sum(p_slice) / len(p_slice), 1) if p_slice else None
 
         # Forecast valid time = first hour of slice
         valid_time = marine_times[slice_start] + "Z" if slice_start < len(marine_times) else retrieved_at
 
         logger.info(
-            "[Weather] Retrieved: wave=%.2fm wind=%.1fkm/h sea=%s",
-            avg_wave_h, avg_wind_kmh, _sea_state(avg_wave_h),
+            "[Weather] Retrieved: wave=%.2fm wind=%.1fkm/h sea=%s msl=%.1fhPa",
+            avg_wave_h, avg_wind_kmh, _sea_state(avg_wave_h), avg_pressure or 0.0,
         )
 
         return MarineConditions(
@@ -231,12 +237,14 @@ def _fetch_open_meteo_marine(
             wind_speed_kmh=avg_wind_kmh,
             wind_direction_deg=avg_wind_d,
             sea_state=_sea_state(avg_wave_h),
-            sst_celsius=None,           # not provided by Open-Meteo free tier
+            sst_celsius=None,
             visibility_km=avg_vis_km,
+            pressure_msl_hpa=avg_pressure,
             forecast_time=valid_time,
             source_time=valid_time,
             retrieved_at=retrieved_at,
         )
+
 
     except (KeyError, IndexError, TypeError) as exc:
         logger.warning("[Weather] Failed to parse Open-Meteo response: %s", exc)

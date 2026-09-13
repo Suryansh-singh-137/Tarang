@@ -122,6 +122,19 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
             provenance_tier="global_model",
         ))
 
+    if data.get("pressure_msl_hpa") is not None:
+
+        evidence.append(EvidenceItem(
+            claim=f"Atmospheric surface pressure (MSL) is {data['pressure_msl_hpa']} hPa",
+            value=data["pressure_msl_hpa"],
+            unit="hPa",
+            source=source,
+            source_time=source_time,
+            retrieved_at=retrieved_at,
+            location=loc,
+            provenance_tier="global_model",
+        ))
+
     return evidence
 
 
@@ -132,19 +145,32 @@ def _build_evidence(data: dict, source: str, source_time: str, retrieved_at: str
 def weather_agent(state: ORCAState) -> dict:
     """
     LangGraph node: fetch marine conditions and normalise to AgentResult.
-
-    Priority:
-      1. Open-Meteo Marine + Forecast API (via marine_weather_client)
-      2. fallback_weather.json (clearly disclosed)
+    Strictly consumes state.resolved_location.
     """
-    intent = state["parsed_intent"]
-    assert intent is not None
+    resolved = state.get("resolved_location")
+    if not resolved or not resolved.get("coastal"):
+        logger.info("[Weather] Skipped: resolved_location is missing or non-coastal")
+        result: AgentResult = {
+            "agent_name": "weather_agent",
+            "status": "skipped",
+            "data": {},
+            "source": "Open-Meteo Marine + Forecast",
+            "summary": "Weather assessment skipped: location is not a verified coastal zone.",
+            "used_fallback": False,
+            "data_quality": "live",
+            "timestamp": "",
+            "error": None,
+            "evidence": [],
+        }
+        return {"weather_result": result}
 
-    lat = intent["lat"] or 8.7642
-    lon = intent["lon"] or 78.1348
-    location_name = intent["location_name"]
-    time_window = intent["time_window"]
-    time_start_utc = intent.get("time_start_utc", "")
+    lat = resolved["lat"]
+    lon = resolved["lon"]
+    location_name = resolved.get("name", "Coastal Location")
+
+    intent = state.get("parsed_intent")
+    time_window = intent.get("time_window", "next_24h") if intent else "next_24h"
+    time_start_utc = intent.get("time_start_utc", "") if intent else ""
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -167,6 +193,7 @@ def weather_agent(state: ORCAState) -> dict:
             "sea_state": live.sea_state,
             "sst_celsius": live.sst_celsius,
             "visibility_km": live.visibility_km,
+            "pressure_msl_hpa": live.pressure_msl_hpa,
             "forecast_time": live.forecast_time,
             "source_time": live.source_time,
             "retrieved_at": live.retrieved_at,
@@ -175,9 +202,10 @@ def weather_agent(state: ORCAState) -> dict:
         source = live.source
         source_time = live.source_time
         logger.info(
-            "[Weather] Live data: wave=%.2fm wind=%.1fkm/h sea=%s (source=%s)",
-            live.wave_height_m, live.wind_speed_kmh, live.sea_state, source,
+            "[Weather] Live data: wave=%.2fm wind=%.1fkm/h msl=%s sea=%s (source=%s)",
+            live.wave_height_m, live.wind_speed_kmh, live.pressure_msl_hpa, live.sea_state, source,
         )
+
     else:
         data = _load_fallback(location_name)
         used_fallback = True

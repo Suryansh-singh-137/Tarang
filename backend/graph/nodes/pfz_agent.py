@@ -159,12 +159,26 @@ def pfz_agent(state: ORCAState) -> dict:
       1. INCOIS ERDDAP Oceansat-2 CHL (via incois_client)
       2. fallback_pfz.json (clearly disclosed)
     """
-    intent = state["parsed_intent"]
-    assert intent is not None
+    resolved = state.get("resolved_location")
+    if not resolved or not resolved.get("coastal"):
+        logger.info("[PFZ] Skipped: resolved_location is missing or non-coastal")
+        result: AgentResult = {
+            "agent_name": "pfz_agent",
+            "status": "skipped",
+            "data": {},
+            "source": "INCOIS",
+            "summary": "PFZ analysis skipped: location is not a verified coastal zone.",
+            "used_fallback": False,
+            "data_quality": "live",
+            "timestamp": "",
+            "error": None,
+            "evidence": [],
+        }
+        return {"pfz_result": result}
 
-    lat = intent["lat"] or 8.7642
-    lon = intent["lon"] or 78.1348
-    location_name = intent["location_name"]
+    lat = resolved["lat"]
+    lon = resolved["lon"]
+    location_name = resolved.get("name", "Coastal Location")
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -236,28 +250,7 @@ def pfz_agent(state: ORCAState) -> dict:
             source_type, active.zone_count, active.nearest_zone_km,
             is_official_pfz, is_proxy,
         )
-        data = {
-            "zones": live.zones,
-            "nearest_zone_km": live.nearest_zone_km,
-            "zone_count": live.zone_count,
-            "avg_chl": live.avg_chl,
-            "source_time": live.source_time,
-            "retrieved_at": live.retrieved_at,
-            "advisory_date": live.source_time[:10] if live.source_time else "",
-            "overall_productivity": (
-                "high" if live.avg_chl >= 0.9
-                else "moderate" if live.avg_chl >= 0.5
-                else "low"
-            ),
-            "pfz_method": "chlorophyll_proxy",
-        }
-        used_fallback = False
-        source = live.source
-        source_time = live.source_time
-        logger.info(
-            "[PFZ] Live: %d zones, nearest=%.1fkm, avg_chl=%.3f mg/m³",
-            live.zone_count, live.nearest_zone_km, live.avg_chl,
-        )
+
     else:
         data = _load_fallback(location_name)
         data["pfz_method"] = "fallback"

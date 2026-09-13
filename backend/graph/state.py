@@ -27,8 +27,16 @@ Milestone 8 additions:
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
+from typing_extensions import TypedDict, NotRequired
 
-from typing_extensions import TypedDict
+from location.models import (
+    DeviceLocation,
+    QueryLocation,
+    ResolvedLocation,
+    LocationMode,
+    ExecutionStatus,
+    DataStatus,
+)
 
 
 class EvidenceItem(TypedDict):
@@ -111,12 +119,15 @@ class ParsedIntent(TypedDict):
     time_window: str        # e.g. "tomorrow_morning", "now", "next_24h"
     time_start_utc: str     # e.g. "2026-09-13T00:30:00Z"
     time_end_utc: str       # e.g. "2026-09-13T06:30:00Z"
-    query_type: Literal["safety_check", "pfz_lookup", "general", "risk_explanation"]
+    query_type: Literal["safety_check", "pfz_lookup", "general", "risk_explanation", "ocean_tide"]
     needs_weather: bool
     needs_pfz: bool
     needs_hazard: bool
     needs_geofence: bool
     needs_risk: bool
+    needs_ocean: NotRequired[bool]
+    location_status: NotRequired[Optional[Literal["coastal", "inland", "unresolved"]]]
+    distance_to_coast_km: NotRequired[Optional[float]]
 
 
 class ConversationTurn(TypedDict):
@@ -148,14 +159,32 @@ class DataQualityReport(TypedDict):
 class ORCAState(TypedDict):
     """Full mutable state shared across all nodes in the graph."""
 
+    # V2 Request Tracking & Authoritative Session
+    request_id: str
+    conversation_id: str
+
     raw_query: str
     detected_language: str              # BCP-47 tag: "hi", "ta", "en"
     parsed_intent: Optional[ParsedIntent]
+
+    # V2 Location Entities (governed by LocationResolver)
+    device_location: Optional[DeviceLocation]
+    query_location: Optional[QueryLocation]
+    resolved_location: Optional[ResolvedLocation]
+    location_mode: Optional[LocationMode]
+
+    # Specialist Agent Results
     weather_result: Optional[AgentResult]
     pfz_result: Optional[AgentResult]
+    ocean_result: Optional[AgentResult]
     hazard_result: Optional[AgentResult]
     geofence_result: Optional[AgentResult]
     risk_result: Optional[AgentResult]
+
+    # V2 Decoupled Statuses
+    execution_status: ExecutionStatus
+    overall_data_status: DataStatus
+
     final_answer_text: str
     map_geojson: Dict[str, Any]
     evidence: List[EvidenceItem]        # accumulated across all agents
@@ -176,7 +205,8 @@ class ORCAState(TypedDict):
     data_quality_reports: List[DataQualityReport]  # one per agent that ran
     risk_sufficient_data: Optional[bool]            # False → risk returned UNKNOWN
 
-    # Browser geolocation & Language Override
+    # Browser geolocation & Language Override (for backward compatibility)
     user_location: Optional[Dict[str, Any]]        # {"lat": float, "lon": float, "name": Optional[str]}
     language_override: Optional[str]               # BCP-47 tag from UI toggle: "en", "hi", "ta"
+
 

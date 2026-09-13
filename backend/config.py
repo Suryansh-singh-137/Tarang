@@ -90,10 +90,10 @@ MAX_CONVERSATION_TURNS: int = int(os.getenv("MAX_CONVERSATION_TURNS", "6"))
 # Which ParsedIntent fields each agent depends on.
 # If none of these fields appear in changed_fields, the cached result can be reused.
 AGENT_DEPENDS_ON: dict[str, list[str]] = {
-    "weather_agent":  ["lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
-    "pfz_agent":      ["lat", "lon"],
-    "hazard_agent":   ["lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
-    "geofence_agent": ["lat", "lon"],
+    "weather_agent":  ["location_name", "lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
+    "pfz_agent":      ["location_name", "lat", "lon"],
+    "hazard_agent":   ["location_name", "lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
+    "geofence_agent": ["location_name", "lat", "lon"],
     # risk_agent always recomputes deterministically — no cache bypass for it
     "risk_agent":     [],
 }

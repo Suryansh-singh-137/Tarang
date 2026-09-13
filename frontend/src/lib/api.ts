@@ -11,6 +11,15 @@ export type StreamCallbacks = {
 };
 
 export interface QueryOptions {
+  request_id?: string;
+  conversation_id?: string;
+  device_location?: {
+    lat: number;
+    lon: number;
+    accuracy?: number | null;
+    captured_at?: string | null;
+    permission_status?: string;
+  } | null;
   user_lat?: number | null;
   user_lon?: number | null;
   user_location_name?: string | null;
@@ -36,6 +45,9 @@ export async function streamQuery(
       },
       body: JSON.stringify({
         query,
+        request_id: options?.request_id,
+        conversation_id: options?.conversation_id,
+        device_location: options?.device_location,
         conversation: state.conversation,
         last_parsed_intent: state.last_parsed_intent,
         last_results: state.last_results,
@@ -46,6 +58,7 @@ export async function streamQuery(
       }),
       signal: options?.signal,
     });
+
 
     if (!response.ok) {
       throw new Error(`Server responded with HTTP ${response.status}`);

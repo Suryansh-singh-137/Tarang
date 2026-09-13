@@ -178,6 +178,7 @@ def _render_template(
     geofence: Optional[AgentResult],
     risk: Optional[AgentResult],
     evidence: list[EvidenceItem],
+    ocean: Optional[AgentResult] = None,
 ) -> str:
     p = _PHRASES.get(lang, _PHRASES["en"])
     tw = _TIME_LABELS.get(lang, _TIME_LABELS["en"]).get(time_window, time_window)
@@ -227,12 +228,29 @@ def _render_template(
         lines.append(f"• Wave height: **{wave} m** ({wave_dir})")
         lines.append(f"• Wind speed: **{wind} km/h** ({wind_dir})")
         lines.append(f"• Sea state: **{sea}**")
+        if d.get("pressure_msl_hpa"):
+            lines.append(f"• Atmospheric surface pressure (MSL): **{d['pressure_msl_hpa']} hPa**")
         if d.get("visibility_km"):
             lines.append(f"• Visibility: {d['visibility_km']} km")
         lines.append(f"  *(Source: {weather['source']})*")
         if weather.get("used_fallback"):
             lines.append("  ⚠️ *(Cached fallback — live data unavailable)*")
     lines.append("")
+
+    # ---- Ocean Tides & Water Level ----
+    if ocean and ocean.get("status") == "success":
+        od = ocean.get("data", {})
+        lines.append(f"**🌊 Ocean Tides & Water Level (Chart Datum)**")
+        lines.append(f"• Current water level: **{od.get('water_level_m', 0.0):.2f} m** above CD ({od.get('current_phase', 'Normal')})")
+        if od.get("next_high_tide"):
+            lines.append(f"• Next High Tide: **{od['next_high_tide'].get('time_ist')}** ({od['next_high_tide'].get('height_m')} m CD)")
+        if od.get("next_low_tide"):
+            lines.append(f"• Next Low Tide: **{od['next_low_tide'].get('time_ist')}** ({od['next_low_tide'].get('height_m')} m CD)")
+        if od.get("tidal_stream_knots"):
+            lines.append(f"• Tidal Current: ~{od['tidal_stream_knots']} knots")
+        lines.append(f"  *(Source: {ocean['source']})*")
+        lines.append("")
+
 
     # ---- PFZ ----
     lines.append(f"**{p['pfz_intro']}**")
@@ -493,6 +511,7 @@ def synthesis(state: ORCAState) -> dict:
     
     weather = state.get("weather_result")
     pfz = state.get("pfz_result")
+    ocean = state.get("ocean_result")
     hazard = state.get("hazard_result")
     geofence = state.get("geofence_result")
     risk = state.get("risk_result")
@@ -517,6 +536,7 @@ def synthesis(state: ORCAState) -> dict:
     # Prepare evidence context for LLM
     evidence_payload = {
         "weather": weather.get("data") if weather and weather.get("status") == "success" else None,
+        "ocean_tides": ocean.get("data") if ocean and ocean.get("status") == "success" else None,
         "pfz": pfz.get("data") if pfz and pfz.get("status") == "success" else None,
         "hazard": hazard.get("data") if hazard and hazard.get("status") == "success" else None,
         "geofence": geofence.get("data") if geofence and geofence.get("status") == "success" else None,
@@ -530,6 +550,7 @@ def synthesis(state: ORCAState) -> dict:
     # Note if any fallback data was used
     data_quality_notes = []
     for agent_name, res in [("weather", weather), ("pfz", pfz), ("hazard", hazard)]:
+
         if res and res.get("status") == "success":
             dq = res.get("data_quality", "live")
             if dq == "fallback":
@@ -642,6 +663,7 @@ def _fallback_synthesis(state: ORCAState) -> dict:
 
     weather  = state.get("weather_result")
     pfz      = state.get("pfz_result")
+    ocean    = state.get("ocean_result")
     hazard   = state.get("hazard_result")
     geofence = state.get("geofence_result")
     risk     = state.get("risk_result")
@@ -657,7 +679,9 @@ def _fallback_synthesis(state: ORCAState) -> dict:
         geofence=geofence,
         risk=risk,
         evidence=evidence,
+        ocean=ocean,
     )
+
 
     return {
         "final_answer_text": answer_text,

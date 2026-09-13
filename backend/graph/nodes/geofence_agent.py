@@ -44,14 +44,29 @@ def geofence_agent(state: ORCAState) -> dict:
     LangGraph node: compute geospatial distances to maritime boundaries.
     Pure deterministic computation — no external API.
     """
-    intent = state["parsed_intent"]
-    assert intent is not None
+    resolved = state.get("resolved_location")
+    if not resolved or not resolved.get("coastal"):
+        logger.info("[Geofence] Skipped: resolved_location is missing or non-coastal")
+        result: AgentResult = {
+            "agent_name": "geofence_agent",
+            "status": "skipped",
+            "data": {},
+            "source": "IMBL Boundary",
+            "summary": "Geofence assessment skipped: location is not a verified coastal zone.",
+            "used_fallback": False,
+            "data_quality": "live",
+            "timestamp": "",
+            "error": None,
+            "evidence": [],
+        }
+        return {"geofence_result": result}
 
-    lat = intent["lat"] or 8.7642
-    lon = intent["lon"] or 78.1348
-    location_name = intent["location_name"]
+    lat = resolved["lat"]
+    lon = resolved["lon"]
+    location_name = resolved.get("name", "Coastal Location")
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
 
     from pathlib import Path
     _DATA_DIR = Path(__file__).parent.parent.parent / "data"

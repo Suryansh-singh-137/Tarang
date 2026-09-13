@@ -20,6 +20,7 @@ import {
   MapGeoJSON,
   RiskLabel,
   LiveConditionsSummary,
+  LocationStatus,
 } from "@/lib/types";
 import { streamQuery } from "@/lib/api";
 import { translations } from "@/lib/i18n";
@@ -75,45 +76,82 @@ export default function Home() {
     last_results: {},
   });
 
+  // Server-authoritative conversation session ID
+  const [conversationId] = useState<string>(() => "conv-" + Math.random().toString(36).substring(2, 11));
+
   const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
   const [isManualLanguageOverride, setIsManualLanguageOverride] = useState(false);
 
   const t = translations[currentLanguage] || translations.en;
 
-  // Initial probe for live conditions and browser geolocation on mount
-  useEffect(() => {
-    setLiveConditions({
-      locationName: "Thoothukudi Harbour",
-      lat: 8.7642,
-      lon: 78.1348,
-      waveHeightM: 0.85,
-      windSpeedKmh: 11.8,
-      seaState: "slight",
-      riskLabel: "LOW",
-      source: "Open-Meteo ERA5 / Live Marine",
-      isFallback: false,
-    });
+  const [geoNotice, setGeoNotice] = useState<string | null>(null);
 
-    // Request browser geolocation on mount (permission prompt on first load)
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lon = position.coords.longitude;
-          setUserCoords({ lat, lon });
-          setLiveConditions((prev) => ({
-            ...prev,
-            lat,
-            lon,
-            locationName: "Your Coastal Location",
-          }));
-        },
-        (err) => {
-          console.info("Browser geolocation unavailable or dismissed:", err.message);
-        },
-        { timeout: 8000, maximumAge: 300000 }
-      );
+  // Robust geolocation handler with user-gesture support and permissions API
+  const requestBrowserLocation = (isUserGesture = false) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      console.warn("[TRACE][1] navigator.geolocation is NOT supported or undefined.");
+      if (isUserGesture) {
+        setGeoNotice("Geolocation is not supported by your browser.");
+      }
+      return;
     }
+
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: "geolocation" as PermissionName })
+        .then((perm) => {
+          console.log(`[TRACE][1] Geolocation permission status: '${perm.state}'`);
+          if (perm.state === "denied" && isUserGesture) {
+            setGeoNotice(
+              "Location permission is blocked in browser settings. Please click the site icon in your address bar to allow location."
+            );
+          }
+          perm.onchange = () => {
+            console.log(`[TRACE][1] Geolocation permission changed to: '${perm.state}'`);
+            if (perm.state === "granted") {
+              setGeoNotice(null);
+              requestBrowserLocation(false);
+            }
+          };
+        })
+        .catch((err) => {
+          console.warn("[TRACE][1] navigator.permissions.query error:", err);
+        });
+    }
+
+    console.log(`[TRACE][1] Requesting getCurrentPosition (userGesture=${isUserGesture})...`);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        console.log(`[TRACE][1] Geolocation SUCCESS: lat=${lat}, lon=${lon}, accuracy=${position.coords.accuracy}m`);
+        setUserCoords({ lat, lon });
+        setGeoNotice(null);
+      },
+      (err) => {
+        console.warn(
+          `[TRACE][1] Geolocation FAILED/DENIED: code=${err.code} (${
+            err.code === 1 ? "PERMISSION_DENIED" : err.code === 2 ? "POSITION_UNAVAILABLE" : "TIMEOUT"
+          }), message="${err.message}"`
+        );
+        if (isUserGesture) {
+          if (err.code === 1) {
+            setGeoNotice(
+              "Location permission was denied. Click the lock/settings icon in the browser address bar to allow location access."
+            );
+          } else {
+            setGeoNotice(`Could not determine position: ${err.message}`);
+          }
+        }
+      },
+      { timeout: 10000, maximumAge: 60000, enableHighAccuracy: true }
+    );
+  };
+
+  // Initial probe on mount
+  useEffect(() => {
+    requestBrowserLocation(false);
   }, []);
 
   // Handle Query Submission
@@ -128,11 +166,13 @@ export default function Home() {
 
     const userMsgId = "user-" + Date.now();
     const assistantMsgId = "asst-" + Date.now();
+    const requestId = "req-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
     const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     // Add user message
     const userMessage: Message = {
       id: userMsgId,
+      request_id: requestId,
       role: "user",
       content: queryText,
       timestamp: timeStr,
@@ -141,6 +181,7 @@ export default function Home() {
     // Add placeholder assistant message
     const assistantMessage: Message = {
       id: assistantMsgId,
+      request_id: requestId,
       role: "assistant",
       content: "",
       timestamp: timeStr,
@@ -151,6 +192,20 @@ export default function Home() {
     setIsLoading(true);
     setProgressSteps([]);
 
+    const deviceLocation = userCoords
+      ? {
+          lat: userCoords.lat,
+          lon: userCoords.lon,
+          accuracy: null,
+          captured_at: new Date().toISOString(),
+          permission_status: "granted",
+        }
+      : null;
+
+    console.log(
+      `[TRACE][2] Submitting query to backend: queryText="${queryText}", requestId="${requestId}", convId="${conversationId}", deviceLocation=${JSON.stringify(deviceLocation)}`
+    );
+
     await streamQuery(
       queryText,
       pipelineState,
@@ -159,14 +214,30 @@ export default function Home() {
           setProgressSteps((prev) => [...prev, progressData]);
         },
         onResult: (result) => {
-          // Update assistant message
+          console.log("[TRACE][6] onResult received from backend:", {
+            request_id: result.request_id,
+            conversation_id: result.conversation_id,
+            execution_status: result.execution_status,
+            overall_data_status: result.overall_data_status,
+            location: result.location,
+            answer_text_preview: result.answer_text?.slice(0, 100),
+            parsed_intent: result.parsed_intent,
+            risk_data: result.risk_data,
+            trace_fallbacks: result.trace?.map((t) => ({ agent: t.agent_name, fallback: t.used_fallback })),
+          });
+
+          // Update assistant message with canonical response data
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMsgId
                 ? {
                     ...msg,
+                    request_id: result.request_id,
                     content: result.answer_text,
                     language: result.language,
+                    location: result.location,
+                    execution_status: result.execution_status,
+                    overall_data_status: result.overall_data_status,
                     risk_data: result.risk_data,
                     evidence: result.evidence,
                     trace: result.trace,
@@ -201,25 +272,47 @@ export default function Home() {
             setCurrentLanguage(result.language as LanguageCode);
           }
 
-          // Update Live Conditions from weather agent result
-          const weatherResult = result.last_results?.weather_agent;
-          if (weatherResult && weatherResult.data) {
-            const wData = weatherResult.data;
+          // Determine real location status (coastal, inland, or unresolved)
+          const resolvedLoc = result.location?.resolved;
+          const locMode = result.location?.mode;
+          const locStatus = result.parsed_intent?.location_status;
+
+          const isCoas =
+            resolvedLoc?.coastal === true ||
+            locStatus === "coastal";
+
+          const isInl =
+            locStatus === "inland" ||
+            (resolvedLoc && resolvedLoc.coastal === false) ||
+            (!isCoas && (
+              result.answer_text?.toLowerCase().includes("inland") ||
+              result.answer_text?.includes("अंतर्देशीय") ||
+              result.answer_text?.includes("உள்நாட்டு")
+            ));
+
+          if (isCoas && resolvedLoc) {
+            setLocationStatus("coastal");
+            const weatherResult = result.agents?.weather || result.last_results?.weather_agent;
+            const wData = weatherResult?.data;
             setLiveConditions({
-              locationName: result.parsed_intent?.location_name || (userCoords ? "Your Coastal Location" : "Target Location"),
-              lat: result.parsed_intent?.lat || userCoords?.lat || 8.7642,
-              lon: result.parsed_intent?.lon || userCoords?.lon || 78.1348,
-              waveHeightM: wData.wave_height_m || 1.0,
-              windSpeedKmh: wData.wind_speed_kmh || 15.0,
-              seaState: wData.sea_state || "moderate",
+              locationName: resolvedLoc.name || result.parsed_intent?.location_name || "Coastal Waters",
+              lat: resolvedLoc.lat,
+              lon: resolvedLoc.lon,
+              waveHeightM: wData?.wave_height_m ?? 1.0,
+              windSpeedKmh: wData?.wind_speed_kmh ?? 15.0,
+              seaState: wData?.sea_state || "moderate",
               riskLabel: result.risk_data?.risk_label || "LOW",
-              source: weatherResult.source || "Open-Meteo",
-              isFallback: weatherResult.used_fallback || false,
+              source: weatherResult?.source || "Open-Meteo",
+              isFallback: weatherResult?.used_fallback || false,
             });
+          } else if (isInl) {
+            setLocationStatus("inland");
+          } else {
+            setLocationStatus("unresolved");
           }
 
           // Update cyclone alert if hazard agent detected active cyclone
-          const hazardResult = result.last_results?.hazard_agent;
+          const hazardResult = result.agents?.hazard || result.last_results?.hazard_agent;
           if (hazardResult && hazardResult.data?.cyclone_warning) {
             const hData = hazardResult.data;
             setActiveCycloneAlert({
@@ -238,7 +331,7 @@ export default function Home() {
               msg.id === assistantMsgId
                 ? {
                     ...msg,
-                    content: `Error: ${err}. Please check your connection to Tarang backend.`,
+                    content: err || "Something went wrong — please try again.",
                     isStreaming: false,
                     isError: true,
                   }
@@ -249,9 +342,12 @@ export default function Home() {
         },
       },
       {
+        request_id: requestId,
+        conversation_id: conversationId,
+        device_location: deviceLocation,
         user_lat: userCoords?.lat ?? null,
         user_lon: userCoords?.lon ?? null,
-        user_location_name: userCoords ? "Your Coastal Location" : null,
+        user_location_name: null,
         language: currentLanguage,
       }
     );
@@ -434,13 +530,38 @@ export default function Home() {
                         {progressSteps[progressSteps.length - 1]?.summary || "Analyzing coastal conditions..."}
                       </span>
                     </div>
+                  ) : messages.length === 0 ? (
+                    <div className="flex items-center gap-2 truncate text-[var(--ink-muted)]">
+                      <span className="w-2 h-2 rounded-full bg-teal-500 shrink-0" />
+                      <span className="font-semibold text-[var(--ink)]">Tarang Marine Network</span>
+                      <span>·</span>
+                      <span className="text-[var(--ink-subtle)]">Enter a coastal harbour or tap GPS</span>
+                    </div>
+                  ) : locationStatus === "inland" ? (
+                    <div className="flex items-center gap-2 truncate text-[var(--ink-muted)]">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                      <span className="font-semibold text-[var(--ink)]">Inland Location</span>
+                      <span>·</span>
+                      <span className="text-[var(--ink-subtle)]">Marine safety metrics not applicable</span>
+                    </div>
+                  ) : locationStatus === "unresolved" ? (
+                    <div className="flex items-center gap-2 truncate text-[var(--ink-muted)]">
+                      <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
+                      <span className="font-semibold text-[var(--ink)]">Location Unresolved</span>
+                      <span>·</span>
+                      <span className="text-[var(--ink-subtle)]">Specify an Indian coastal harbour or district</span>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-2 truncate">
                       <span className="font-semibold text-[var(--ink)]">
-                        {liveConditions?.locationName || "Thoothukudi Harbour"}
+                        {liveConditions?.locationName || "Coastal Waters"}
                       </span>
                       <span>·</span>
-                      <span>{liveConditions?.waveHeightM.toFixed(1) ?? "0.8"}m wave</span>
+                      <span>
+                        {liveConditions?.waveHeightM != null
+                          ? `${liveConditions.waveHeightM.toFixed(1)}m wave`
+                          : "Wave data n/a"}
+                      </span>
                       <span>·</span>
                       <span
                         className={`font-semibold ${
@@ -448,6 +569,8 @@ export default function Home() {
                             ? "text-[#DC2626]"
                             : currentRiskLabel === "MODERATE"
                             ? "text-[#D97706]"
+                            : currentRiskLabel === "UNKNOWN"
+                            ? "text-amber-600"
                             : "text-[#1B8755]"
                         }`}
                       >
@@ -456,12 +579,42 @@ export default function Home() {
                     </div>
                   )}
 
-                  <div className="hidden sm:flex items-center gap-2 text-[11px] text-[var(--ink-subtle)] shrink-0">
-                    <span>
-                      {liveConditions ? `${liveConditions.lat.toFixed(2)}°N, ${liveConditions.lon.toFixed(2)}°E` : ""}
-                    </span>
+                  <div className="flex items-center gap-2 text-[11px] text-[var(--ink-subtle)] shrink-0">
+                    {userCoords ? (
+                      <button
+                        type="button"
+                        onClick={() => requestBrowserLocation(true)}
+                        className="hover:underline flex items-center gap-1 text-[var(--ink-muted)] cursor-pointer"
+                        title="GPS coordinates recorded. Click to refresh."
+                      >
+                        <span>📍 {userCoords.lat.toFixed(2)}°N, {userCoords.lon.toFixed(2)}°E</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => requestBrowserLocation(true)}
+                        className="px-2 py-0.5 rounded bg-[var(--foam)] text-[var(--current)] font-medium hover:bg-[var(--foam)]/80 transition-colors border border-[var(--current)]/20 cursor-pointer"
+                        title="Click to allow GPS device location"
+                      >
+                        <span>📍 Enable GPS</span>
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Inline Geolocation notice banner if blocked in settings */}
+                {geoNotice && (
+                  <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 text-xs text-amber-800 flex items-center justify-between">
+                    <span>{geoNotice}</span>
+                    <button
+                      type="button"
+                      onClick={() => setGeoNotice(null)}
+                      className="font-bold text-amber-900 hover:underline ml-2"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
 
                 {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input */}
                 <div className="p-3 sm:p-4 bg-[var(--surface)] border-t border-[var(--border)] shrink-0 z-10 shadow-xs pb-16 md:pb-4">

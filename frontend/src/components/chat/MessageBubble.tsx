@@ -91,9 +91,9 @@ export const MessageBubble: React.FC<Props> = ({
   // Assistant message bubble
   return (
     <div className="flex justify-start mb-6 animate-in fade-in duration-200">
-      <div className="w-full max-w-[95%] sm:max-w-[88%] rounded-2xl px-5 py-5 bg-[var(--surface)] border border-[var(--border)] shadow-xs text-[var(--ink)] space-y-4">
+      <div className={`w-full max-w-[95%] sm:max-w-[88%] rounded-2xl px-5 py-5 bg-[var(--surface)] border ${message.isError ? "border-amber-200/80 bg-amber-50/20" : "border-[var(--border)]"} shadow-xs text-[var(--ink)] space-y-4`}>
         {/* Risk Badge Verdict prominently at top of answer */}
-        {message.risk_data && message.risk_data.risk_label && (
+        {!message.isError && message.risk_data && message.risk_data.risk_label && (
           <div className="pb-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
             <RiskBadge
               label={message.risk_data.risk_label}
@@ -123,50 +123,58 @@ export const MessageBubble: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Inline Fallback / Proxy Disclosures (Part 2) */}
-        {message.trace?.some((tr) => tr.used_fallback) && (
-          <div className="p-3 bg-[#FEF3C7] border border-[#FDE68A] rounded-xl text-xs text-[#92400E] flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <span className="font-semibold">{t.fallbackWarning}</span>
-              <p className="text-[11px] text-[#B45309]">
-                Live satellite or marine data source was temporarily unreachable. Assessment relied on validated fallback records.
-              </p>
+        {/* Inline Fallback / Proxy Disclosures (Only when critical marine safety sources relied on fallback) */}
+        {!message.isError &&
+          message.risk_data?.risk_label !== "UNKNOWN" &&
+          message.trace?.some(
+            (tr) => (tr.agent_name === "weather_agent" || tr.agent_name === "hazard_agent") && tr.used_fallback
+          ) && (
+            <div className="p-3 bg-[#FEF3C7] border border-[#FDE68A] rounded-xl text-xs text-[#92400E] flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="font-semibold">{t.fallbackWarning}</span>
+                <p className="text-[11px] text-[#B45309]">
+                  Live marine weather or hazard source was temporarily unreachable. Assessment relied on validated fallback records.
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Footer Actions: Read Aloud TTS & Evidence Count */}
         <div className="pt-3 border-t border-[var(--border)] flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--ink-muted)]">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleToggleAudio}
-              disabled={isLoadingAudio || !message.content}
-              className="inline-flex items-center gap-2 min-h-[44px] px-3.5 py-2 rounded-full bg-[var(--surface-muted)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] hover:border-[var(--current)] transition-all font-medium disabled:opacity-50"
-              aria-label={isPlaying ? t.stopAudio : t.readAloud}
-            >
-              {isLoadingAudio ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-[var(--current)]" />
-                  <span>{t.synthesizingAudio}</span>
-                </>
-              ) : isPlaying ? (
-                <>
-                  <Square className="w-4 h-4 text-[#DC2626] fill-current" />
-                  <span>{t.stopAudio}</span>
-                </>
-              ) : (
-                <>
-                  <Volume2 className="w-4 h-4 text-[var(--current)]" />
-                  <span>{t.readAloud}</span>
-                </>
-              )}
-            </button>
-          </div>
+          {!message.isError ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleAudio}
+                disabled={isLoadingAudio || !message.content}
+                className="inline-flex items-center gap-2 min-h-[44px] px-3.5 py-2 rounded-full bg-[var(--surface-muted)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] hover:border-[var(--current)] transition-all font-medium disabled:opacity-50"
+                aria-label={isPlaying ? t.stopAudio : t.readAloud}
+              >
+                {isLoadingAudio ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--current)]" />
+                    <span>{t.synthesizingAudio}</span>
+                  </>
+                ) : isPlaying ? (
+                  <>
+                    <Square className="w-4 h-4 text-[#DC2626] fill-current" />
+                    <span>{t.stopAudio}</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-[var(--current)]" />
+                    <span>{t.readAloud}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div />
+          )}
 
           <div className="flex items-center gap-2">
-            {onViewTrace && message.trace && message.trace.length > 0 && (
+            {!message.isError && onViewTrace && message.trace && message.trace.length > 0 && (
               <button
                 type="button"
                 onClick={onViewTrace}

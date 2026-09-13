@@ -150,17 +150,40 @@ def risk_agent(state: ORCAState) -> dict:
 
     Milestone 4: Builds structured RiskComponent list for explainability.
     """
+    resolved = state.get("resolved_location")
+    if not resolved or not resolved.get("coastal"):
+        logger.info("[Risk] Skipped: resolved_location is missing or non-coastal")
+        result: AgentResult = {
+            "agent_name": "risk_agent",
+            "status": "skipped",
+            "data": {},
+            "source": "Tarang Composite Risk Model v1",
+            "summary": "Risk assessment skipped: location is not a verified coastal zone.",
+            "used_fallback": False,
+            "data_quality": "live",
+            "timestamp": "",
+            "error": None,
+            "evidence": [],
+        }
+        return {"risk_result": result}
+
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     weather = state.get("weather_result")
     hazard  = state.get("hazard_result")
     geofence = state.get("geofence_result")
     dq_reports = state.get("data_quality_reports") or []
+    logger.info(
+        f"[TRACE][5] risk_agent dq_reports count={len(dq_reports)}: "
+        f"{[{'agent': r.get('agent_name'), 'dq': r.get('data_quality'), 'fallback': r.get('used_fallback')} for r in dq_reports]}"
+    )
+
 
     # -----------------------------------------------------------------------
     # M8 Phase F: Fail-Closed Validation
     # -----------------------------------------------------------------------
     critical_data_ok = all_critical_data_available(dq_reports)
+    logger.info(f"[TRACE][5] risk_agent critical_data_ok={critical_data_ok}")
 
     if not critical_data_ok:
         logger.warning("[Risk] CRITICAL DATA MISSING/STALE/PROXY. Failing closed.")

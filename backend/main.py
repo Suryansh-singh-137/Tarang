@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException
@@ -27,6 +28,8 @@ import config
 from tools import sarvam_tts_client
 from graph.build_graph import graph
 from graph.state import ORCAState
+from location.models import DeviceLocation, LocationMode, ExecutionStatus, DataStatus
+from session.session_store import get_or_create_session, save_session
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -43,7 +46,7 @@ app = FastAPI(
         "Multi-agent marine safety advisor for Indian coastal fishermen. "
         "Powered by LangGraph + real INCOIS/Open-Meteo data."
     ),
-    version="3.0.0-milestone5",
+    version="3.0.0-v2architecture",
 )
 
 app.add_middleware(
@@ -61,11 +64,14 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str
-    # Milestone 5: Multi-turn conversational memory
+    request_id: str | None = None
+    conversation_id: str | None = None
+    device_location: dict | None = None       # {"lat": float, "lon": float, "accuracy": float|None, "permission_status": str}
+    # Milestone 5: Multi-turn conversational memory (client-provided fallback)
     conversation: list[dict] = []             # [{"role": "user"|"assistant", "content": "..."}]
     last_parsed_intent: dict | None = None    # ParsedIntent from previous turn
     last_results: dict[str, dict] = {}       # {agent_name: AgentResult} from previous turn
-    # Geolocation & Language Override
+    # Legacy Geolocation & Language Override
     user_lat: float | None = None             # Browser geolocation latitude
     user_lon: float | None = None             # Browser geolocation longitude
     user_location_name: str | None = None     # Optional reverse geocoded name
@@ -81,35 +87,75 @@ class SpeakRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _build_initial_state(body: QueryRequest) -> ORCAState:
-    user_loc = None
-    if body.user_lat is not None and body.user_lon is not None:
-        user_loc = {
+    req_id = body.request_id or f"req-{uuid.uuid4().hex[:8]}"
+    conv_id = body.conversation_id or f"conv-{uuid.uuid4().hex[:12]}"
+    session = get_or_create_session(conv_id)
+
+    # Device location extraction
+    device_loc: DeviceLocation | None = None
+    if body.device_location and body.device_location.get("lat") is not None and body.device_location.get("lon") is not None:
+        device_loc = {
+            "lat": float(body.device_location["lat"]),
+            "lon": float(body.device_location["lon"]),
+            "accuracy": body.device_location.get("accuracy"),
+            "captured_at": body.device_location.get("captured_at"),
+            "permission_status": body.device_location.get("permission_status", "granted"),
+        }
+    elif body.user_lat is not None and body.user_lon is not None:
+        device_loc = {
             "lat": float(body.user_lat),
             "lon": float(body.user_lon),
-            "name": body.user_location_name or "Your Location",
+            "accuracy": None,
+            "captured_at": None,
+            "permission_status": "granted",
         }
+    elif session.device_location:
+        device_loc = session.device_location
+
+    if device_loc:
+        session.device_location = device_loc
 
     initial_lang = body.language if body.language in ("en", "hi", "ta") else "en"
 
+    user_loc = None
+    if device_loc:
+        user_loc = {
+            "lat": device_loc["lat"],
+            "lon": device_loc["lon"],
+            "name": body.user_location_name or "Your Location",
+        }
+
     return ORCAState(
+        request_id=req_id,
+        conversation_id=conv_id,
         raw_query=body.query,
         detected_language=initial_lang,
         parsed_intent=None,
+        device_location=device_loc,
+        query_location=None,
+        resolved_location=None,
+        location_mode=None,
         weather_result=None,
         pfz_result=None,
+        ocean_result=None,
         hazard_result=None,
         geofence_result=None,
         risk_result=None,
+        execution_status="success",
+        overall_data_status="live",
         final_answer_text="",
         map_geojson={"type": "FeatureCollection", "features": []},
         evidence=[],
         trace=[],
-        # Milestone 5 fields
-        conversation_history=body.conversation[:config.MAX_CONVERSATION_TURNS],
-        last_parsed_intent=body.last_parsed_intent,  # type: ignore[arg-type]
-        last_results={k: v for k, v in body.last_results.items()},  # type: ignore[arg-type]
+        # Server-authoritative conversation session
+        conversation_history=session.conversation_history or body.conversation[:config.MAX_CONVERSATION_TURNS],
+        last_parsed_intent=session.last_parsed_intent or body.last_parsed_intent,
+        last_results=session.last_results or {k: v for k, v in body.last_results.items()},
         changed_fields=[],
-        # Geolocation & Language Override
+        parse_method="rule_based_fallback",
+        synthesis_method="template_fallback",
+        data_quality_reports=[],
+        risk_sufficient_data=None,
         user_location=user_loc,
         language_override=body.language if body.language in ("en", "hi", "ta") else None,
     )
@@ -121,43 +167,75 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
 
     We emit:
       - A "progress" event for each node completion (trace entry)
-      - A final "result" event with the full payload
+      - A final "result" event with the canonical TarangResponse payload
     """
     initial_state = _build_initial_state(body)
-    logger.info(f"Starting ORCA pipeline for query: {body.query!r}")
+    req_id = initial_state["request_id"]
+    conv_id = initial_state["conversation_id"]
+
+    logger.info(
+        f"[TRACE][1/2] /query received [req={req_id}, conv={conv_id}]: query={body.query!r}, "
+        f"device_location={initial_state.get('device_location')}"
+    )
 
     final_state: ORCAState | None = None
 
-    # astream yields state deltas after each node
-    async for chunk in graph.astream(initial_state):
-        # Each chunk is {node_name: partial_state_dict}
-        for node_name, state_delta in chunk.items():
-            logger.info(f"Node completed: {node_name}")
-            if not state_delta:
-                continue
+    try:
+        # astream yields state deltas after each node
+        async for chunk in graph.astream(initial_state):
+            for node_name, state_delta in chunk.items():
+                logger.info(f"[TRACE] Node completed: {node_name}")
+                if not state_delta:
+                    continue
 
-            # Emit a progress event for each new trace entry
-            trace_list = state_delta.get("trace", [])
-            if trace_list:
-                latest = trace_list[-1]
-                yield {
-                    "event": "progress",
-                    "data": json.dumps({
-                        "node": node_name,
-                        "agent_name": latest.get("agent_name", node_name),
-                        "status": latest.get("status", "unknown"),
-                        "summary": latest.get("summary", ""),
-                        "source": latest.get("source", ""),
-                    }),
-                }
+                # Emit a progress event for each new trace entry
+                trace_list = state_delta.get("trace", [])
+                if trace_list:
+                    latest = trace_list[-1]
+                    yield {
+                        "event": "progress",
+                        "data": json.dumps({
+                            "request_id": req_id,
+                            "node": node_name,
+                            "agent_name": latest.get("agent_name", node_name),
+                            "status": latest.get("status", "unknown"),
+                            "summary": latest.get("summary", ""),
+                            "source": latest.get("source", ""),
+                        }),
+                    }
 
-            # Track the last delta to build final state
-            if final_state is None:
-                final_state = dict(initial_state)  # type: ignore[arg-type]
-            final_state.update(state_delta)  # type: ignore[arg-type]
+                # Track the last delta to build final state
+                if final_state is None:
+                    final_state = dict(initial_state)  # type: ignore[arg-type]
+                final_state.update(state_delta)  # type: ignore[arg-type]
 
-            # Small yield to let the event loop breathe
-            await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+    except Exception as exc:
+        logger.exception("[Query] Top-level unhandled exception: %s", exc)
+        yield {
+            "event": "result",
+            "data": json.dumps({
+                "request_id": req_id,
+                "conversation_id": conv_id,
+                "answer_text": "Something went wrong — please try again.",
+                "language": initial_state.get("detected_language", "en"),
+                "location": {
+                    "mode": "NONE",
+                    "resolved": None,
+                    "query": None,
+                    "device": initial_state.get("device_location"),
+                },
+                "execution_status": "failed",
+                "overall_data_status": "unavailable",
+                "agents": {},
+                "map_geojson": {"type": "FeatureCollection", "features": []},
+                "trace": [],
+                "risk_data": {},
+                "evidence": [],
+            }),
+        }
+        return
 
     if final_state is None:
         final_state = initial_state  # type: ignore[assignment]
@@ -174,15 +252,15 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         for r in (final_state.get("trace") or [])
     ]
 
-    # --- Build last_results dict for client to echo back in next turn ---
-    last_results_for_client: dict = {}
+    # --- Build last_results dict for caching ---
+    last_results_dict: dict = {}
     for agent_key in [
-        "weather_result", "pfz_result", "hazard_result", "geofence_result", "risk_result"
+        "weather_result", "pfz_result", "ocean_result", "hazard_result", "geofence_result", "risk_result"
     ]:
         ar = final_state.get(agent_key)
         if ar and ar.get("status") == "success":
             agent_name = ar.get("agent_name", agent_key.replace("_result", "_agent"))
-            last_results_for_client[agent_name] = {
+            last_results_dict[agent_name] = {
                 "agent_name":   ar.get("agent_name"),
                 "status":       ar.get("status"),
                 "data":         ar.get("data", {}),
@@ -198,12 +276,40 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
     # Append assistant reply to conversation history
     answer_text = final_state.get("final_answer_text", "")
     updated_history = list(final_state.get("conversation_history") or [])
-    updated_history.append({"role": "assistant", "content": answer_text[:500]})  # cap summary
+    updated_history.append({"role": "assistant", "content": answer_text[:500]})
     updated_history = updated_history[-config.MAX_CONVERSATION_TURNS:]
 
+    # Persist in Server-Side SessionStore
+    session = get_or_create_session(conv_id)
+    session.conversation_history = updated_history
+    session.last_parsed_intent = final_state.get("parsed_intent")
+    session.last_results = last_results_dict
+    if final_state.get("resolved_location"):
+        session.last_query_location = final_state.get("resolved_location")
+    save_session(session)
+
+    # Canonical TarangResponse Payload
     result_payload = {
+        "request_id": req_id,
+        "conversation_id": conv_id,
         "answer_text": answer_text,
         "language": final_state.get("detected_language", "en"),
+        "location": {
+            "mode": final_state.get("location_mode", "NONE"),
+            "resolved": final_state.get("resolved_location"),
+            "query": final_state.get("query_location"),
+            "device": final_state.get("device_location"),
+        },
+        "execution_status": final_state.get("execution_status", "success"),
+        "overall_data_status": final_state.get("overall_data_status", "live"),
+        "agents": {
+            "weather": final_state.get("weather_result"),
+            "pfz": final_state.get("pfz_result"),
+            "ocean": final_state.get("ocean_result"),
+            "hazard": final_state.get("hazard_result"),
+            "geofence": final_state.get("geofence_result"),
+            "risk": final_state.get("risk_result"),
+        },
         "map_geojson": final_state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
         "trace": trace_for_response,
         "risk_data": (
@@ -223,10 +329,9 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
             for ev in (final_state.get("evidence") or [])
         ],
         "parsed_intent": final_state.get("parsed_intent"),
-        # Milestone 5: Client must echo these back in the next request
         "conversation_history": updated_history,
         "last_parsed_intent":   final_state.get("parsed_intent"),
-        "last_results":         last_results_for_client,
+        "last_results":         last_results_dict,
         "changed_fields":       final_state.get("changed_fields") or [],
     }
 
@@ -235,7 +340,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "data": json.dumps(result_payload),
     }
 
-    logger.info("ORCA pipeline complete.")
+    logger.info("ORCA pipeline complete [req=%s, conv=%s].", req_id, conv_id)
+
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +409,10 @@ async def query_endpoint(body: QueryRequest, request: Request):
                     break
                 yield event
         except Exception as exc:
-            logger.exception(f"Pipeline error: {exc}")
+            logger.exception(f"Unhandled pipeline error in /query: {exc}")
             yield {
                 "event": "error",
-                "data": json.dumps({"error": str(exc)}),
+                "data": json.dumps({"error": "Something went wrong — please try again"}),
             }
 
     return EventSourceResponse(event_generator())

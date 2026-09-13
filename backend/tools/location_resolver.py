@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -245,6 +247,23 @@ def _is_coastal_address(address: Dict[str, str]) -> bool:
     return False
 
 
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate Great Circle distance between two points in km."""
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+def distance_to_nearest_coast_km(lat: float, lon: float) -> float:
+    """Calculate distance in km to the nearest known Indian coastal point in GAZETTEER."""
+    if not GAZETTEER:
+        return 0.0
+    return min(haversine_km(lat, lon, clat, clon) for clat, clon in GAZETTEER.values())
+
+
 def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Validate whether geographic coordinates belong to an Indian coastal location or marine waters.
@@ -261,11 +280,16 @@ def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> T
     if cache_key in _REVERSE_CACHE:
         return _REVERSE_CACHE[cache_key]
 
+    dist_to_coast_km = distance_to_nearest_coast_km(lat, lon)
+
     # Fast boundary envelope check:
     # India's marine waters, islands, and coastline span latitude ~6.0°N to ~24.5°N
     # Any coordinate north of 24.5°N in India (e.g. New Delhi 28.61°N) is inland.
     if lat > 24.5 or lat < 5.0 or lon < 65.0 or lon > 96.0:
-        result = (False, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {"reason": "outside_coastal_envelope"})
+        result = (False, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {
+            "reason": "outside_coastal_envelope",
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
@@ -283,7 +307,10 @@ def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> T
     except Exception as exc:
         logger.warning("[Location] Nominatim reverse lookup failed for (%.4f, %.4f): %s", lat, lon, exc)
         # Permissive fallback if geocoder fails
-        result = (True, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {"reason": "geocoder_unreachable_fallback"})
+        result = (True, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {
+            "reason": "geocoder_unreachable_fallback",
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         return result
 
     address = data.get("address", {})
@@ -302,26 +329,41 @@ def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> T
 
     # 1. Marine / offshore waters within Indian EEZ (Nominatim returns country_code 'in' with no inland state)
     if country_code == "in" and not state:
-        result = (True, display_name or "Offshore Coastal Waters", {"reason": "marine_territorial_waters"})
+        result = (True, display_name or "Offshore Coastal Waters", {
+            "reason": "marine_territorial_waters",
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
     # 2. Foreign country outside Indian waters
     if country_code and country_code != "in":
-        result = (False, display_name, {"reason": "foreign_country", "country": country_code})
+        result = (False, display_name, {
+            "reason": "foreign_country",
+            "country": country_code,
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
     # 3. State check: must be a coastal state or UT
     is_coastal_state = any(cs in state for cs in COASTAL_STATES_UT)
     if not is_coastal_state:
-        result = (False, display_name, {"reason": "non_coastal_state", "state": state})
+        result = (False, display_name, {
+            "reason": "non_coastal_state",
+            "state": state,
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
     # 4. Island UTs & Goa are 100% coastal
     if any(isl in state for isl in ["andaman", "nicobar", "lakshadweep", "daman", "diu", "goa", "puducherry"]):
-        result = (True, display_name, {"reason": "coastal_island_or_ut", "state": state})
+        result = (True, display_name, {
+            "reason": "coastal_island_or_ut",
+            "state": state,
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
@@ -329,14 +371,24 @@ def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> T
     addr_tokens = f"{county} {district} {address.get('city', '')} {address.get('town', '')} {address.get('village', '')} {display_name}".lower()
     is_coastal_dist = any(cd in addr_tokens for cd in COASTAL_DISTRICTS)
     if is_coastal_dist:
-        result = (True, display_name, {"reason": "coastal_district", "state": state})
+        result = (True, display_name, {
+            "reason": "coastal_district",
+            "state": state,
+            "distance_to_coast_km": dist_to_coast_km,
+        })
         _REVERSE_CACHE[cache_key] = result
         return result
 
     # Inland district within a coastal state (e.g. Bangalore, Madurai, Coimbatore, Pune, Nagpur)
-    result = (False, display_name, {"reason": "inland_district_in_coastal_state", "state": state, "district": district or county})
+    result = (False, display_name, {
+        "reason": "inland_district_in_coastal_state",
+        "state": state,
+        "district": district or county,
+        "distance_to_coast_km": dist_to_coast_km,
+    })
     _REVERSE_CACHE[cache_key] = result
     return result
+
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +439,14 @@ def resolve_location(query: str) -> Dict[str, Any]:
         "is", "it", "safe", "to", "fish", "right", "now", "today", "tomorrow", "can", "will",
         "how", "what", "where", "when", "should", "are", "do", "does", "i", "we", "the", "a",
         "an", "near", "in", "at", "for", "me", "my", "tell", "check", "please", "there", "any",
-        "weather", "forecast", "sea", "state", "marine", "risk", "condition", "conditions"
+        "weather", "forecast", "sea", "state", "marine", "risk", "condition", "conditions",
+        "mere", "yaha", "yahaan", "yahan", "idhar", "humare", "hamaare", "kya", "hai", "ka",
+        "ki", "ke", "ko", "bata", "batao", "bataiye", "do", "de", "kaisa", "karke", "level",
+        "sollu", "sollungal", "enga", "inge", "ingu", "eppadi", "irukku", "kadal", "mattai",
+        "about", "then", "later", "morning", "evening", "afternoon", "night", "time", "next",
+        "also", "and", "or", "so", "show", "give", "get", "view", "see", "info", "information",
+        "report", "details", "tide", "tides", "water", "waves", "wind", "winds", "cyclone",
+        "storm", "kal", "aaj", "subah", "shaam", "naale", "indru", "kaalai", "maalai",
     }
     tokens = [w for w in re.findall(r'\b[A-Za-z]+\b', query) if w.lower() not in _STOP_WORDS]
     if not tokens:
@@ -464,6 +523,7 @@ def resolve_location(query: str) -> Dict[str, Any]:
             "location_source":     "geocoder",
             "status":              "inland",
             "location_confidence": "medium",
+            "distance_to_coast_km": distance_to_nearest_coast_km(lat, lon),
         }
         _GEOCODE_CACHE[query_lower] = _result
         return _result

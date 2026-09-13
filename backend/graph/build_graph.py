@@ -41,11 +41,13 @@ from graph.nodes.detect_and_parse import detect_and_parse
 from graph.nodes.explain_risk import explain_risk
 from graph.nodes.geofence_agent import geofence_agent
 from graph.nodes.hazard_agent import hazard_agent
+from graph.nodes.ocean_agent import ocean_agent
 from graph.nodes.pfz_agent import pfz_agent
 from graph.nodes.risk_agent import risk_agent
 from graph.nodes.synthesis import synthesis
 from graph.nodes.weather_agent import weather_agent
-from graph.state import AgentResult, ORCAState
+from graph.state import AgentResult, ORCAState, ExecutionStatus, DataStatus
+
 
 logger = logging.getLogger("tarang.graph")
 
@@ -136,10 +138,24 @@ def _reuse_cached(agent_name: str, state: ORCAState) -> dict:
     current_evidence = state.get("evidence") or []
     cached_evidence = cached.get("evidence", []) if cached else []
     logger.info("[Cache] Reinjecting cached %s result into state", agent_name)
+
+    current_dq = state.get("data_quality_reports") or []
+    cached_dq = []
+    if cached and cached.get("data_quality"):
+        cached_dq = [{
+            "agent_name": agent_name,
+            "data_quality": cached.get("data_quality", "live"),
+            "used_fallback": cached.get("used_fallback", False),
+            "timestamp": cached.get("timestamp", ""),
+            "staleness_hours": 0.0,
+            "error": cached.get("error"),
+        }]
+
     return {
         state_key: cached,
         "trace": current_trace + [cached],
         "evidence": current_evidence + cached_evidence,
+        "data_quality_reports": current_dq + cached_dq,
     }
 
 
@@ -147,47 +163,101 @@ def _reuse_cached(agent_name: str, state: ORCAState) -> dict:
 # Wrapped node functions that respect needs_* flags + M5 cache reuse
 # ---------------------------------------------------------------------------
 
+def _log_agent_trace(agent_name: str, action: str, lat: float | None, lon: float | None, res_dict: dict):
+    agent_key = f"{agent_name.replace('_agent', '')}_result"
+    ar = res_dict.get(agent_key) or {}
+    logger.info(
+        f"[TRACE][4/5] Agent '{agent_name}' action={action} lat={lat} lon={lon} "
+        f"status={ar.get('status')} used_fallback={ar.get('used_fallback')} data_quality={ar.get('data_quality')}"
+    )
+
+
 def _weather_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
     if not intent or not intent.get("needs_weather"):
-        return _skip("weather_agent", state)
+        res = _skip("weather_agent", state)
+        _log_agent_trace("weather_agent", "SKIPPED", lat, lon, res)
+        return res
     if _can_reuse_cached("weather_agent", state):
-        return _reuse_cached("weather_agent", state)
-    return weather_agent(state)
+        res = _reuse_cached("weather_agent", state)
+        _log_agent_trace("weather_agent", "REUSED_CACHE", lat, lon, res)
+        return res
+    res = weather_agent(state)
+    _log_agent_trace("weather_agent", "RUN_LIVE", lat, lon, res)
+    return res
 
 
 def _pfz_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
     if not intent or not intent.get("needs_pfz"):
-        return _skip("pfz_agent", state)
+        res = _skip("pfz_agent", state)
+        _log_agent_trace("pfz_agent", "SKIPPED", lat, lon, res)
+        return res
     if _can_reuse_cached("pfz_agent", state):
-        return _reuse_cached("pfz_agent", state)
-    return pfz_agent(state)
+        res = _reuse_cached("pfz_agent", state)
+        _log_agent_trace("pfz_agent", "REUSED_CACHE", lat, lon, res)
+        return res
+    res = pfz_agent(state)
+    _log_agent_trace("pfz_agent", "RUN_LIVE", lat, lon, res)
+    return res
+
+
+def _ocean_node(state: ORCAState) -> dict:
+    intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
+    if not intent or (not intent.get("needs_ocean") and intent.get("query_type") not in ("weather_only", "weather", "safety_check", "general", "ocean_tide")):
+        res = _skip("ocean_agent", state)
+        _log_agent_trace("ocean_agent", "SKIPPED", lat, lon, res)
+        return res
+    res = ocean_agent(state)
+    _log_agent_trace("ocean_agent", "RUN_LIVE", lat, lon, res)
+    return res
 
 
 def _hazard_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
     if not intent or not intent.get("needs_hazard"):
-        return _skip("hazard_agent", state)
+        res = _skip("hazard_agent", state)
+        _log_agent_trace("hazard_agent", "SKIPPED", lat, lon, res)
+        return res
     if _can_reuse_cached("hazard_agent", state):
-        return _reuse_cached("hazard_agent", state)
-    return hazard_agent(state)
+        res = _reuse_cached("hazard_agent", state)
+        _log_agent_trace("hazard_agent", "REUSED_CACHE", lat, lon, res)
+        return res
+    res = hazard_agent(state)
+    _log_agent_trace("hazard_agent", "RUN_LIVE", lat, lon, res)
+    return res
 
 
 def _geofence_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
     if not intent or not intent.get("needs_geofence"):
-        return _skip("geofence_agent", state)
+        res = _skip("geofence_agent", state)
+        _log_agent_trace("geofence_agent", "SKIPPED", lat, lon, res)
+        return res
     if _can_reuse_cached("geofence_agent", state):
-        return _reuse_cached("geofence_agent", state)
-    return geofence_agent(state)
+        res = _reuse_cached("geofence_agent", state)
+        _log_agent_trace("geofence_agent", "REUSED_CACHE", lat, lon, res)
+        return res
+    res = geofence_agent(state)
+    _log_agent_trace("geofence_agent", "RUN_LIVE", lat, lon, res)
+    return res
 
 
 def _risk_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
     if intent and intent.get("needs_risk"):
-        return risk_agent(state)
-    return _skip("risk_agent", state)
+        res = risk_agent(state)
+        _log_agent_trace("risk_agent", "RUN_LIVE", lat, lon, res)
+        return res
+    res = _skip("risk_agent", state)
+    _log_agent_trace("risk_agent", "SKIPPED", lat, lon, res)
+    return res
 
 
 def _explain_risk_node(state: ORCAState) -> dict:
@@ -209,6 +279,61 @@ def _explain_risk_node(state: ORCAState) -> dict:
     return {}
 
 
+def _status_validator_node(state: ORCAState) -> dict:
+    """
+    Computes decoupled execution_status and overall_data_status across all specialist agents.
+    execution_status: 'success' | 'partial' | 'failed' | 'skipped'
+    overall_data_status: 'live' | 'cached' | 'mixed' | 'unavailable'
+    """
+    resolved = state.get("resolved_location")
+
+    # If location is inland or unresolved, clarification was successfully given
+    if not resolved or not resolved.get("coastal"):
+        return {
+            "execution_status": "skipped" if not resolved else "success",
+            "overall_data_status": "unavailable",
+        }
+
+    # Inspect all agents that ran
+    trace = state.get("trace") or []
+    executed = [r for r in trace if r.get("status") != "skipped"]
+
+    if not executed:
+        exec_status: ExecutionStatus = "skipped"
+        data_status: DataStatus = "unavailable"
+    else:
+        successes = [r for r in executed if r.get("status") == "success"]
+        errors = [r for r in executed if r.get("status") in ("error", "insufficient_data")]
+
+        if len(errors) == 0:
+            exec_status = "success"
+        elif len(successes) > 0:
+            exec_status = "partial"
+        else:
+            exec_status = "failed"
+
+        # Check data quality among successful agents
+        qualities = [r.get("data_quality", "live") for r in successes]
+        has_fallback = any(q == "fallback" for q in qualities)
+        has_live = any(q == "live" for q in qualities)
+        has_proxy = any(q == "historical_proxy" for q in qualities)
+
+        if not successes:
+            data_status = "unavailable"
+        elif has_fallback and not has_live:
+            data_status = "cached"
+        elif has_live and not has_fallback and not has_proxy:
+            data_status = "live"
+        else:
+            data_status = "mixed"
+
+    logger.info("[StatusValidator] execution_status=%s overall_data_status=%s", exec_status, data_status)
+    return {
+        "execution_status": exec_status,
+        "overall_data_status": data_status,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Build & compile the graph
 # ---------------------------------------------------------------------------
@@ -225,10 +350,12 @@ def build_graph() -> "CompiledGraph":  # type: ignore[type-arg]
     builder.add_node("detect_and_parse", detect_and_parse)
     builder.add_node("weather_agent", _weather_node)
     builder.add_node("pfz_agent", _pfz_node)
+    builder.add_node("ocean_agent", _ocean_node)
     builder.add_node("hazard_agent", _hazard_node)
     builder.add_node("geofence_agent", _geofence_node)
     builder.add_node("risk_agent", _risk_node)
     builder.add_node("explain_risk", _explain_risk_node)
+    builder.add_node("status_validator", _status_validator_node)
     builder.add_node("synthesis", synthesis)
 
     # --- Entry point ---
@@ -236,14 +363,15 @@ def build_graph() -> "CompiledGraph":  # type: ignore[type-arg]
 
     # --- Sequential edges (deterministic routing) ---
     # After parsing, always run all specialist wrappers in order.
-    # The wrappers check needs_* and cache internally.
     builder.add_edge("detect_and_parse", "weather_agent")
     builder.add_edge("weather_agent", "pfz_agent")
-    builder.add_edge("pfz_agent", "hazard_agent")
+    builder.add_edge("pfz_agent", "ocean_agent")
+    builder.add_edge("ocean_agent", "hazard_agent")
     builder.add_edge("hazard_agent", "geofence_agent")
     builder.add_edge("geofence_agent", "risk_agent")
     builder.add_edge("risk_agent", "explain_risk")
-    builder.add_edge("explain_risk", "synthesis")
+    builder.add_edge("explain_risk", "status_validator")
+    builder.add_edge("status_validator", "synthesis")
     builder.add_edge("synthesis", END)
 
     return builder.compile()
@@ -254,3 +382,4 @@ def build_graph() -> "CompiledGraph":  # type: ignore[type-arg]
 # ---------------------------------------------------------------------------
 
 graph = build_graph()
+

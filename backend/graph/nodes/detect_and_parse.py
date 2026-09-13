@@ -23,6 +23,7 @@ Location resolution uses a static coastal gazetteer.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
@@ -34,7 +35,11 @@ from langchain_core.prompts import ChatPromptTemplate
 
 import config
 from graph.state import ORCAState, ParsedIntent
-from tools.location_resolver import resolve_location, GAZETTEER, location_is_coastal
+from location.resolver import LocationResolver
+from location.models import DeviceLocation, QueryLocation, ResolvedLocation, LocationMode
+from session.session_store import get_or_create_session
+from tools.location_resolver import resolve_location, GAZETTEER, location_is_coastal, distance_to_nearest_coast_km
+
 
 # ---------------------------------------------------------------------------
 # Timezone offset for India (IST = UTC+5:30)
@@ -264,6 +269,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": True,
             "needs_geofence": True,
             "needs_risk": True,
+            "needs_ocean": True,
         }
     elif is_safety:
         return "safety_check", {
@@ -272,6 +278,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": True,
             "needs_geofence": True,
             "needs_risk": True,
+            "needs_ocean": True,
         }
     elif is_pfz:
         # Pure PFZ query — no weather/hazard/risk needed
@@ -281,6 +288,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
+            "needs_ocean": False,
         }
     elif is_hazard:
         return "hazard_only", {
@@ -289,6 +297,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": True,
             "needs_geofence": False,
             "needs_risk": False,
+            "needs_ocean": False,
         }
     elif is_weather:
         return "weather_only", {
@@ -297,6 +306,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
+            "needs_ocean": True,
         }
     else:
         return "general", {
@@ -305,6 +315,7 @@ def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
             "needs_hazard": True,
             "needs_geofence": True,
             "needs_risk": True,
+            "needs_ocean": True,
         }
 
 
@@ -380,520 +391,177 @@ def _get_location_clarification_text(lang: str) -> str:
         return "I could not determine your coastal location. Please specify which harbour or coastal area you are planning to fish near (e.g., Thoothukudi, Rameswaram, Kochi, or Visakhapatnam), or enable device location access so I can assess conditions in your local waters."
 
 
-def _get_inland_clarification_text(lang: str, loc_name: Optional[str] = None) -> str:
-    """Return clarification prompt when location is determined to be inland."""
-    name_str = f"'{loc_name}'" if loc_name else "Your current location"
-    if lang == "ta":
-        return f"{name_str} கடற்கரை இல்லாத உள்நாட்டு பகுதியாக தெரிகிறது. தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
-    elif lang == "hi":
-        return f"{name_str} एक अंतर्देशीय (गैर-तटीय) स्थान प्रतीत होता है। कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+def _get_relative_missing_clarification_text(lang: str) -> str:
+    """Return prompt when user asks for 'here' / 'near me' but device location is unavailable."""
+    if lang == "hi":
+        return "आपकी क्वेरी में 'यहाँ' / 'मेरे पास' की स्थिति पूछी गई है, लेकिन डिवाइस स्थान की अनुमति उपलब्ध नहीं है। कृपया ब्राउज़र में स्थान अनुमति सक्षम करें अथवा अपने तटीय शहर (जैसे कोच्चि, मुंबई, थूथुकुडी) का नाम बताएं।"
+    elif lang == "ta":
+        return "உங்கள் வினவல் 'இங்கே' / 'அருகில்' உள்ள நிலவரத்தைக் கேட்கிறது, ஆனால் சாதன இருப்பிட அனுமதி கிடைக்கவில்லை. தயவுசெய்து சாதன இருப்பிட அனுமதியை வழங்கவும் அல்லது உங்கள் கடலோர நகரத்தைக் குறிப்பிடவும் (எ.கா. கொச்சி, மும்பை, தூத்துக்குடி)."
     else:
-        return f"The location {name_str} appears to be inland. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you."
+        return "You asked for conditions 'here', but device location access is not available. Please allow location access in your browser or specify your coastal town (e.g. Kochi, Mumbai, Thoothukudi)."
+
+
+def _get_inland_clarification_text(
+
+    lang: str,
+    loc_name: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    dist_km: Optional[float] = None,
+) -> str:
+    """
+    Return user-facing clarification prompt when location is determined to be inland.
+    Replaces generic placeholder names with actual coordinates and real distance to coast.
+    """
+    # If distance was not passed but coords are available, compute it
+    if dist_km is None and lat is not None and lon is not None:
+        dist_km = distance_to_nearest_coast_km(lat, lon)
+
+    is_placeholder = (
+        not loc_name
+        or loc_name.lower() in ("your coastal location", "current location", "unknown", "inland", "target location")
+        or loc_name.startswith("Location (")
+    )
+    dist_rounded = f"{round(dist_km / 10) * 10:.0f}" if dist_km is not None else None
+
+    # Case A: We have latitude & longitude (e.g. browser geolocation)
+    if lat is not None and lon is not None:
+        coord_str = f"{lat:.2f}°N, {lon:.2f}°E"
+        if dist_rounded:
+            if lang == "hi":
+                return (
+                    f"आप {coord_str} के पास हैं — निकटतम समुद्र तट से लगभग {dist_rounded} किमी दूर। "
+                    f"यह एक अंतर्देशीय (गैर-तटीय) स्थान है। "
+                    f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
+                    f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+                )
+            elif lang == "ta":
+                return (
+                    f"நீங்கள் {coord_str} அருகில் உள்ளீர்கள் — அருகிலுள்ள கடற்கரையில் இருந்து சுமார் {dist_rounded} கி.மீ தொலைவில் உள்ளீர்கள். "
+                    f"இது கடற்கரை இல்லாத உள்நாட்டு பகுதியாகும். "
+                    f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், "
+                    f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
+                )
+            else:
+                return (
+                    f"You're near {coord_str} — about {dist_rounded}km from the nearest coast. "
+                    f"This isn't a coastal location. Please provide an Indian coastal location "
+                    f"(e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you."
+                )
+        else:
+            if lang == "hi":
+                return (
+                    f"आप {coord_str} के पास हैं, जो एक अंतर्देशीय (गैर-तटीय) स्थान है। "
+                    f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
+                    f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+                )
+            elif lang == "ta":
+                return (
+                    f"நீங்கள் {coord_str} அருகில் உள்ளீர்கள், இது கடற்கரை இல்லாத உள்நாட்டு பகுதியாகும். "
+                    f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, मुंबई) குறிப்பிடவும், "
+                    f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
+                )
+            else:
+                return (
+                    f"You're near {coord_str}, which appears to be inland. "
+                    f"Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
+                    f"and I will retrieve marine and safety information for you."
+                )
+
+    # Case B: Named location from query text (e.g. "Delhi", "Bengaluru", "Jaipur")
+    name_display = loc_name if not is_placeholder else "This location"
+    if dist_rounded:
+        if lang == "hi":
+            return (
+                f"स्थान '{name_display}' अंतर्देशीय है (समुद्र तट से लगभग {dist_rounded} किमी दूर)। "
+                f"कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, "
+                f"और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+            )
+        elif lang == "ta":
+            return (
+                f"'{name_display}' பகுதி ஒரு உள்நாட்டு பகுதியாகும் (கடற்கரையில் இருந்து சுமார் {dist_rounded} கி.மீ தூரம்). "
+                f"தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், "
+                f"நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
+            )
+        else:
+            return (
+                f"The location '{name_display}' is inland (about {dist_rounded}km from the coast). "
+                f"Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
+                f"and I will retrieve marine and safety information for you."
+            )
+
+    # Generic fallback
+    if lang == "hi":
+        return f"'{name_display}' एक अंतर्देशीय (गैर-तटीय) स्थान प्रतीत होता है। कृपया किसी भारतीय तटीय स्थान (जैसे थूथुकुडी, चेन्नई, मुंबई) का नाम बताएं, और मैं आपके लिए समुद्री और सुरक्षा जानकारी प्राप्त करूँगा।"
+    elif lang == "ta":
+        return f"'{name_display}' கடற்கரை இல்லாத உள்நாட்டு பகுதியாக தெரிகிறது. தயவுசெய்து ஒரு இந்திய கடலோர பகுதியை (எ.கா. தூத்துக்குடி, சென்னை, மும்பை) குறிப்பிடவும், நான் உங்களுக்கான கடல் மற்றும் பாதுகாப்பு தகவல்களை வழங்குகிறேன்."
+    else:
+        return f"The location '{name_display}' appears to be inland. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you."
+
 
 def detect_and_parse(state: ORCAState) -> dict:
     """
-    LangGraph node: detect language + parse intent from raw_query using Groq LLM.
-    Falls back to deterministic rule-based parsing on failure/timeout.
+    LangGraph node: detect language + parse intent from raw_query.
+    Enforces V2 single-source-of-truth architecture using LocationResolver and SessionStore.
     """
-    raw = state["raw_query"]
+    raw = state.get("raw_query", "").strip()
     last_intent = state.get("last_parsed_intent")
     conversation_history = list(state.get("conversation_history") or [])
     language_override = state.get("language_override")
 
-    if not config.GROQ_API_KEY:
-        logger.warning("GROQ_API_KEY not set. Falling back to rule-based parser.")
-        return _fallback_parse(state)
+    # 1. Authoritative Server-Side Session
+    conv_id = state.get("conversation_id") or "default"
+    session = get_or_create_session(conv_id)
 
-    # Prepare context
-    history_text = "\n".join([f"{t['role']}: {t['content']}" for t in conversation_history])
-    gazetteer_list = ", ".join([f"{k.title()} ({v[0]}, {v[1]})" for k, v in GAZETTEER.items()])
-    
-    system_prompt = f"""You are a marine safety intent parser. Extract structured intent from the user query.
-The query may be in English, Hindi (including Romanised), or Tamil (including Romanised).
-    
-RULES:
-1. Resolve location names to lat/lon ONLY from this gazetteer list: {gazetteer_list}. 
-   If the location isn't in this list, return location_name as the raw extracted text and leave lat/lon null.
-2. If there is conversation history, inherit the location and/or time_window from the last intent if they are not explicitly changed in the new query.
-3. Classify the query_type accurately. "risk_explanation" is when asking WHY the risk score is what it is (explain the factors).
-
-Last Intent Context:
-{last_intent if last_intent else 'None'}
-
-Conversation History:
-{history_text if history_text else 'None'}
-"""
-    
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("user", "{query}")
-    ])
-    
-    llm = ChatGroq(
-        model=config.GROQ_MODEL_FAST, 
-        api_key=config.GROQ_API_KEY, 
-        temperature=0, 
-        max_retries=0, 
-        timeout=4.0
-    )
-    structured_llm = llm.with_structured_output(ParsedIntentSchema)
-    chain = prompt | structured_llm
-    
-    try:
-        res: ParsedIntentSchema = chain.invoke({"query": raw})
-        
-        # Determine language: manual override takes precedence over LLM auto-detection
-        detected_lang = language_override if language_override in ("en", "hi", "ta") else res.detected_language
-
-        # We must fill needs_risk based on query_type for backward compatibility in the pipeline
-        needs_risk = res.query_type == "safety_check"
-        
-        # For explanations, handle explicitly
-        if res.query_type == "risk_explanation":
-            time_start_utc, time_end_utc = _resolve_time_range(res.time_window)
-            
-            loc_name = res.location_name
-            lat = res.lat
-            lon = res.lon
-
-            if loc_name is None and last_intent is not None and last_intent.get("location_name"):
-                loc_name = last_intent.get("location_name")
-                lat = last_intent.get("lat")
-                lon = last_intent.get("lon")
-
-            user_loc = state.get("user_location")
-            if (loc_name is None or lat is None or lon is None) and user_loc and user_loc.get("lat") is not None and user_loc.get("lon") is not None:
-                lat = float(user_loc["lat"])
-                lon = float(user_loc["lon"])
-                loc_name = user_loc.get("name") or f"Location ({lat:.2f}°N, {lon:.2f}°E)"
-
-            if loc_name is None or lat is None or lon is None:
-                clarification_text = _get_location_clarification_text(detected_lang)
-                unresolved_intent = ParsedIntent(
-                    location_name=None,
-                    lat=None,
-                    lon=None,
-                    time_window=res.time_window,
-                    time_start_utc="",
-                    time_end_utc="",
-                    query_type="general",
-                    needs_weather=False,
-                    needs_pfz=False,
-                    needs_hazard=False,
-                    needs_geofence=False,
-                    needs_risk=False,
-                )
-                return {
-                    "detected_language": detected_lang,
-                    "parsed_intent": unresolved_intent,
-                    "changed_fields": [],
-                    "final_answer_text": clarification_text,
-                    "parse_method": "llm",
-                }
-
-            parsed_intent = ParsedIntent(
-                location_name=loc_name,
-                lat=lat,
-                lon=lon,
-                time_window=res.time_window,
-                time_start_utc=time_start_utc,
-                time_end_utc=time_end_utc,
-                query_type="risk_explanation",
-                needs_weather=False,
-                needs_pfz=False,
-                needs_hazard=False,
-                needs_geofence=False,
-                needs_risk=False,
-            )
-            
-            new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
-            return {
-                "detected_language": detected_lang,
-                "parsed_intent": parsed_intent,
-                "changed_fields": [],
-                "conversation_history": new_history,
-                "parse_method": "llm",
+    # 2. Extract Device Location
+    device_loc: Optional[DeviceLocation] = state.get("device_location")
+    if not device_loc and state.get("user_location"):
+        u_loc = state["user_location"]
+        if u_loc.get("lat") is not None and u_loc.get("lon") is not None:
+            device_loc = {
+                "lat": float(u_loc["lat"]),
+                "lon": float(u_loc["lon"]),
+                "accuracy": u_loc.get("accuracy"),
+                "captured_at": u_loc.get("captured_at"),
+                "permission_status": "granted",
             }
-            
-        # Detect invalid location logic
-        if res.location_name and res.lat is None and res.lon is None:
-            # We matched the text but it wasn't in gazetteer. Let's use the Tier 2 geocoder.
-            loc_result = resolve_location(res.location_name)
-            
-            if loc_result["status"] == "success":
-                res.location_name = loc_result["location_name"]
-                res.lat = loc_result["latitude"]
-                res.lon = loc_result["longitude"]
-            elif loc_result["status"] == "inland":
-                invalid_intent = ParsedIntent(
-                    location_name="Unknown", lat=None, lon=None,
-                    time_window=res.time_window, time_start_utc="", time_end_utc="",
-                    query_type="general", needs_weather=False, needs_pfz=False,
-                    needs_hazard=False, needs_geofence=False, needs_risk=False,
-                )
-                return {
-                    "detected_language": detected_lang,
-                    "parsed_intent": invalid_intent,
-                    "changed_fields": [],
-                    "final_answer_text": f"The location '{res.location_name}' appears to be inland. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you.",
-                    "parse_method": "llm",
-                }
-            else:
-                invalid_intent = ParsedIntent(
-                    location_name="Unknown", lat=None, lon=None,
-                    time_window=res.time_window, time_start_utc="", time_end_utc="",
-                    query_type="general", needs_weather=False, needs_pfz=False,
-                    needs_hazard=False, needs_geofence=False, needs_risk=False,
-                )
-                return {
-                    "detected_language": detected_lang,
-                    "parsed_intent": invalid_intent,
-                    "changed_fields": [],
-                    "final_answer_text": "I was unable to identify a recognised coastal location in your query. Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) and I will retrieve marine and safety information for you.",
-                    "parse_method": "llm",
-                }
+    if device_loc:
+        session.device_location = device_loc
+    elif session.device_location:
+        device_loc = session.device_location
 
-        # Resolve explicit UTC time range
-        time_start_utc, time_end_utc = _resolve_time_range(res.time_window)
+    # 3. Single-Source-of-Truth Location Resolution
+    mode, q_loc, resolved = LocationResolver.resolve(raw, device_loc, session)
 
-        # Location resolution: extracted from query -> multi-turn last_intent -> user_location
-        loc_name = res.location_name
-        lat = res.lat
-        lon = res.lon
+    # 4. Language Detection
+    detected_lang = language_override if language_override in ("en", "hi", "ta") else _detect_language(raw)
 
-        if loc_name is None and last_intent is not None and last_intent.get("location_name"):
-            loc_name = last_intent.get("location_name")
-            lat = last_intent.get("lat")
-            lon = last_intent.get("lon")
+    # 5. Temporal Extraction & Intent Classification
+    _explicit_time = _extract_time_window(raw)
+    _has_explicit_time = any(pat.search(raw) for pat, _ in _TIME_PATTERNS)
+    if not _has_explicit_time and last_intent is not None and last_intent.get("time_window"):
+        time_window = last_intent["time_window"]
+    else:
+        time_window = _explicit_time
 
-        user_loc = state.get("user_location")
-        if (loc_name is None or lat is None or lon is None) and user_loc and user_loc.get("lat") is not None and user_loc.get("lon") is not None:
-            lat = float(user_loc["lat"])
-            lon = float(user_loc["lon"])
-            loc_name = user_loc.get("name") or f"Location ({lat:.2f}°N, {lon:.2f}°E)"
-
-        # Coastal-validity check on all resolved coordinates (browser geolocation or text)
-        if lat is not None and lon is not None:
-            is_coastal, verified_name, meta = location_is_coastal(lat, lon, loc_name)
-            if not is_coastal:
-                logger.info("[Location] Coordinates (%.4f, %.4f) '%s' flagged as inland: %s", lat, lon, loc_name, meta)
-                inland_intent = ParsedIntent(
-                    location_name=verified_name or loc_name or "Inland",
-                    lat=None,
-                    lon=None,
-                    time_window=res.time_window,
-                    time_start_utc="",
-                    time_end_utc="",
-                    query_type="general",
-                    needs_weather=False,
-                    needs_pfz=False,
-                    needs_hazard=False,
-                    needs_geofence=False,
-                    needs_risk=False,
-                )
-                inland_text = _get_inland_clarification_text(detected_lang, verified_name or loc_name)
-                return {
-                    "detected_language": detected_lang,
-                    "parsed_intent": inland_intent,
-                    "changed_fields": [],
-                    "final_answer_text": inland_text,
-                    "parse_method": "llm",
-                }
-            loc_name = verified_name or loc_name
-
-        # If STILL no resolvable location: DO NOT DEFAULT TO THOOTHUKUDI!
-        if loc_name is None or lat is None or lon is None:
-            unresolved_intent = ParsedIntent(
-                location_name=None,
-                lat=None,
-                lon=None,
-                time_window=res.time_window,
-                time_start_utc="",
-                time_end_utc="",
-                query_type="general",
-                needs_weather=False,
-                needs_pfz=False,
-                needs_hazard=False,
-                needs_geofence=False,
-                needs_risk=False,
-            )
-            clarification_text = _get_location_clarification_text(detected_lang)
-            return {
-                "detected_language": detected_lang,
-                "parsed_intent": unresolved_intent,
-                "changed_fields": [],
-                "final_answer_text": clarification_text,
-                "parse_method": "llm",
-            }
-
-        new_intent = ParsedIntent(
-            location_name=loc_name,
-            lat=lat,
-            lon=lon,
-            time_window=res.time_window,
-            time_start_utc=time_start_utc,
-            time_end_utc=time_end_utc,
-            query_type=res.query_type, # type: ignore
-            needs_weather=res.needs_weather,
-            needs_pfz=res.needs_pfz,
-            needs_hazard=res.needs_hazard,
-            needs_geofence=res.needs_geofence,
-            needs_risk=needs_risk,
-        )
-
-        changed_fields = _compute_changed_fields(new_intent, last_intent)
-        new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
-
-        return {
-            "detected_language": detected_lang,
-            "parsed_intent": new_intent,
-            "changed_fields": changed_fields,
-            "conversation_history": new_history,
-            "parse_method": "llm",
-        }
-        
-    except Exception as exc:
-        logger.warning(f"Groq parse failed ({exc}), falling back to rule-based parser.")
-        return _fallback_parse(state)
-
-
-# ---------------------------------------------------------------------------
-# Fallback rule-based parsing (Pre-M6 logic)
-# ---------------------------------------------------------------------------
-
-def _fallback_parse(state: ORCAState) -> dict:
-    """
-    LangGraph node: detect language + parse intent from raw_query.
-    Returns a partial state dict to merge into ORCAState.
-
-    Milestone 2:
-      - Resolves time_window → explicit UTC time range
-      - Flags invalid locations rather than silently defaulting
-
-    Milestone 4:
-      - Classifies "risk_explanation" queries before other checks
-
-    Milestone 5:
-      - Inherits location/time from last_parsed_intent when not explicitly provided
-      - Produces changed_fields to enable selective agent re-invocation
-      - Caps conversation_history to config.MAX_CONVERSATION_TURNS
-    """
-    raw = state["raw_query"]
-    language_override = state.get("language_override")
-    detected_language = language_override if language_override in ("en", "hi", "ta") else _detect_language(raw)
-    
-    loc_result = resolve_location(raw)
-    location_name = loc_result["location_name"] if loc_result["status"] == "success" else None
-    lat = loc_result["latitude"] if loc_result["status"] == "success" else None
-    lon = loc_result["longitude"] if loc_result["status"] == "success" else None
-    loc_status = loc_result["status"]
-    
-    time_window = _extract_time_window(raw)
+    time_start_utc, time_end_utc = _resolve_time_range(time_window)
     query_type, needs = _classify_query(raw)
 
-    # ---- Milestone 5: Get multi-turn context ----
-    last_intent: Optional[ParsedIntent] = state.get("last_parsed_intent")
-    conversation_history = list(state.get("conversation_history") or [])
+    # Check for tides / water level keywords
+    raw_lower = raw.lower()
+    needs_ocean = any(w in raw_lower for w in [
+        "tide", "tides", "water level", "sea level", "jwar", "bhata", "alahi", "high tide", "low tide"
+    ])
+    needs["needs_ocean"] = needs_ocean
 
-    # ---- Milestone 4: Handle risk_explanation early ----
-    # For explanations, we reuse the last known location if no new one given
-    if query_type == "risk_explanation":
-        if location_name is None and last_intent is not None:
-            location_name = last_intent.get("location_name")
-            lat = last_intent.get("lat")
-            lon = last_intent.get("lon")
+    logger.info(
+        "[DetectAndParse] Mode=%s Resolved=%s QLoc=%s Lang=%s",
+        mode, resolved.get("name") if resolved else None, q_loc.get("source"), detected_lang
+    )
 
-        # Check user geolocation
-        user_loc = state.get("user_location")
-        if (location_name is None or lat is None or lon is None) and user_loc and user_loc.get("lat") is not None and user_loc.get("lon") is not None:
-            lat = float(user_loc["lat"])
-            lon = float(user_loc["lon"])
-            location_name = user_loc.get("name") or f"Location ({lat:.2f}°N, {lon:.2f}°E)"
-
-        if lat is not None and lon is not None:
-            is_coastal, verified_name, meta = location_is_coastal(lat, lon, location_name)
-            if not is_coastal:
-                inland_intent: ParsedIntent = {
-                    "location_name": verified_name or location_name or "Inland",
-                    "lat": None,
-                    "lon": None,
-                    "time_window": time_window,
-                    "time_start_utc": "",
-                    "time_end_utc": "",
-                    "query_type": "general",
-                    "needs_weather": False,
-                    "needs_pfz": False,
-                    "needs_hazard": False,
-                    "needs_geofence": False,
-                    "needs_risk": False,
-                }
-                inland_text = _get_inland_clarification_text(detected_language, verified_name or location_name)
-                return {
-                    "detected_language": detected_language,
-                    "parsed_intent": inland_intent,
-                    "changed_fields": [],
-                    "final_answer_text": inland_text,
-                    "parse_method": "rule_based_fallback",
-                }
-            location_name = verified_name or location_name
-
-        if location_name is None or lat is None or lon is None:
-            clarification_text = _get_location_clarification_text(detected_language)
-            invalid_intent: ParsedIntent = {
-                "location_name": None,
-                "lat": None,
-                "lon": None,
-                "time_window": time_window,
-                "time_start_utc": "",
-                "time_end_utc": "",
-                "query_type": "general",
-                "needs_weather": False,
-                "needs_pfz": False,
-                "needs_hazard": False,
-                "needs_geofence": False,
-                "needs_risk": False,
-            }
-            return {
-                "detected_language": detected_language,
-                "parsed_intent": invalid_intent,
-                "changed_fields": [],
-                "final_answer_text": clarification_text,
-                "parse_method": "rule_based_fallback",
-            }
-
-        # Use last time_window if not explicitly provided in this message
-        _explicit_time = _extract_time_window(raw)
-        if _explicit_time == "next_24h" and last_intent is not None:
-            # "next_24h" is the default — if last intent had a real window, keep it
-            time_window = last_intent.get("time_window", "next_24h")
-        else:
-            time_window = _explicit_time
-
-        time_start_utc, time_end_utc = _resolve_time_range(time_window)
-
-        parsed_intent: ParsedIntent = ParsedIntent(
-            location_name=location_name,
-            lat=lat,
-            lon=lon,
-            time_window=time_window,
-            time_start_utc=time_start_utc,
-            time_end_utc=time_end_utc,
-            query_type="risk_explanation",
-            **needs,  # type: ignore[misc]
-        )
-
-        # Cap conversation history
-        new_history = (conversation_history + [{"role": "user", "content": raw}])[
-            -config.MAX_CONVERSATION_TURNS:
-        ]
-
-        return {
-            "detected_language": detected_language,
-            "parsed_intent": parsed_intent,
-            "changed_fields": [],
-            "conversation_history": new_history,
-            "parse_method": "rule_based_fallback",
-        }
-
-    # ---- Detect fictional/invalid locations ----
-    if loc_status == "inland":
-        invalid_intent: ParsedIntent = {
-            "location_name": "Unknown",
-            "lat": None,
-            "lon": None,
-            "time_window": time_window,
-            "time_start_utc": "",
-            "time_end_utc": "",
-            "query_type": "general",
-            "needs_weather": False,
-            "needs_pfz": False,
-            "needs_hazard": False,
-            "needs_geofence": False,
-            "needs_risk": False,
-        }
-        return {
-            "detected_language": detected_language,
-            "parsed_intent": invalid_intent,
-            "changed_fields": [],
-            "final_answer_text": (
-                "The requested location appears to be inland. "
-                "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
-                "and I will retrieve marine and safety information for you."
-            ),
-            "parse_method": "rule_based_fallback",
-        }
-        
-    if _is_invalid_location(raw) and location_name is None:
-        invalid_intent: ParsedIntent = {
-            "location_name": "Unknown",
-            "lat": None,
-            "lon": None,
-            "time_window": time_window,
-            "time_start_utc": "",
-            "time_end_utc": "",
-            "query_type": "general",
-            "needs_weather": False,
-            "needs_pfz": False,
-            "needs_hazard": False,
-            "needs_geofence": False,
-            "needs_risk": False,
-        }
-        return {
-            "detected_language": detected_language,
-            "parsed_intent": invalid_intent,
-            "changed_fields": [],
-            "final_answer_text": (
-                "I was unable to identify a recognised coastal location in your query. "
-                "Please provide an Indian coastal location (e.g. Thoothukudi, Chennai, Mumbai) "
-                "and I will retrieve marine and safety information for you."
-            ),
-            "parse_method": "rule_based_fallback",
-        }
-
-    # ---- Milestone 5: Inherit location from previous turn if not in this query ----
-    if location_name is None and last_intent is not None:
-        location_name = last_intent.get("location_name")
-        lat = last_intent.get("lat")
-        lon = last_intent.get("lon")
-
-    # If still no location, check browser geolocation in state
-    user_loc = state.get("user_location")
-    if (location_name is None or lat is None or lon is None) and user_loc and user_loc.get("lat") is not None and user_loc.get("lon") is not None:
-        lat = float(user_loc["lat"])
-        lon = float(user_loc["lon"])
-        location_name = user_loc.get("name") or f"Location ({lat:.2f}°N, {lon:.2f}°E)"
-
-    # Coastal validity check on resolved coordinates
-    if lat is not None and lon is not None:
-        is_coastal, verified_name, meta = location_is_coastal(lat, lon, location_name)
-        if not is_coastal:
-            logger.info("[Location] Fallback: coordinates (%.4f, %.4f) '%s' flagged inland: %s", lat, lon, location_name, meta)
-            inland_intent: ParsedIntent = {
-                "location_name": verified_name or location_name or "Inland",
-                "lat": None,
-                "lon": None,
-                "time_window": time_window,
-                "time_start_utc": "",
-                "time_end_utc": "",
-                "query_type": "general",
-                "needs_weather": False,
-                "needs_pfz": False,
-                "needs_hazard": False,
-                "needs_geofence": False,
-                "needs_risk": False,
-            }
-            inland_text = _get_inland_clarification_text(detected_language, verified_name or location_name)
-            return {
-                "detected_language": detected_language,
-                "parsed_intent": inland_intent,
-                "changed_fields": [],
-                "final_answer_text": inland_text,
-                "parse_method": "rule_based_fallback",
-            }
-        location_name = verified_name or location_name
-
-    # If still no location: DO NOT DEFAULT TO THOOTHUKUDI!
-    if location_name is None or lat is None or lon is None:
+    # 6. Early-Exit Case A: User asked for "here" / "near me" but device location is missing
+    if mode == "DEVICE" and resolved is None:
+        clarification_text = _get_relative_missing_clarification_text(detected_lang)
         unresolved_intent: ParsedIntent = {
             "location_name": None,
             "lat": None,
@@ -901,57 +569,148 @@ def _fallback_parse(state: ORCAState) -> dict:
             "time_window": time_window,
             "time_start_utc": "",
             "time_end_utc": "",
-            "query_type": "general",
+            "query_type": query_type,
             "needs_weather": False,
             "needs_pfz": False,
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
+            "needs_ocean": False,
+            "location_status": "unresolved",
         }
-        clarification_text = _get_location_clarification_text(detected_language)
         return {
-            "detected_language": detected_language,
+            "detected_language": detected_lang,
             "parsed_intent": unresolved_intent,
+            "device_location": device_loc,
+            "query_location": q_loc,
+            "resolved_location": None,
+            "location_mode": mode,
             "changed_fields": [],
             "final_answer_text": clarification_text,
             "parse_method": "rule_based_fallback",
         }
 
-    # ---- Milestone 5: Inherit time_window from last turn if this query uses default ----
-    # Only inherit if the new query has no explicit temporal signal
-    _explicit_time = _extract_time_window(raw)
-    _has_explicit_time = any(pat.search(raw) for pat, _ in _TIME_PATTERNS)
-    if not _has_explicit_time and last_intent is not None:
-        time_window = last_intent.get("time_window", "next_24h")
+    # 7. Early-Exit Case B: Completely Unresolved Location
+    if resolved is None:
+        clarification_text = _get_location_clarification_text(detected_lang)
+        unresolved_intent = {
+            "location_name": None,
+            "lat": None,
+            "lon": None,
+            "time_window": time_window,
+            "time_start_utc": "",
+            "time_end_utc": "",
+            "query_type": query_type,
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+            "location_status": "unresolved",
+        }
+        return {
+            "detected_language": detected_lang,
+            "parsed_intent": unresolved_intent,
+            "device_location": device_loc,
+            "query_location": q_loc,
+            "resolved_location": None,
+            "location_mode": mode,
+            "changed_fields": [],
+            "final_answer_text": clarification_text,
+            "parse_method": "rule_based_fallback",
+        }
+
+    # 8. Early-Exit Case C: Inland Location Flagged by Coastal Check
+    if not resolved["coastal"]:
+        dist_km = resolved.get("nearest_coast_km")
+        inland_text = _get_inland_clarification_text(
+            detected_lang,
+            resolved["name"],
+            resolved["lat"],
+            resolved["lon"],
+            dist_km,
+        )
+        inland_intent: ParsedIntent = {
+            "location_name": resolved["name"],
+            "lat": resolved["lat"],
+            "lon": resolved["lon"],
+            "time_window": time_window,
+            "time_start_utc": "",
+            "time_end_utc": "",
+            "query_type": query_type,
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+            "location_status": "inland",
+            "distance_to_coast_km": dist_km,
+        }
+        return {
+            "detected_language": detected_lang,
+            "parsed_intent": inland_intent,
+            "device_location": device_loc,
+            "query_location": q_loc,
+            "resolved_location": resolved,
+            "location_mode": mode,
+            "changed_fields": [],
+            "final_answer_text": inland_text,
+            "parse_method": "rule_based_fallback",
+        }
+
+    # 9. Case D: Coastal Location Verified
+    loc_name = resolved["name"]
+    lat = resolved["lat"]
+    lon = resolved["lon"]
+
+    # Special case: risk explanation
+    if query_type == "risk_explanation":
+        needs_weather = False
+        needs_pfz = False
+        needs_hazard = False
+        needs_geofence = False
+        needs_risk = False
     else:
-        time_window = _explicit_time
+        needs_weather = needs.get("needs_weather", True)
+        needs_pfz = needs.get("needs_pfz", True)
+        needs_hazard = needs.get("needs_hazard", True)
+        needs_geofence = needs.get("needs_geofence", True)
+        needs_risk = needs.get("needs_risk", True)
 
-    # Resolve explicit UTC time range
-    time_start_utc, time_end_utc = _resolve_time_range(time_window)
-
-    new_intent = ParsedIntent(
-        location_name=location_name,
+    new_intent: ParsedIntent = ParsedIntent(
+        location_name=loc_name,
         lat=lat,
         lon=lon,
         time_window=time_window,
         time_start_utc=time_start_utc,
         time_end_utc=time_end_utc,
         query_type=query_type,
-        **needs,  # type: ignore[misc]
+        needs_weather=needs_weather,
+        needs_pfz=needs_pfz,
+        needs_hazard=needs_hazard,
+        needs_geofence=needs_geofence,
+        needs_risk=needs_risk,
+        needs_ocean=needs_ocean,
+        location_status="coastal",
+        distance_to_coast_km=resolved.get("nearest_coast_km", 0.0),
     )
 
-    # ---- Compute changed_fields (M5) ----
     changed_fields = _compute_changed_fields(new_intent, last_intent)
-
-    # Cap conversation history
     new_history = (conversation_history + [{"role": "user", "content": raw}])[
         -config.MAX_CONVERSATION_TURNS:
     ]
 
     return {
-        "detected_language": detected_language,
+        "detected_language": detected_lang,
         "parsed_intent": new_intent,
+        "device_location": device_loc,
+        "query_location": q_loc,
+        "resolved_location": resolved,
+        "location_mode": mode,
         "changed_fields": changed_fields,
         "conversation_history": new_history,
         "parse_method": "rule_based_fallback",
     }
+
