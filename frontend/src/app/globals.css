@@ -150,10 +150,29 @@ body {
   animation: wave-drift 4s ease-in-out infinite;
 }
 
+/* Vertical writing mode for rotated coordinate readout (Part 0) */
+.writing-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* Editorial nav letter-spacing (~0.2em) */
+.tracking-editorial {
+  letter-spacing: 0.22em;
+}
+
+/* Smooth scrolling for below-fold features section */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   .animate-mic-pulse,
   .animate-wave-drift {
     animation: none;
+  }
+  html {
+    scroll-behavior: auto;
   }
 }

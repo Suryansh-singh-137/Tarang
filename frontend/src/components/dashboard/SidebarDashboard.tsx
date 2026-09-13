@@ -29,6 +29,7 @@ interface Props {
   onSelectLocation: (place: string) => void;
   onSelectPrompt: (prompt: string) => void;
   className?: string;
+  hasStartedChat?: boolean;
 }
 
 const QUICK_PLACES = [
@@ -47,7 +48,11 @@ export const SidebarDashboard: React.FC<Props> = ({
   onSelectLocation,
   onSelectPrompt,
   className = "",
+  hasStartedChat = false,
 }) => {
+  const [isConditionsExpanded, setIsConditionsExpanded] = useState(false);
+  const [isQuickPlacesOpen, setIsQuickPlacesOpen] = useState(!hasStartedChat);
+  const [isSuggestedOpen, setIsSuggestedOpen] = useState(!hasStartedChat);
   const [isDataSourcesOpen, setIsDataSourcesOpen] = useState(false);
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
   const t = translations[language] || translations.en;
@@ -66,56 +71,77 @@ export const SidebarDashboard: React.FC<Props> = ({
   };
 
   return (
-    <aside className={`flex flex-col gap-4 p-4 text-[var(--ink)] overflow-y-auto ${className}`}>
-      {/* 1. Live Conditions Strip */}
-      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 shadow-xs">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#1B8755] animate-pulse" />
-            <h2 className="text-xs font-bold tracking-wider uppercase text-[var(--ink-muted)]">
-              {t.liveConditions}
-            </h2>
-          </div>
-          <span className="text-[11px] text-[var(--ink-subtle)] flex items-center gap-1 font-medium">
-            <MapPin className="w-3 h-3" />
-            {conditions.locationName}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="p-2.5 bg-[var(--surface-muted)] rounded-lg border border-[var(--border)]">
-            <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
-              <Waves className="w-3.5 h-3.5 text-[var(--current)]" />
-              <span>{t.waveHeight}</span>
-            </div>
-            <div className="text-base font-bold font-display text-[var(--ink)]">
-              {conditions.waveHeightM.toFixed(1)} <span className="text-xs font-sans font-normal text-[var(--ink-muted)]">m</span>
-            </div>
+    <aside className={`flex flex-col gap-3.5 p-4 text-[var(--ink)] overflow-y-auto ${className}`}>
+      {/* 1. Live Conditions Strip — Compact single-line summary by default (Part 1C.1) */}
+      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3 shadow-2xs">
+        <button
+          type="button"
+          onClick={() => setIsConditionsExpanded(!isConditionsExpanded)}
+          className="w-full flex items-center justify-between text-left min-h-[44px] cursor-pointer"
+          aria-label={isConditionsExpanded ? "Collapse live conditions" : "Expand live conditions"}
+        >
+          <div className="flex items-center gap-2 overflow-hidden text-xs">
+            <span className="w-2 h-2 rounded-full bg-[#1B8755] shrink-0 animate-pulse" />
+            <span className="font-semibold text-[var(--ink)] truncate max-w-[110px]">
+              {conditions.locationName}
+            </span>
+            <span className="text-[var(--border)]">·</span>
+            <span className="text-[var(--ink-muted)] font-mono-data shrink-0">
+              {conditions.waveHeightM.toFixed(1)}m
+            </span>
+            <span className="text-[var(--border)] hidden sm:inline">·</span>
+            <span className="text-[var(--ink-muted)] font-mono-data shrink-0 hidden sm:inline">
+              {conditions.windSpeedKmh.toFixed(0)}km/h
+            </span>
           </div>
 
-          <div className="p-2.5 bg-[var(--surface-muted)] rounded-lg border border-[var(--border)]">
-            <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
-              <Wind className="w-3.5 h-3.5 text-[var(--current)]" />
-              <span>{t.windSpeed}</span>
+          <div className="flex items-center gap-1.5 shrink-0 pl-1">
+            <RiskBadge label={conditions.riskLabel} size="sm" showScore={false} />
+            {isConditionsExpanded ? (
+              <ChevronUp className="w-4 h-4 text-[var(--ink-subtle)]" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-[var(--ink-subtle)]" />
+            )}
+          </div>
+        </button>
+
+        {/* Expanded detail view */}
+        {isConditionsExpanded && (
+          <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2.5 animate-in fade-in duration-150">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2 bg-[var(--surface-muted)] rounded-lg border border-[var(--border)]">
+                <div className="flex items-center gap-1 text-xs text-[var(--ink-muted)] mb-0.5">
+                  <Waves className="w-3.5 h-3.5 text-[var(--current)]" />
+                  <span>{t.waveHeight}</span>
+                </div>
+                <div className="text-sm font-bold text-[var(--ink)] font-mono-data">
+                  {conditions.waveHeightM.toFixed(1)} <span className="text-xs font-normal text-[var(--ink-muted)]">m</span>
+                </div>
+              </div>
+
+              <div className="p-2 bg-[var(--surface-muted)] rounded-lg border border-[var(--border)]">
+                <div className="flex items-center gap-1 text-xs text-[var(--ink-muted)] mb-0.5">
+                  <Wind className="w-3.5 h-3.5 text-[var(--current)]" />
+                  <span>{t.windSpeed}</span>
+                </div>
+                <div className="text-sm font-bold text-[var(--ink)] font-mono-data">
+                  {conditions.windSpeedKmh.toFixed(0)} <span className="text-xs font-normal text-[var(--ink-muted)]">km/h</span>
+                </div>
+              </div>
             </div>
-            <div className="text-base font-bold font-display text-[var(--ink)]">
-              {conditions.windSpeedKmh.toFixed(0)} <span className="text-xs font-sans font-normal text-[var(--ink-muted)]">km/h</span>
+
+            <div className="text-[11px] text-[var(--ink-subtle)] flex items-center justify-between">
+              <span>Sea state: <strong className="text-[var(--ink)] capitalize">{conditions.seaState}</strong></span>
+              <span className="truncate max-w-[140px]">{conditions.source}</span>
             </div>
           </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
-          <span className="text-xs text-[var(--ink-muted)] capitalize">
-            Sea state: <strong className="text-[var(--ink)]">{conditions.seaState}</strong>
-          </span>
-          <RiskBadge label={conditions.riskLabel} size="sm" showScore={false} />
-        </div>
+        )}
       </section>
 
       {/* 2. Active Cyclone / Hazard Alert Banner (Rendered when GDACS alert exists) */}
       {activeCycloneAlert ? (
-        <section className="bg-[#FEF3C7] border-2 border-[#F59E0B] rounded-xl p-3.5 shadow-xs animate-pulse">
-          <div className="flex items-center gap-2 text-[#92400E] font-bold text-xs uppercase tracking-wider mb-1.5">
+        <section className="bg-[#FEF3C7] border-2 border-[#F59E0B] rounded-xl p-3 shadow-xs animate-pulse">
+          <div className="flex items-center gap-2 text-[#92400E] font-bold text-xs uppercase tracking-wider mb-1">
             <AlertTriangle className="w-4 h-4 text-[#D97706]" />
             {t.activeAlerts}
           </div>
@@ -129,49 +155,69 @@ export const SidebarDashboard: React.FC<Props> = ({
         </section>
       ) : (
         <div className="px-3 py-2 bg-[var(--surface-muted)] border border-[var(--border)] rounded-lg text-[11px] text-[var(--ink-muted)] flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-[#1B8755] shrink-0" />
+          <ShieldCheck className="w-3.5 h-3.5 text-[#1B8755] shrink-0" />
           <span>{t.noActiveAlerts}</span>
         </div>
       )}
 
-      {/* 3. Quick Locations */}
-      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 shadow-xs">
-        <h2 className="text-xs font-bold tracking-wider uppercase text-[var(--ink-muted)] mb-2.5 flex items-center gap-1.5">
-          <Compass className="w-3.5 h-3.5 text-[var(--current)]" />
-          {t.quickLocations}
-        </h2>
-        <div className="flex flex-wrap gap-1.5">
-          {QUICK_PLACES.map((p) => (
-            <button
-              key={p.name}
-              type="button"
-              onClick={() => onSelectLocation(p.name)}
-              className="px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--surface-muted)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] hover:border-[var(--current)] transition-all min-h-[36px]"
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
+      {/* 3. Quick Locations — Collapsible when chat has started */}
+      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setIsQuickPlacesOpen(!isQuickPlacesOpen)}
+          className="w-full flex items-center justify-between text-xs font-bold tracking-wider uppercase text-[var(--ink-muted)] min-h-[36px] cursor-pointer"
+        >
+          <span className="flex items-center gap-1.5">
+            <Compass className="w-3.5 h-3.5 text-[var(--current)]" />
+            {t.quickLocations}
+          </span>
+          {isQuickPlacesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+
+        {isQuickPlacesOpen && (
+          <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-[var(--border)]">
+            {QUICK_PLACES.map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                onClick={() => onSelectLocation(p.name)}
+                className="px-3.5 py-2 rounded-full text-xs font-medium bg-[var(--surface-muted)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] hover:border-[var(--current)] transition-all min-h-[48px] flex items-center justify-center cursor-pointer"
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* 4. Suggested Queries (Solves cold start) */}
-      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 shadow-xs">
-        <h2 className="text-xs font-bold tracking-wider uppercase text-[var(--ink-muted)] mb-2.5 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-[var(--dawn)]" />
-          {t.suggestedQueries}
-        </h2>
-        <div className="flex flex-col gap-2">
-          {Object.values(t.prompts).map((promptText, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => onSelectPrompt(promptText)}
-              className="text-left p-2.5 rounded-lg text-xs text-[var(--ink)] bg-[var(--surface-muted)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)] transition-all line-clamp-2"
-            >
-              "{promptText}"
-            </button>
-          ))}
-        </div>
+      {/* 4. Suggested Queries — Collapsible when chat has started */}
+      <section className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setIsSuggestedOpen(!isSuggestedOpen)}
+          className="w-full flex items-center justify-between text-xs font-bold tracking-wider uppercase text-[var(--ink-muted)] min-h-[36px] cursor-pointer"
+        >
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-[var(--dawn)]" />
+            {t.suggestedQueries}
+          </span>
+          {isSuggestedOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+
+        {isSuggestedOpen && (
+          <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-[var(--border)]">
+            {Object.values(t.prompts).map((promptText, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => onSelectPrompt(promptText)}
+                className="text-left p-3 rounded-lg text-xs text-[var(--ink)] bg-[var(--surface-muted)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)] transition-all line-clamp-2 min-h-[48px] flex items-center cursor-pointer"
+              >
+                &ldquo;{promptText}&rdquo;
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 5. Data Sources & M8 Provenance Trust Panel */}
@@ -179,7 +225,7 @@ export const SidebarDashboard: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setIsDataSourcesOpen(!isDataSourcesOpen)}
-          className="w-full flex items-center justify-between text-xs font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] py-1"
+          className="w-full flex items-center justify-between text-xs font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] min-h-[48px] px-1 cursor-pointer"
         >
           <span className="flex items-center gap-2">
             <Database className="w-3.5 h-3.5 text-[var(--current)]" />
@@ -189,7 +235,7 @@ export const SidebarDashboard: React.FC<Props> = ({
         </button>
 
         {isDataSourcesOpen && (
-          <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs space-y-2 text-[var(--ink-muted)]">
+          <div className="mt-2 pt-3 border-t border-[var(--border)] text-xs space-y-2 text-[var(--ink-muted)]">
             <div className="p-2 bg-[var(--surface-muted)] rounded border border-[var(--border)]">
               <span className="font-semibold text-[var(--ink)] block">Tier 1: Official National</span>
               INCOIS Ocean Advisories & IMD Cyclone Bulletins (Authoritative Indian mandate)
@@ -215,7 +261,7 @@ export const SidebarDashboard: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setIsEmergencyOpen(!isEmergencyOpen)}
-          className="w-full flex items-center justify-between text-xs font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] py-1"
+          className="w-full flex items-center justify-between text-xs font-semibold text-[var(--ink-muted)] hover:text-[var(--ink)] min-h-[48px] px-1 cursor-pointer"
         >
           <span className="flex items-center gap-2">
             <PhoneCall className="w-3.5 h-3.5 text-[#DC2626]" />
@@ -225,10 +271,12 @@ export const SidebarDashboard: React.FC<Props> = ({
         </button>
 
         {isEmergencyOpen && (
-          <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs space-y-1.5">
-            <div className="flex items-center justify-between p-2 bg-[#FEE2E2] rounded border border-[#FECACA] text-[#991B1B] font-semibold">
+          <div className="mt-2 pt-3 border-t border-[var(--border)] text-xs space-y-1.5">
+            <div className="flex items-center justify-between p-2.5 bg-[#FEE2E2] rounded border border-[#FECACA] text-[#991B1B] font-semibold">
               <span>Coast Guard S&R:</span>
-              <a href="tel:1554" className="underline font-bold text-sm">1554</a>
+              <a href="tel:1554" className="underline font-bold text-sm min-h-[48px] min-w-[48px] flex items-center justify-center p-2">
+                1554
+              </a>
             </div>
             <div className="p-2 bg-[var(--surface-muted)] rounded text-[var(--ink-muted)] text-[11px]">
               {t.incoisHelpline}

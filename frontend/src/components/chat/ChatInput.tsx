@@ -43,7 +43,20 @@ export const ChatInput: React.FC<Props> = ({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+      // Detect supported mimeType across Chrome, Firefox, Safari, and Edge
+      let mimeType = "";
+      if (typeof MediaRecorder !== "undefined") {
+        if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        }
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -55,7 +68,14 @@ export const ChatInput: React.FC<Props> = ({
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const finalType = recorder.mimeType || mimeType || "audio/webm";
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalType });
+
+        if (audioBlob.size < 100) {
+          setMicError("No voice captured. Please speak clearly into your microphone and try again.");
+          return;
+        }
+
         await processAudioTranscription(audioBlob);
       };
 
@@ -63,7 +83,11 @@ export const ChatInput: React.FC<Props> = ({
       setIsRecording(true);
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      setMicError("Microphone access was denied. You can continue typing below.");
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setMicError("Microphone access was denied. Please grant microphone permission in your browser or type below.");
+      } else {
+        setMicError(`Microphone error (${err.name || "AccessError"}): ${err.message || "Could not open audio device"}`);
+      }
       setIsRecording(false);
     }
   };
@@ -82,7 +106,7 @@ export const ChatInput: React.FC<Props> = ({
       }
     } catch (err: any) {
       console.error("Transcription error:", err);
-      setMicError("Speech recognition failed. Please type your query instead.");
+      setMicError(err.message || "Speech recognition failed. Please type your query instead.");
     } finally {
       setIsTranscribing(false);
     }

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Layers, MapPin, Fish, AlertTriangle, Maximize2 } from "lucide-react";
+import { Layers, Fish, AlertTriangle, Maximize2, HelpCircle } from "lucide-react";
+import { ShorelineCompass } from "../illustrations/ShorelineCompass";
 import { MapGeoJSON, RiskLabel } from "@/lib/types";
 
 interface Props {
@@ -21,7 +22,10 @@ export const MarineMap: React.FC<Props> = ({
   const mapInstanceRef = useRef<any>(null);
   const geoLayerGroupRef = useRef<any>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [featuresCount, setFeaturesCount] = useState({ pfz: 0, imbl: false, query: false });
+
+  const hasGeoData = Boolean(geoJson && geoJson.features && geoJson.features.length > 0);
 
   // Guard SSR
   useEffect(() => {
@@ -29,16 +33,14 @@ export const MarineMap: React.FC<Props> = ({
   }, []);
 
   useEffect(() => {
-    if (!isMounted || !mapContainerRef.current) return;
+    if (!isMounted || !hasGeoData || !mapContainerRef.current) return;
 
     let L: any;
 
     const initMap = async () => {
-      // Dynamically import Leaflet in browser
       L = (await import("leaflet")).default;
 
       if (!mapInstanceRef.current && mapContainerRef.current) {
-        // Default center on Indian coastline (Tamil Nadu / Sri Lanka channel by default)
         const map = L.map(mapContainerRef.current, {
           center: [9.5, 78.8],
           zoom: 7,
@@ -52,7 +54,6 @@ export const MarineMap: React.FC<Props> = ({
           subdomains: "abcd",
         }).addTo(map);
 
-        // Attribution in small subtle text
         L.control
           .attribution({
             position: "bottomright",
@@ -65,7 +66,6 @@ export const MarineMap: React.FC<Props> = ({
         geoLayerGroupRef.current = layerGroup;
       }
 
-      // Render GeoJSON data whenever geoJson changes
       renderFeatures(L);
     };
 
@@ -77,11 +77,11 @@ export const MarineMap: React.FC<Props> = ({
         mapInstanceRef.current = null;
       }
     };
-  }, [isMounted]);
+  }, [isMounted, hasGeoData]);
 
   // Update features whenever geoJson or riskLabel changes
   useEffect(() => {
-    if (!mapInstanceRef.current || !window) return;
+    if (!mapInstanceRef.current || !hasGeoData) return;
     import("leaflet").then((leafletModule) => {
       renderFeatures(leafletModule.default);
     });
@@ -90,7 +90,6 @@ export const MarineMap: React.FC<Props> = ({
   const renderFeatures = (L: any) => {
     if (!mapInstanceRef.current || !geoLayerGroupRef.current) return;
 
-    const map = mapInstanceRef.current;
     const group = geoLayerGroupRef.current;
     group.clearLayers();
 
@@ -99,7 +98,6 @@ export const MarineMap: React.FC<Props> = ({
     let hasImbl = false;
     let hasQuery = false;
 
-    // Determine perimeter circle color based on risk
     const riskStroke =
       riskLabel === "HIGH" || riskLabel === "EXTREME"
         ? "#DC2626"
@@ -129,7 +127,6 @@ export const MarineMap: React.FC<Props> = ({
             dashArray: "4 4",
           }).addTo(group);
 
-          // Query point custom pin icon
           const pinHtml = `
             <div style="position: relative; display: flex; align-items: center; justify-content: center;">
               <div style="position: absolute; width: 34px; height: 34px; border-radius: 9999px; background: rgba(46, 143, 160, 0.25); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
@@ -151,7 +148,7 @@ export const MarineMap: React.FC<Props> = ({
                 <strong style="color: #2E8FA0; font-size: 13px;">📍 ${props.label || locationName}</strong><br/>
                 <span style="color: #6B7280; font-size: 11px;">Lat: ${lat.toFixed(4)}°, Lon: ${lon.toFixed(4)}°</span><br/>
                 <span style="display: inline-block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; background: #F3F4F6; font-size: 10px; font-weight: 600;">
-                  Safety Zone: ${riskLabel}
+                  Safety Verdict: ${riskLabel}
                 </span>
               </div>
             `)
@@ -168,16 +165,15 @@ export const MarineMap: React.FC<Props> = ({
           const dist = props.distance_km != null ? `${Math.round(props.distance_km)} km` : "Nearby";
 
           const pfzHtml = `
-            <div style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;">
-              <div style="position: absolute; width: 22px; height: 22px; border-radius: 9999px; background: rgba(27, 135, 85, 0.35);"></div>
-              <div style="width: 14px; height: 14px; border-radius: 9999px; background: #1B8755; border: 2px solid #FFFFFF; box-shadow: 0 1px 4px rgba(0,0,0,0.2);"></div>
+            <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background-color: #1B8755; color: white; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.25); font-size: 12px;">
+              🐟
             </div>
           `;
           const pfzIcon = L.divIcon({
             html: pfzHtml,
             className: "custom-pfz-pin",
-            iconSize: [22, 22],
-            iconAnchor: [11, 11],
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
           });
 
           L.marker([lat, lon], { icon: pfzIcon })
@@ -189,7 +185,7 @@ export const MarineMap: React.FC<Props> = ({
                   • Chlorophyll-a: <b>${typeof chl === "number" ? chl.toFixed(2) : chl} mg/m³</b><br/>
                   • Bearing: <b>${props.bearing_deg || props.bearing || "E"}°</b>
                 </div>
-                <div style="margin-top: 6px; font-size: 10px; color: #6B7280; border-top: 1px solid #E5E7EB; pt-1;">
+                <div style="margin-top: 6px; font-size: 10px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 4px;">
                   Source: INCOIS Oceansat-2 (satellite chlorophyll proxy)
                 </div>
               </div>
@@ -208,8 +204,8 @@ export const MarineMap: React.FC<Props> = ({
           L.polyline(latLngs, {
             color: "#DC2626",
             weight: 2.5,
-            dashArray: "6 6",
-            opacity: 0.85,
+            dashArray: "6, 6",
+            opacity: 0.9,
           })
             .bindPopup(`
               <div style="font-family: sans-serif; font-size: 12px;">
@@ -226,21 +222,48 @@ export const MarineMap: React.FC<Props> = ({
 
     setFeaturesCount({ pfz: pfzCount, imbl: hasImbl, query: hasQuery });
 
-    // Fit map view if valid coordinates were registered
     if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+      mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
     }
   };
 
-  const handleRecenter = () => {
+  const handleRecenter = async () => {
     if (!mapInstanceRef.current || !geoLayerGroupRef.current) return;
-    const group = geoLayerGroupRef.current;
-    const bounds = group.getBounds();
-    if (bounds && bounds.isValid()) {
+    const L = (await import("leaflet")).default;
+    const bounds = L.latLngBounds([]);
+    geoLayerGroupRef.current.eachLayer((layer: any) => {
+      if (layer.getBounds) bounds.extend(layer.getBounds());
+      else if (layer.getLatLng) bounds.extend(layer.getLatLng());
+    });
+    if (bounds.isValid()) {
       mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
     }
   };
 
+  // ── Pre-query state: serene, quiet coastal placeholder (Part 1C.1) ──
+  if (!hasGeoData) {
+    return (
+      <div
+        className={`relative bg-[var(--surface)] rounded-xl overflow-hidden border border-[var(--border)] p-6 flex flex-col items-center justify-center text-center shadow-2xs ${className}`}
+        aria-label="Marine chart placeholder"
+      >
+        <div className="w-24 h-24 mb-3 opacity-80 flex items-center justify-center">
+          <ShorelineCompass size={96} />
+        </div>
+        <div className="font-serif-display text-base font-normal text-[var(--ink)] mb-1">
+          Marine Chart
+        </div>
+        <p className="font-sans text-xs text-[var(--ink-muted)] max-w-[260px] leading-relaxed">
+          Ask about conditions or select a coastal location to plot live PFZ boundaries and marine charts.
+        </p>
+        <div className="mt-4 font-mono-data text-[10px] text-[var(--ink-subtle)] bg-[var(--surface-muted)] px-3 py-1 rounded-full border border-[var(--border)]">
+          INCOIS · GDACS · OPEN-METEO
+        </div>
+      </div>
+    );
+  }
+
+  // ── Active GeoJSON chart state ──
   return (
     <div className={`relative bg-[#E2ECEE] rounded-xl overflow-hidden border border-[var(--border)] shadow-xs flex flex-col ${className}`}>
       {/* Map Control Toolbar */}
@@ -272,36 +295,61 @@ export const MarineMap: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Recenter Button */}
-      <button
-        type="button"
-        onClick={handleRecenter}
-        className="absolute top-3 right-3 z-[1000] p-2 bg-white/90 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors"
-        title="Recenter map on active features"
-        aria-label="Recenter map"
-      >
-        <Maximize2 className="w-4 h-4" />
-      </button>
+      {/* Action buttons: Info / Legend Toggle + Recenter (Part 1C.1) */}
+      <div className="absolute top-3 right-3 z-[1000] flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setIsLegendOpen(!isLegendOpen)}
+          className={`p-2 bg-white/90 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer ${
+            isLegendOpen ? "ring-2 ring-[var(--current)]" : ""
+          }`}
+          title="Toggle map symbols legend"
+          aria-label="Toggle map symbols legend"
+        >
+          <HelpCircle className="w-4 h-4 text-[var(--ink-muted)]" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleRecenter}
+          className="p-2 bg-white/90 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer"
+          title="Recenter map on active features"
+          aria-label="Recenter map"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* Map DOM target */}
       <div ref={mapContainerRef} className="w-full h-full min-h-[350px] z-10" />
 
-      {/* Map Legend Overlay */}
-      <div className="absolute bottom-3 left-3 z-[1000] bg-white/95 backdrop-blur-xs border border-[var(--border)] rounded-lg p-2.5 shadow-xs text-[11px] text-[var(--ink-muted)] space-y-1.5 pointer-events-auto">
-        <div className="font-semibold text-[var(--ink)] text-xs mb-1">Map Symbols</div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-[var(--ink)] border border-white" />
-          <span>Target Query Point</span>
+      {/* Map Legend Overlay — tucked behind info toggle button */}
+      {isLegendOpen && (
+        <div className="absolute bottom-3 left-3 z-[1000] bg-white/95 backdrop-blur-xs border border-[var(--border)] rounded-lg p-2.5 shadow-md text-[11px] text-[var(--ink-muted)] space-y-1.5 pointer-events-auto animate-in fade-in duration-150">
+          <div className="flex items-center justify-between font-semibold text-[var(--ink)] text-xs mb-1">
+            <span>Map Symbols</span>
+            <button
+              type="button"
+              onClick={() => setIsLegendOpen(false)}
+              className="text-[var(--ink-subtle)] hover:text-[var(--ink)] text-xs px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-[var(--ink)] border border-white" />
+            <span>Target Query Point</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#1B8755] border border-white" />
+            <span>Potential Fishing Zone (PFZ)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-0.5 border-t-2 border-dashed border-[#DC2626]" />
+            <span>IMBL Maritime Boundary</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-[#1B8755] border border-white" />
-          <span>Potential Fishing Zone (PFZ)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-0.5 border-t-2 border-dashed border-[#DC2626]" />
-          <span>IMBL Maritime Boundary</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

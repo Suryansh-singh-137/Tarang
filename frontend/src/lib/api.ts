@@ -2,13 +2,21 @@
 
 import { ChatState, ProgressEventData, QueryResultPayload } from "./types";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export type StreamCallbacks = {
   onProgress?: (progress: ProgressEventData) => void;
   onResult?: (result: QueryResultPayload) => void;
   onError?: (error: string) => void;
 };
+
+export interface QueryOptions {
+  user_lat?: number | null;
+  user_lon?: number | null;
+  user_location_name?: string | null;
+  language?: string | null;
+  signal?: AbortSignal;
+}
 
 /**
  * Stream query via POST /query with SSE event parsing
@@ -17,7 +25,7 @@ export async function streamQuery(
   query: string,
   state: ChatState,
   callbacks: StreamCallbacks,
-  signal?: AbortSignal
+  options?: QueryOptions
 ): Promise<void> {
   try {
     const response = await fetch(`${API_BASE_URL}/query`, {
@@ -31,8 +39,12 @@ export async function streamQuery(
         conversation: state.conversation,
         last_parsed_intent: state.last_parsed_intent,
         last_results: state.last_results,
+        user_lat: options?.user_lat ?? null,
+        user_lon: options?.user_lon ?? null,
+        user_location_name: options?.user_location_name ?? null,
+        language: options?.language ?? null,
       }),
-      signal,
+      signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -52,7 +64,8 @@ export async function streamQuery(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
+      const normalized = buffer.replace(/\r\n/g, "\n");
+      const chunks = normalized.split("\n\n");
       buffer = chunks.pop() || "";
 
       for (const chunk of chunks) {
@@ -136,8 +149,21 @@ export async function synthesizeSpeech(text: string, language: string): Promise<
   });
 
   if (!response.ok) {
-    throw new Error(`TTS synthesis failed with status ${response.status}`);
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`TTS synthesis failed with HTTP ${response.status}: ${errorText}`);
   }
 
-  return await response.blob();
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("audio")) {
+    const errorJson = await response.text().catch(() => "");
+    throw new Error(`Expected audio bytes but received ${contentType}: ${errorJson}`);
+  }
+
+  const blob = await response.blob();
+  if (!blob || blob.size === 0) {
+    throw new Error("Received empty audio response from TTS server");
+  }
+
+  return blob;
 }
+

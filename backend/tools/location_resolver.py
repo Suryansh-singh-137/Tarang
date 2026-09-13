@@ -150,6 +150,7 @@ except Exception as _e:
 # In-memory Nominatim cache (24-hour TTL per entry, max 512 entries)
 # ---------------------------------------------------------------------------
 _GEOCODE_CACHE: TTLCache = TTLCache(maxsize=512, ttl=86400)
+_REVERSE_CACHE: TTLCache = TTLCache(maxsize=512, ttl=86400)
 
 # Rate limiting: Nominatim policy = max 1 req/s
 _LAST_NOMINATIM_CALL: float = 0.0
@@ -165,18 +166,177 @@ def _nominatim_rate_limit() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Coastal validation helper
+# Coastal Districts of India
+# ---------------------------------------------------------------------------
+COASTAL_DISTRICTS: set[str] = {
+    # Gujarat
+    "kutch", "kachchh", "morbi", "jamnagar", "devbhumi dwarka", "porbandar",
+    "junagadh", "gir somnath", "amreli", "bhavnagar", "ahmedabad", "anand",
+    "bharuch", "surat", "navsari", "valsad",
+    # Maharashtra
+    "palghar", "thane", "mumbai", "mumbai suburban", "mumbai city",
+    "raigad", "ratnagiri", "sindhudurg",
+    # Goa
+    "north goa", "south goa", "goa",
+    # Karnataka
+    "uttara kannada", "north canara", "udupi", "dakshina kannada", "south canara",
+    "kumta", "kumata", "honnavar", "bhatkal", "karwar", "ankola", "kundapura", "mangalore", "mangaluru",
+    # Kerala
+    "kasaragod", "kannur", "kozhikode", "malappuram", "thrissur",
+    "ernakulam", "alappuzha", "kollam", "thiruvananthapuram",
+    # Tamil Nadu
+    "tiruvallur", "chennai", "chengalpattu", "viluppuram", "cuddalore",
+    "mayiladuthurai", "nagapattinam", "tiruvarur", "thanjavur", "pudukkottai",
+    "ramanathapuram", "thoothukudi", "tirunelveli", "kanniyakumari", "kanyakumari",
+    "kalkulam", "rameswaram",
+    # Andhra Pradesh
+    "srikakulam", "vizianagaram", "visakhapatnam", "anakapalli", "kakinada",
+    "konaseema", "dr. b.r. ambedkar konaseema", "west godavari", "krishna",
+    "bapatla", "prakasam", "sri potti sriramulu nellore", "nellore", "tirupati",
+    "nizampatnam", "gara",
+    # Odisha
+    "balasore", "baleshwar", "bhadrak", "kendrapara", "jagatsinghpur", "puri", "ganjam",
+    "balaramgadi",
+    # West Bengal
+    "purba medinipur", "east midnapore", "south 24 parganas", "north 24 parganas",
+    "howrah", "kolkata", "namkhana",
+    # Islands & UTs (100% coastal)
+    "andaman", "nicobar", "andaman and nicobar", "south andaman", "north and middle andaman", "nicobars",
+    "diglipur", "port blair",
+    "lakshadweep", "minicoy", "kavaratti", "agatti", "amini",
+    "puducherry", "karaikal", "mahe", "yanam",
+    "daman", "diu",
+}
+
+
+# ---------------------------------------------------------------------------
+# Coastal validation helpers
 # ---------------------------------------------------------------------------
 
 def _is_coastal_address(address: Dict[str, str]) -> bool:
-    """Return True if the Nominatim address is in a known Indian coastal state/UT."""
+    """Return True if the Nominatim address is in a known Indian coastal state and district."""
     state = address.get("state", "").lower()
     county = address.get("county", "").lower()
-    # Check direct state match
+    district = (address.get("state_district") or address.get("district") or "").lower()
+    city = address.get("city", "").lower()
+    town = address.get("town", "").lower()
+    village = address.get("village", "").lower()
+
+    # Direct coastal state match
+    is_coastal_state = False
     for cs in COASTAL_STATES_UT:
-        if cs in state or cs in county:
+        if cs in state:
+            is_coastal_state = True
+            break
+
+    if not is_coastal_state:
+        return False
+
+    # Island UTs & Goa are entirely coastal
+    if any(isl in state for isl in ["andaman", "nicobar", "lakshadweep", "daman", "diu", "goa", "puducherry"]):
+        return True
+
+    # Check coastal district / taluk
+    addr_tokens = f"{county} {district} {city} {town} {village}"
+    for cd in COASTAL_DISTRICTS:
+        if cd in addr_tokens:
             return True
+
     return False
+
+
+def location_is_coastal(lat: float, lon: float, name: Optional[str] = None) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Validate whether geographic coordinates belong to an Indian coastal location or marine waters.
+
+    Args:
+        lat: Latitude in decimal degrees
+        lon: Longitude in decimal degrees
+        name: Optional location name provided by caller/user
+
+    Returns:
+        (is_coastal, resolved_display_name, details_dict)
+    """
+    cache_key = f"{lat:.4f},{lon:.4f}"
+    if cache_key in _REVERSE_CACHE:
+        return _REVERSE_CACHE[cache_key]
+
+    # Fast boundary envelope check:
+    # India's marine waters, islands, and coastline span latitude ~6.0°N to ~24.5°N
+    # Any coordinate north of 24.5°N in India (e.g. New Delhi 28.61°N) is inland.
+    if lat > 24.5 or lat < 5.0 or lon < 65.0 or lon > 96.0:
+        result = (False, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {"reason": "outside_coastal_envelope"})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    _nominatim_rate_limit()
+
+    try:
+        with httpx.Client(timeout=6.0) as client:
+            resp = client.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "addressdetails": 1},
+                headers={"User-Agent": "Tarang-MarineSafetyApp/1.0 (contact@tarang.app)"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        logger.warning("[Location] Nominatim reverse lookup failed for (%.4f, %.4f): %s", lat, lon, exc)
+        # Permissive fallback if geocoder fails
+        result = (True, name or f"Location ({lat:.2f}°N, {lon:.2f}°E)", {"reason": "geocoder_unreachable_fallback"})
+        return result
+
+    address = data.get("address", {})
+    country_code = address.get("country_code", "").lower()
+    state = address.get("state", "").lower()
+    county = address.get("county", "").lower()
+    district = (address.get("state_district") or address.get("district") or "").lower()
+    display_name = (
+        data.get("name")
+        or address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or name
+        or f"Location ({lat:.2f}°N, {lon:.2f}°E)"
+    )
+
+    # 1. Marine / offshore waters within Indian EEZ (Nominatim returns country_code 'in' with no inland state)
+    if country_code == "in" and not state:
+        result = (True, display_name or "Offshore Coastal Waters", {"reason": "marine_territorial_waters"})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    # 2. Foreign country outside Indian waters
+    if country_code and country_code != "in":
+        result = (False, display_name, {"reason": "foreign_country", "country": country_code})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    # 3. State check: must be a coastal state or UT
+    is_coastal_state = any(cs in state for cs in COASTAL_STATES_UT)
+    if not is_coastal_state:
+        result = (False, display_name, {"reason": "non_coastal_state", "state": state})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    # 4. Island UTs & Goa are 100% coastal
+    if any(isl in state for isl in ["andaman", "nicobar", "lakshadweep", "daman", "diu", "goa", "puducherry"]):
+        result = (True, display_name, {"reason": "coastal_island_or_ut", "state": state})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    # 5. Mainland coastal states: check coastal district / taluk
+    addr_tokens = f"{county} {district} {address.get('city', '')} {address.get('town', '')} {address.get('village', '')} {display_name}".lower()
+    is_coastal_dist = any(cd in addr_tokens for cd in COASTAL_DISTRICTS)
+    if is_coastal_dist:
+        result = (True, display_name, {"reason": "coastal_district", "state": state})
+        _REVERSE_CACHE[cache_key] = result
+        return result
+
+    # Inland district within a coastal state (e.g. Bangalore, Madurai, Coimbatore, Pune, Nagpur)
+    result = (False, display_name, {"reason": "inland_district_in_coastal_state", "state": state, "district": district or county})
+    _REVERSE_CACHE[cache_key] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -222,13 +382,27 @@ def resolve_location(query: str) -> Dict[str, Any]:
         logger.info("[Location] Cache hit for '%s'", query)
         return _GEOCODE_CACHE[query_lower]
 
-    # ── Tier 2: Nominatim ───────────────────────────────────────────────────
-    logger.info("[Location] '%s' not in gazetteer; querying Nominatim", query)
+    # Extract non-stopword tokens as search term candidate
+    _STOP_WORDS = {
+        "is", "it", "safe", "to", "fish", "right", "now", "today", "tomorrow", "can", "will",
+        "how", "what", "where", "when", "should", "are", "do", "does", "i", "we", "the", "a",
+        "an", "near", "in", "at", "for", "me", "my", "tell", "check", "please", "there", "any",
+        "weather", "forecast", "sea", "state", "marine", "risk", "condition", "conditions"
+    }
+    tokens = [w for w in re.findall(r'\b[A-Za-z]+\b', query) if w.lower() not in _STOP_WORDS]
+    if not tokens:
+        logger.info("[Location] No candidate location tokens found in query: '%s'", query)
+        return {
+            "location_name":       "Unknown",
+            "latitude":            None,
+            "longitude":           None,
+            "source":              "none",
+            "location_source":     "none",
+            "status":              "unresolved",
+            "location_confidence": "low",
+        }
 
-    # Use the first capitalised word(s) as the search term — strip verb phrases
-    # e.g. "Is it safe near Diu?" → try "Diu" first
-    words = [w for w in query.split() if w[0].isupper()] if any(c.isupper() for c in query) else []
-    search_term = " ".join(words) if words else query
+    search_term = " ".join(tokens)
 
     _nominatim_rate_limit()
 

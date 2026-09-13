@@ -105,7 +105,7 @@ class ParsedIntent(TypedDict):
       - query_type extended with "risk_explanation"
     """
 
-    location_name: str
+    location_name: Optional[str]
     lat: Optional[float]
     lon: Optional[float]
     time_window: str        # e.g. "tomorrow_morning", "now", "next_24h"
@@ -175,4 +175,8 @@ class ORCAState(TypedDict):
     # Milestone 8: Data quality tracking
     data_quality_reports: List[DataQualityReport]  # one per agent that ran
     risk_sufficient_data: Optional[bool]            # False → risk returned UNKNOWN
+
+    # Browser geolocation & Language Override
+    user_location: Optional[Dict[str, Any]]        # {"lat": float, "lon": float, "name": Optional[str]}
+    language_override: Optional[str]               # BCP-47 tag from UI toggle: "en", "hi", "ta"
 

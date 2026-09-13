@@ -62,10 +62,14 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str
     # Milestone 5: Multi-turn conversational memory
-    # The client passes back what the server returned in the previous turn.
     conversation: list[dict] = []             # [{"role": "user"|"assistant", "content": "..."}]
     last_parsed_intent: dict | None = None    # ParsedIntent from previous turn
     last_results: dict[str, dict] = {}       # {agent_name: AgentResult} from previous turn
+    # Geolocation & Language Override
+    user_lat: float | None = None             # Browser geolocation latitude
+    user_lon: float | None = None             # Browser geolocation longitude
+    user_location_name: str | None = None     # Optional reverse geocoded name
+    language: str | None = None               # Manual language override ("en", "hi", "ta")
 
 class SpeakRequest(BaseModel):
     text: str
@@ -77,9 +81,19 @@ class SpeakRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _build_initial_state(body: QueryRequest) -> ORCAState:
+    user_loc = None
+    if body.user_lat is not None and body.user_lon is not None:
+        user_loc = {
+            "lat": float(body.user_lat),
+            "lon": float(body.user_lon),
+            "name": body.user_location_name or "Your Location",
+        }
+
+    initial_lang = body.language if body.language in ("en", "hi", "ta") else "en"
+
     return ORCAState(
         raw_query=body.query,
-        detected_language="en",
+        detected_language=initial_lang,
         parsed_intent=None,
         weather_result=None,
         pfz_result=None,
@@ -95,6 +109,9 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
         last_parsed_intent=body.last_parsed_intent,  # type: ignore[arg-type]
         last_results={k: v for k, v in body.last_results.items()},  # type: ignore[arg-type]
         changed_fields=[],
+        # Geolocation & Language Override
+        user_location=user_loc,
+        language_override=body.language if body.language in ("en", "hi", "ta") else None,
     )
 
 
@@ -310,11 +327,14 @@ async def transcribe(audio: UploadFile = File(...)):
     try:
         # Read the uploaded audio
         audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio payload received.")
         
-        # We need a file-like object with a name for the Groq client
-        file_tuple = (audio.filename, audio_bytes, audio.content_type)
+        filename = audio.filename or "recording.webm"
+        content_type = audio.content_type or "audio/webm"
+        file_tuple = (filename, audio_bytes, content_type)
         
-        client = groq.Groq(api_key=config.GROQ_API_KEY, timeout=8.0)
+        client = groq.Groq(api_key=config.GROQ_API_KEY, timeout=12.0)
         
         # Whisper auto-detects language if not provided
         transcription = client.audio.transcriptions.create(
@@ -329,6 +349,8 @@ async def transcribe(audio: UploadFile = File(...)):
             "detected_language_whisper": getattr(transcription, "language", "unknown"),
             "duration_seconds": getattr(transcription, "duration", 0.0)
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Transcription failed: {exc}")
         raise HTTPException(status_code=500, detail="Transcription failed. Please try again or type your question.")

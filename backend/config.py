@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
-# Directory layout
+# Directory layout & environment loading
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
+
+# Ensure .env is explicitly loaded from backend directory
+load_dotenv(BASE_DIR / ".env")
 
 # ---------------------------------------------------------------------------
 # External API base URLs
@@ -34,8 +38,8 @@ OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
 
 # Groq configuration (Milestone 6)
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL_FAST: str = "llama-3.1-8b-instant"
-GROQ_MODEL_QUALITY: str = "llama-3.3-70b-versatile"
+GROQ_MODEL_FAST: str = "openai/gpt-oss-20b"
+GROQ_MODEL_QUALITY: str = "openai/gpt-oss-120b"
 
 # Sarvam TTS configuration (Milestone 7)
 SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")

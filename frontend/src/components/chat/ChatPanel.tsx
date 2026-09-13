@@ -54,9 +54,34 @@ export const ChatPanel: React.FC<Props> = ({
             </p>
           </div>
 
-          {/* Quick suggested prompt chips */}
-          <div className="w-full space-y-2 pt-2">
-            <span className="text-xs font-semibold text-[var(--ink-subtle)] uppercase tracking-wider block">
+          {/* Quick Locations pill chips (PRD Part 1 & 1C) */}
+          <div className="w-full space-y-2 pt-1">
+            <span className="text-xs font-mono-data uppercase tracking-wider text-[var(--ink-subtle)] block">
+              Quick Locations
+            </span>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {[
+                { name: "Thoothukudi", query: "Is it safe to fish near Thoothukudi today?" },
+                { name: "Rameswaram", query: "Check wave conditions and risk near Rameswaram" },
+                { name: "Kochi", query: "What is the sea state near Kochi harbour?" },
+                { name: "Visakhapatnam", query: "Is there any cyclone or hazard alert near Visakhapatnam?" },
+                { name: "Kanyakumari", query: "Can small motorized craft fish off Kanyakumari today?" },
+              ].map((loc) => (
+                <button
+                  key={loc.name}
+                  type="button"
+                  onClick={() => onSelectPrompt(loc.query)}
+                  className="px-3.5 py-1.5 rounded-full bg-[var(--surface)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)] text-xs text-[var(--ink)] transition-all shadow-2xs font-mono-data cursor-pointer min-h-[36px] flex items-center"
+                >
+                  {loc.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Suggested prompt chips */}
+          <div className="w-full space-y-2 pt-1">
+            <span className="text-xs font-mono-data uppercase tracking-wider text-[var(--ink-subtle)] block">
               {t.suggestedQueries}
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -65,9 +90,9 @@ export const ChatPanel: React.FC<Props> = ({
                   key={idx}
                   type="button"
                   onClick={() => onSelectPrompt(prompt)}
-                  className="p-3 text-left rounded-xl bg-[var(--surface)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)] text-xs text-[var(--ink)] transition-all line-clamp-2 shadow-xs"
+                  className="p-3 text-left rounded-xl bg-[var(--surface)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)] text-xs text-[var(--ink)] transition-all line-clamp-2 shadow-2xs cursor-pointer"
                 >
-                  "{prompt}"
+                  &ldquo;{prompt}&rdquo;
                 </button>
               ))}
             </div>

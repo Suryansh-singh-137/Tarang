@@ -2,23 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import {
-  MessageSquare,
-  Map as MapIcon,
-  Activity,
-  Layers,
-  Sparkles,
-  Shield,
-  HelpCircle,
-  Menu,
-  X,
-  Compass,
-} from "lucide-react";
-
 import { LandingHero } from "@/components/landing/LandingHero";
-import { SidebarDashboard } from "@/components/dashboard/SidebarDashboard";
+import { FeaturesSection } from "@/components/landing/FeaturesSection";
+import { LandingFooter } from "@/components/landing/LandingFooter";
+import { IconRail, ActiveTab } from "@/components/navigation/IconRail";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { AlertsView } from "@/components/alerts/AlertsView";
 import { TracePanel } from "@/components/trace/TracePanel";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 
@@ -31,7 +21,7 @@ import {
   RiskLabel,
   LiveConditionsSummary,
 } from "@/lib/types";
-import { streamQuery, API_BASE_URL } from "@/lib/api";
+import { streamQuery } from "@/lib/api";
 import { translations } from "@/lib/i18n";
 
 // Dynamic Leaflet import to prevent any SSR hydration mismatch
@@ -40,7 +30,7 @@ const MarineMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-full min-h-[350px] bg-[#E2ECEE] rounded-xl flex items-center justify-center text-xs text-[var(--ink-muted)] animate-pulse">
+      <div className="w-full h-full min-h-[350px] bg-[#E2ECEE] rounded-2xl flex items-center justify-center text-xs text-[var(--ink-muted)] animate-pulse">
         Initializing Marine Chart...
       </div>
     ),
@@ -49,21 +39,28 @@ const MarineMap = dynamic(
 
 export default function Home() {
   const [viewMode, setViewMode] = useState<"landing" | "workspace">("landing");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [progressSteps, setProgressSteps] = useState<ProgressEventData[]>([]);
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>("en");
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
 
-  // Active mobile view tab
-  const [mobileTab, setMobileTab] = useState<"chat" | "map" | "trace" | "dashboard">("chat");
-  const [isTraceOpen, setIsTraceOpen] = useState(true);
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-
   // GeoJSON and Risk state for Map and Dashboard
   const [mapGeoJson, setMapGeoJson] = useState<MapGeoJSON | null>(null);
   const [currentRiskLabel, setCurrentRiskLabel] = useState<RiskLabel>("LOW");
-  const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary | null>(null);
+  const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary>({
+    locationName: "Thoothukudi Harbour",
+    lat: 8.7642,
+    lon: 78.1348,
+    waveHeightM: 0.85,
+    windSpeedKmh: 11.8,
+    seaState: "slight",
+    riskLabel: "LOW",
+    source: "Open-Meteo ERA5 / Live Marine",
+    isFallback: false,
+  });
   const [activeCycloneAlert, setActiveCycloneAlert] = useState<{
     name: string;
     level: string;
@@ -78,11 +75,13 @@ export default function Home() {
     last_results: {},
   });
 
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [isManualLanguageOverride, setIsManualLanguageOverride] = useState(false);
+
   const t = translations[currentLanguage] || translations.en;
 
-  // Initial probe for live conditions on mount
+  // Initial probe for live conditions and browser geolocation on mount
   useEffect(() => {
-    // Check if backend is available and initialize default conditions
     setLiveConditions({
       locationName: "Thoothukudi Harbour",
       lat: 8.7642,
@@ -94,6 +93,27 @@ export default function Home() {
       source: "Open-Meteo ERA5 / Live Marine",
       isFallback: false,
     });
+
+    // Request browser geolocation on mount (permission prompt on first load)
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          setUserCoords({ lat, lon });
+          setLiveConditions((prev) => ({
+            ...prev,
+            lat,
+            lon,
+            locationName: "Your Coastal Location",
+          }));
+        },
+        (err) => {
+          console.info("Browser geolocation unavailable or dismissed:", err.message);
+        },
+        { timeout: 8000, maximumAge: 300000 }
+      );
+    }
   }, []);
 
   // Handle Query Submission
@@ -104,6 +124,7 @@ export default function Home() {
     if (viewMode === "landing") {
       setViewMode("workspace");
     }
+    setActiveTab("chat");
 
     const userMsgId = "user-" + Date.now();
     const assistantMsgId = "asst-" + Date.now();
@@ -174,8 +195,8 @@ export default function Home() {
             setCurrentRiskLabel(result.risk_data.risk_label);
           }
 
-          // Auto-update language chrome if detected
-          if (result.language && (result.language === "hi" || result.language === "ta" || result.language === "en")) {
+          // Only auto-update language chrome if user has not set a manual override
+          if (!isManualLanguageOverride && result.language && (result.language === "hi" || result.language === "ta" || result.language === "en")) {
             setDetectedLanguage(result.language);
             setCurrentLanguage(result.language as LanguageCode);
           }
@@ -185,9 +206,9 @@ export default function Home() {
           if (weatherResult && weatherResult.data) {
             const wData = weatherResult.data;
             setLiveConditions({
-              locationName: result.parsed_intent?.location_name || "Target Location",
-              lat: result.parsed_intent?.lat || 8.7642,
-              lon: result.parsed_intent?.lon || 78.1348,
+              locationName: result.parsed_intent?.location_name || (userCoords ? "Your Coastal Location" : "Target Location"),
+              lat: result.parsed_intent?.lat || userCoords?.lat || 8.7642,
+              lon: result.parsed_intent?.lon || userCoords?.lon || 78.1348,
               waveHeightM: wData.wave_height_m || 1.0,
               windSpeedKmh: wData.wind_speed_kmh || 15.0,
               seaState: wData.sea_state || "moderate",
@@ -226,12 +247,19 @@ export default function Home() {
           );
           setIsLoading(false);
         },
+      },
+      {
+        user_lat: userCoords?.lat ?? null,
+        user_lon: userCoords?.lon ?? null,
+        user_location_name: userCoords ? "Your Coastal Location" : null,
+        language: currentLanguage,
       }
     );
   };
 
-  const handleSelectLocation = (placeName: string) => {
-    handleSendMessage(`Is it safe to fish near ${placeName} today?`);
+  const handleSelectLanguage = (lang: LanguageCode) => {
+    setCurrentLanguage(lang);
+    setIsManualLanguageOverride(true);
   };
 
   const handleSelectPrompt = (promptText: string) => {
@@ -240,7 +268,18 @@ export default function Home() {
 
   const handleStartVoiceLanding = () => {
     setViewMode("workspace");
-    setMobileTab("chat");
+    setActiveTab("chat");
+  };
+
+  const handleIntelligenceClick = () => {
+    if (viewMode === "landing" && messages.length === 0) {
+      const el = document.getElementById("features");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+    }
+    handleSendMessage("What are the six specialized agents and data sources in Tarang?");
   };
 
   // Get active query location name for map header
@@ -268,26 +307,14 @@ export default function Home() {
       {/* ── Top Navigation Bar: Hairline-thin Nav (Part 0 PRD) ── */}
       <header className="h-14 px-4 sm:px-8 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between shrink-0 z-30 shadow-2xs">
         <div className="flex items-center gap-6 sm:gap-8">
-          {/* Mobile Sidebar Toggle (workspace mode) */}
-          {viewMode === "workspace" && (
-            <button
-              type="button"
-              onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-              className="lg:hidden p-2 text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--foam)] rounded-lg min-h-[48px] min-w-[48px] flex items-center justify-center cursor-pointer"
-              aria-label="Toggle navigation menu"
-            >
-              {isMobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
-          )}
-
-          {/* Wordmark: TARANG in Instrument Serif / Fraunces with small-caps tracking ~0.18em */}
+          {/* Wordmark: tarang. in Instrument Serif with trailing period per PRD Part 0 rule 7 */}
           <button
             type="button"
             onClick={() => setViewMode(messages.length === 0 ? "landing" : "workspace")}
             className="flex items-center gap-3 text-left group cursor-pointer"
           >
-            <span className="font-serif-display text-lg sm:text-xl font-semibold tracking-wordmark text-[var(--ink)]">
-              TARANG
+            <span className="font-serif-display text-xl sm:text-2xl font-normal text-[var(--ink)] tracking-tight">
+              tarang.
             </span>
             {viewMode === "workspace" && (
               <span className="hidden md:inline-block text-xs text-[var(--ink-subtle)] font-normal border-l border-[var(--border)] pl-2.5">
@@ -296,26 +323,26 @@ export default function Home() {
             )}
           </button>
 
-          {/* Part 0 Instrument Nav Links: FLEET FORECAST ARCHIVE */}
+          {/* Nav Links: INTELLIGENCE FLEET ARCHIVE */}
           <div className="hidden sm:flex items-center gap-6 font-mono-data text-[11px] text-[var(--ink-muted)]">
             <button
               type="button"
+              onClick={handleIntelligenceClick}
+              className="hover:text-[var(--current)] transition-colors tracking-editorial cursor-pointer uppercase"
+            >
+              INTELLIGENCE
+            </button>
+            <button
+              type="button"
               onClick={() => handleSendMessage("What is the fleet forecast for Tamil Nadu coast today?")}
-              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
+              className="hover:text-[var(--current)] transition-colors tracking-editorial cursor-pointer uppercase"
             >
               FLEET
             </button>
             <button
               type="button"
-              onClick={() => handleSendMessage("Show me the sea weather forecast for today")}
-              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
-            >
-              FORECAST
-            </button>
-            <button
-              type="button"
               onClick={() => handleSendMessage("Show recent marine safety advisories and cyclone history")}
-              className="hover:text-[var(--current)] transition-colors tracking-wider cursor-pointer"
+              className="hover:text-[var(--current)] transition-colors tracking-editorial cursor-pointer uppercase"
             >
               ARCHIVE
             </button>
@@ -346,7 +373,7 @@ export default function Home() {
           {/* Language Toggle (EN / हिं / த) */}
           <LanguageToggle
             currentLanguage={currentLanguage}
-            onSelectLanguage={(lang) => setCurrentLanguage(lang)}
+            onSelectLanguage={handleSelectLanguage}
             detectedBadge={detectedLanguage}
           />
         </div>
@@ -354,7 +381,7 @@ export default function Home() {
 
       {/* ── Main Content Area ── */}
       {viewMode === "landing" && messages.length === 0 ? (
-        // Part 0: Serene Landing Hero Threshold
+        // Part 0 & 0.1: Asymmetric Hero + Below-the-fold Features + Quiet Hairline Footer
         <main className="flex-1 overflow-y-auto">
           <LandingHero
             language={currentLanguage}
@@ -363,156 +390,125 @@ export default function Home() {
             onSubmitText={handleSendMessage}
             onSelectPrompt={handleSelectPrompt}
           />
+          <div id="features">
+            <FeaturesSection language={currentLanguage} />
+          </div>
+          <LandingFooter />
         </main>
       ) : (
-        // Part 1: Working 3-Panel Workspace (Desktop) & Tabbed Layout (Mobile)
-        <main className="flex-1 flex overflow-hidden relative">
-          {/* ── 1. Left Sidebar Dashboard (Desktop: ~300px, Mobile: Drawer) ── */}
-          <div
-            className={`
-              fixed lg:relative top-16 lg:top-0 bottom-0 left-0 z-40
-              w-72 sm:w-80 bg-[var(--surface)] border-r border-[var(--border)]
-              transition-transform duration-300 ease-in-out shrink-0
-              ${isMobileSidebarOpen ? "translate-x-0 shadow-xl" : "-translate-x-full lg:translate-x-0"}
-              ${mobileTab === "dashboard" ? "translate-x-0 w-full" : ""}
-            `}
-          >
-            <SidebarDashboard
-              language={currentLanguage}
-              liveConditions={liveConditions}
-              activeCycloneAlert={activeCycloneAlert}
-              onSelectLocation={(place) => {
-                handleSelectLocation(place);
-                setIsMobileSidebarOpen(false);
-                if (mobileTab === "dashboard") setMobileTab("chat");
-              }}
-              onSelectPrompt={(prompt) => {
-                handleSelectPrompt(prompt);
-                setIsMobileSidebarOpen(false);
-                if (mobileTab === "dashboard") setMobileTab("chat");
-              }}
-              className="h-full"
-            />
-          </div>
+        // Part 1: Icon Rail Navigation Model (Desktop 64px rail, Mobile 56px bottom tabs)
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* ── Icon Rail (Navigation Destinations: Chat, Map, Alerts, Trace) ── */}
+          <IconRail
+            activeTab={activeTab}
+            onSelectTab={(tab) => setActiveTab(tab)}
+            hasMapData={Boolean(mapGeoJson?.features?.length)}
+            hasActiveAlert={Boolean(activeCycloneAlert)}
+            hasTraceData={Boolean(activeTrace && activeTrace.length > 0)}
+          />
 
-          {/* Mobile Overlay backdrop when drawer is open */}
-          {isMobileSidebarOpen && (
-            <div
-              className="fixed inset-0 bg-black/30 z-30 lg:hidden"
-              onClick={() => setIsMobileSidebarOpen(false)}
-            />
-          )}
+          {/* ── Active View Container (Only ONE view active at a time) ── */}
+          <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+            {/* Destination 1: Chat View (Default) */}
+            {activeTab === "chat" && (
+              <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)]">
+                {/* Chat message stream with empty state */}
+                <div className="flex-1 overflow-hidden">
+                  <ChatPanel
+                    messages={messages}
+                    isLoading={isLoading}
+                    progressSteps={progressSteps}
+                    language={currentLanguage}
+                    onSelectPrompt={handleSelectPrompt}
+                    onViewTrace={() => setActiveTab("trace")}
+                    className="h-full"
+                  />
+                </div>
 
-          {/* ── 2. Center Column: Chat & Voice Interface (~45-50% width on Desktop) ── */}
-          <div
-            className={`
-              flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)] border-r border-[var(--border)]
-              ${mobileTab !== "chat" ? "hidden lg:flex" : "flex"}
-            `}
-          >
-            {/* Chat message stream with live SSE progress stepper */}
-            <div className="flex-1 overflow-hidden">
-              <ChatPanel
-                messages={messages}
-                isLoading={isLoading}
-                progressSteps={progressSteps}
-                language={currentLanguage}
-                onSelectPrompt={handleSelectPrompt}
-                onViewTrace={() => {
-                  setMobileTab("trace");
-                  setIsTraceOpen(true);
-                }}
-                className="h-full"
-              />
-            </div>
+                {/* Quiet single status line directly above the input bar (PRD Part 1 & 1C) */}
+                <div className="px-4 py-2 bg-[var(--surface-muted)]/80 border-t border-[var(--border)] flex items-center justify-between text-xs font-mono-data text-[var(--ink-muted)] shrink-0 select-none">
+                  {isLoading ? (
+                    <div className="flex items-center gap-2 text-[var(--current)] font-medium truncate">
+                      <span className="w-2 h-2 rounded-full bg-[var(--current)] animate-ping shrink-0" />
+                      <span className="truncate">
+                        {progressSteps[progressSteps.length - 1]?.summary || "Analyzing coastal conditions..."}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-semibold text-[var(--ink)]">
+                        {liveConditions?.locationName || "Thoothukudi Harbour"}
+                      </span>
+                      <span>·</span>
+                      <span>{liveConditions?.waveHeightM.toFixed(1) ?? "0.8"}m wave</span>
+                      <span>·</span>
+                      <span
+                        className={`font-semibold ${
+                          currentRiskLabel === "HIGH"
+                            ? "text-[#DC2626]"
+                            : currentRiskLabel === "MODERATE"
+                            ? "text-[#D97706]"
+                            : "text-[#1B8755]"
+                        }`}
+                      >
+                        {currentRiskLabel} RISK
+                      </span>
+                    </div>
+                  )}
 
-            {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input */}
-            <div className="p-3 sm:p-4 bg-[var(--surface)] border-t border-[var(--border)] shrink-0 z-10 shadow-xs">
-              <ChatInput
-                onSendMessage={handleSendMessage}
-                isLoading={isLoading}
-                language={currentLanguage}
-              />
-            </div>
-          </div>
+                  <div className="hidden sm:flex items-center gap-2 text-[11px] text-[var(--ink-subtle)] shrink-0">
+                    <span>
+                      {liveConditions ? `${liveConditions.lat.toFixed(2)}°N, ${liveConditions.lon.toFixed(2)}°E` : ""}
+                    </span>
+                  </div>
+                </div>
 
-          {/* ── 3. Right Column: Marine Map & Collapsible Trace Panel (~35-40% on Desktop) ── */}
-          <div
-            className={`
-              w-full lg:w-[420px] xl:w-[480px] shrink-0 h-full flex flex-col bg-[var(--surface-muted)] overflow-hidden
-              ${mobileTab === "map" || mobileTab === "trace" ? "flex" : "hidden lg:flex"}
-            `}
-          >
-            {/* Top half: Leaflet Interactive Marine Chart */}
-            <div className={`p-3 shrink-0 ${mobileTab === "trace" ? "hidden lg:block h-[45%]" : "flex-1 lg:h-[50%]"}`}>
-              <MarineMap
-                geoJson={mapGeoJson}
-                riskLabel={currentRiskLabel}
-                locationName={activeLocationName}
-                className="h-full"
-              />
-            </div>
+                {/* Bottom Input Area: Dominant 56px Mic Button + 48px Text Input */}
+                <div className="p-3 sm:p-4 bg-[var(--surface)] border-t border-[var(--border)] shrink-0 z-10 shadow-xs pb-16 md:pb-4">
+                  <ChatInput
+                    onSendMessage={handleSendMessage}
+                    isLoading={isLoading}
+                    language={currentLanguage}
+                  />
+                </div>
+              </div>
+            )}
 
-            {/* Bottom half: Collapsible Reasoning Trace Panel */}
-            <div className={`p-3 pt-0 flex-1 overflow-hidden ${mobileTab === "map" ? "hidden lg:flex" : "flex"}`}>
-              <TracePanel
-                trace={activeTrace}
-                evidence={activeEvidence}
-                language={currentLanguage}
-                isOpen={isTraceOpen}
-                onToggle={() => setIsTraceOpen(!isTraceOpen)}
-                className="h-full w-full"
-              />
-            </div>
-          </div>
+            {/* Destination 2: Marine Map (Full Width) */}
+            {activeTab === "map" && (
+              <div className="flex-1 h-full overflow-hidden p-2 sm:p-4 pb-16 md:pb-4 bg-[var(--neutral)]">
+                <MarineMap
+                  geoJson={mapGeoJson}
+                  riskLabel={currentRiskLabel}
+                  locationName={activeLocationName}
+                  className="w-full h-full rounded-2xl border border-[var(--border)] shadow-2xs overflow-hidden"
+                />
+              </div>
+            )}
 
-          {/* ── Mobile Navigation Tabs Bar (< 1024px) ── */}
-          <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-[var(--surface)] border-t border-[var(--border)] flex items-center justify-around z-20 shadow-lg px-2">
-            <button
-              type="button"
-              onClick={() => setMobileTab("chat")}
-              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
-                mobileTab === "chat" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
-              }`}
-            >
-              <MessageSquare className="w-4 h-4 mb-0.5" />
-              <span>{t.navChat}</span>
-            </button>
+            {/* Destination 3: Hazard & Alerts View (Full Width) */}
+            {activeTab === "alerts" && (
+              <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+                <AlertsView
+                  language={currentLanguage}
+                  onSelectLanguage={handleSelectLanguage}
+                  activeCycloneAlert={activeCycloneAlert}
+                />
+              </div>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setMobileTab("map")}
-              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
-                mobileTab === "map" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
-              }`}
-            >
-              <MapIcon className="w-4 h-4 mb-0.5" />
-              <span>{t.navMap}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMobileTab("trace")}
-              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
-                mobileTab === "trace" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
-              }`}
-            >
-              <Activity className="w-4 h-4 mb-0.5" />
-              <span>{t.navTrace}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMobileTab("dashboard")}
-              className={`flex flex-col items-center justify-center flex-1 h-full text-[11px] font-medium transition-colors ${
-                mobileTab === "dashboard" ? "text-[var(--current)] font-semibold" : "text-[var(--ink-muted)]"
-              }`}
-            >
-              <Compass className="w-4 h-4 mb-0.5" />
-              <span>{t.navDashboard}</span>
-            </button>
-          </nav>
-        </main>
+            {/* Destination 4: Reasoning Trace View (Full Width) */}
+            {activeTab === "trace" && (
+              <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+                <TracePanel
+                  trace={activeTrace}
+                  evidence={activeEvidence}
+                  language={currentLanguage}
+                />
+              </div>
+            )}
+          </main>
+        </div>
       )}
     </div>
   );

@@ -309,14 +309,12 @@ def _render_template(
         d = risk["data"]
         cs = d["component_scores"]
         lines.append(f"Score: **{d['composite_score']}/100 ({d['risk_label']})**")
-        lines.append(f"| Factor | Component Score | Weight | Contribution |")
-        lines.append(f"|--------|-----------------|--------|--------------|")
         for comp in d.get("components", []):
             lines.append(
-                f"| {comp['label']} | {comp['component_score']:.0f}/100 "
-                f"| {comp['weight']*100:.0f}% | {comp['contribution']:.1f} |"
+                f"• **{comp['label']}**: {comp['component_score']:.0f}/100 "
+                f"(Weight: {comp['weight']*100:.0f}%, Contribution: {comp['contribution']:.1f} pts)"
             )
-        lines.append(f"")
+        lines.append("")
         lines.append(f"{d['recommendation']}")
     lines.append("")
 
@@ -541,7 +539,7 @@ def synthesis(state: ORCAState) -> dict:
     
     dq_str = " ".join(data_quality_notes) if data_quality_notes else "All data is live."
     
-    system_prompt = f"""You are Tarang, a marine safety decision-support assistant. Synthesize a conversational, evidence-based assessment for {location}.
+    system_template = """You are Tarang, a marine safety decision-support assistant. Synthesize a conversational, evidence-based assessment for {location}.
 
 STRICT RULES:
 1. NEVER state a numeric value that is not present in the provided JSON data.
@@ -551,13 +549,14 @@ STRICT RULES:
 5. ALWAYS append this disclaimer at the end: "Disclaimer: This is a decision-support assessment, not an official safety clearance. Always follow advisories from IMD, INCOIS, and the Indian Coast Guard."
 6. The response must be in the {lang} language.
 7. Data Quality: {dq_str}. You MUST mention if any data is fallback or historical proxy.
+8. For any factor breakdowns, use clean bullet points. DO NOT emit markdown table syntax (|...|).
 
 JSON Evidence:
 {evidence_str}
 """
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
+        ("system", system_template),
         ("user", "Synthesize the assessment based on the provided evidence.")
     ])
     
@@ -571,7 +570,12 @@ JSON Evidence:
     chain = prompt | llm
     
     try:
-        res = chain.invoke({})
+        res = chain.invoke({
+            "location": location,
+            "lang": lang,
+            "dq_str": dq_str,
+            "evidence_str": evidence_str,
+        })
         output_text = res.content
         
         # Numeric grounding check

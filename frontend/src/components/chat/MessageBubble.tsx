@@ -48,24 +48,31 @@ export const MessageBubble: React.FC<Props> = ({
     try {
       setIsLoadingAudio(true);
       const audioBlob = await synthesizeSpeech(message.content, message.language || language || "en");
+      console.log(`[TTS] Received audio blob (${audioBlob.size} bytes, type: ${audioBlob.type})`);
+      
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
-      audio.onended = () => setIsPlaying(false);
-      audio.onerror = (e) => {
-        console.error("Audio playback error:", e);
+      audio.onended = () => {
         setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      audio.onerror = (e) => {
+        console.error("Audio playback decoding error:", e);
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
       };
 
       setAudioElement(audio);
-      audio.play();
+      await audio.play();
       setIsPlaying(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to play TTS audio:", err);
-      alert("Could not play audio. Please ensure Sarvam TTS API is accessible.");
+      alert(`Could not play audio: ${err.message || "Please ensure Sarvam TTS API is accessible."}`);
     } finally {
       setIsLoadingAudio(false);
     }
+
   };
 
   if (isUser) {
