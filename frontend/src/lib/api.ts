@@ -288,3 +288,36 @@ export async function getSessionLocationApi(
   }
 }
 
+/**
+ * Retrieve Potential Fishing Zones (PFZ) for a location via GET /location/pfz
+ */
+export async function fetchPfzZonesApi(
+  lat: number,
+  lon: number,
+  name?: string
+): Promise<{
+  status: string;
+  is_coastal: boolean;
+  location?: { name: string; lat: number; lon: number };
+  zones: any[];
+  nearest_zone_km?: number;
+  zone_count?: number;
+  avg_chl?: number;
+  source?: string;
+  data_quality?: string;
+  used_fallback?: boolean;
+  summary?: string;
+  features?: any[];
+} | null> {
+  try {
+    const nameParam = name ? `&name=${encodeURIComponent(name)}` : "";
+    const res = await fetch(`${API_BASE_URL}/location/pfz?lat=${lat}&lon=${lon}${nameParam}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn("Failed to fetch PFZ zones:", err);
+    return null;
+  }
+}
+
+

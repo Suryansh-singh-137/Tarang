@@ -624,6 +624,15 @@ function AppWorkspace() {
                 locationName={activeLocationName}
                 locationStatus={locationStatus}
                 onNavigateToMap={() => setActiveTab("map")}
+                onPfzLoaded={(features) => {
+                  setMapGeoJson((prev) => ({
+                    type: "FeatureCollection",
+                    features: [
+                      ...(prev?.features?.filter((f) => f.properties?.feature_type !== "pfz_zone") || []),
+                      ...features,
+                    ],
+                  }));
+                }}
                 language={currentLanguage}
               />
             </div>
