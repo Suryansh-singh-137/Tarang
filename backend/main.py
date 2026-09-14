@@ -615,10 +615,16 @@ def speak(body: SpeakRequest):
     Text-to-Speech via Sarvam AI.
     Returns streaming audio/wav bytes.
     """
+    if not config.SARVAM_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="SARVAM_API_KEY is not configured in backend/.env. Please configure your Sarvam AI API key.",
+        )
+
     audio_bytes = sarvam_tts_client.synthesize_speech(body.text, body.language)
     
     if not audio_bytes:
-        raise HTTPException(status_code=500, detail="Failed to synthesize speech.")
+        raise HTTPException(status_code=500, detail="Failed to synthesize speech via Sarvam AI API.")
         
     return Response(content=audio_bytes, media_type="audio/wav")
 

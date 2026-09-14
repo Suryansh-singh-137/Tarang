@@ -153,8 +153,13 @@ export const MessageBubble: React.FC<Props> = ({
   };
 
   const handleToggleAudio = async () => {
-    if (isPlaying && audioElement) {
-      audioElement.pause();
+    if (isPlaying) {
+      if (audioElement) {
+        audioElement.pause();
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
       setIsPlaying(false);
       return;
     }
@@ -187,12 +192,31 @@ export const MessageBubble: React.FC<Props> = ({
       await audio.play();
       setIsPlaying(true);
     } catch (err: any) {
-      console.error("Failed to play TTS audio:", err);
-      alert(`Could not play audio: ${err.message || "Please ensure Sarvam TTS API is accessible."}`);
+      console.warn("Sarvam TTS unavailable, falling back to browser speech synthesis:", err);
+      // Graceful fallback to browser's native Web Speech API
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const cleanText = message.content
+            .replace(/[*#_~`|]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          const utterance = new SpeechSynthesisUtterance(cleanText);
+          const langMap: Record<string, string> = { en: "en-IN", hi: "hi-IN", ta: "ta-IN" };
+          utterance.lang = langMap[message.language || language || "en"] || "en-US";
+          utterance.onend = () => setIsPlaying(false);
+          utterance.onerror = () => setIsPlaying(false);
+          window.speechSynthesis.speak(utterance);
+          setIsPlaying(true);
+          return;
+        } catch (synthErr) {
+          console.error("Browser speech synthesis error:", synthErr);
+        }
+      }
+      alert(`Could not play audio: ${err.message || "Please ensure Sarvam TTS API is accessible or configure SARVAM_API_KEY."}`);
     } finally {
       setIsLoadingAudio(false);
     }
-
   };
 
   if (isUser) {
