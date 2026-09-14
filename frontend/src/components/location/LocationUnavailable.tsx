@@ -24,9 +24,10 @@ export function LocationUnavailable({
 }: LocationUnavailableProps) {
   const { selectedLocation, marineContext, setPickerOpen, setLocation } = useLocation();
 
-  const dist = marineContext?.distance_to_coast_km
-    ? `${Math.round(marineContext.distance_to_coast_km)} km`
-    : "several hundred km";
+  const dist =
+    typeof marineContext?.distance_to_coast_km === "number" && marineContext.distance_to_coast_km > 0
+      ? `${Math.round(marineContext.distance_to_coast_km)} km`
+      : "an inland distance";
 
   return (
     <div

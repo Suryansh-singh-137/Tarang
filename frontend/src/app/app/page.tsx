@@ -116,8 +116,13 @@ function AppWorkspace() {
         lon: selectedLocation.lon,
         locationName: selectedLocation.name,
       }));
+      if (marineContext?.is_coastal || marineContext?.type === "coastal" || marineContext?.type === "offshore") {
+        setLocationStatus("coastal");
+      } else if (marineContext?.type === "inland") {
+        setLocationStatus("inland");
+      }
     }
-  }, [selectedLocation]);
+  }, [selectedLocation, marineContext]);
 
   const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
