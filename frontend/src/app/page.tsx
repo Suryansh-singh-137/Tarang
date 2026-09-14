@@ -245,6 +245,9 @@ export default function Home() {
                     trace: result.trace,
                     map_geojson: result.map_geojson,
                     parsed_intent: result.parsed_intent,
+                    answer_plan: result.answer_plan,
+                    response_mode: result.response_mode,
+                    query_signature: result.query_signature,
                     isStreaming: false,
                   }
                 : msg

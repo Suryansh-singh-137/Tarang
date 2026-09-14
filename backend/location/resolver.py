@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
 from location.models import (
     DeviceLocation,
@@ -27,7 +27,9 @@ from location.models import (
     ResolvedLocation,
     LocationMode,
 )
-from session.session_store import SessionRecord
+
+if TYPE_CHECKING:
+    from session.session_store import SessionRecord
 from tools.location_resolver import (
     resolve_location as tool_resolve_location,
     location_is_coastal,

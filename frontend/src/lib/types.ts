@@ -49,6 +49,33 @@ export type ProgressEventData = {
   source: string;
 };
 
+export type ResponseMode =
+  | "factual_direct"
+  | "specialist_card"
+  | "applicability_explanation"
+  | "safety_assessment"
+  | "clarification";
+
+export type PresentationHint =
+  | "location_card"
+  | "weather_card"
+  | "ocean_card"
+  | "pfz_card"
+  | "hazard_card"
+  | "safety_card"
+  | "applicability_card"
+  | "clarification_card";
+
+export type AnswerPlan = {
+  intent_name: string;
+  primary_capability: string;
+  required_agents: string[];
+  response_mode: ResponseMode;
+  location_scope: string;
+  evidence_needed: string[];
+  presentation_hint: PresentationHint;
+};
+
 export type LocationStatus = "coastal" | "inland" | "unresolved" | "idle";
 
 export type ParsedIntent = {
@@ -66,6 +93,10 @@ export type ParsedIntent = {
   needs_risk?: boolean;
   location_status?: "coastal" | "inland" | "unresolved";
   distance_to_coast_km?: number | null;
+  intent_name?: string;
+  answer_plan?: AnswerPlan;
+  response_mode?: ResponseMode;
+  query_signature?: string;
 };
 
 export type GeoJSONFeature = {
@@ -152,6 +183,9 @@ export type QueryResultPayload = {
   risk_data?: RiskData;
   evidence?: EvidenceItem[];
   parsed_intent?: ParsedIntent;
+  answer_plan?: AnswerPlan;
+  response_mode?: ResponseMode;
+  query_signature?: string;
   conversation_history?: Array<{ role: string; content: string }>;
   last_parsed_intent?: ParsedIntent | null;
   last_results?: Record<string, any>;
@@ -175,6 +209,9 @@ export type Message = {
   trace?: TraceEntry[];
   map_geojson?: MapGeoJSON;
   parsed_intent?: ParsedIntent;
+  answer_plan?: AnswerPlan;
+  response_mode?: ResponseMode;
+  query_signature?: string;
   timestamp: string;
   isStreaming?: boolean;
   isError?: boolean;

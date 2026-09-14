@@ -119,6 +119,38 @@ class AgentResult(TypedDict):
     observed_at: NotRequired[Optional[str]]
 
 
+ResponseMode = Literal[
+    "DIRECT_FACT",
+    "DATA_SUMMARY",
+    "APPLICABILITY_EXPLANATION",
+    "DECISION_ASSESSMENT",
+    "FOLLOWUP",
+    "CLARIFICATION",
+]
+
+
+class AnswerPlan(TypedDict, total=False):
+    """Structured plan created before synthesis instructing how to shape the response (PRD §5)."""
+    intent: str
+    intent_name: str
+    answer_type: str
+    presentation_hint: str
+    primary_capability: str
+    required_capabilities: List[str]
+    required_agents: List[str]
+    response_mode: str
+    location_scope: str
+    evidence_needed: List[str]
+    requested_location: Optional[str]
+    resolved_location: Optional[Dict[str, Any]]
+    should_answer_directly: bool
+    should_explain_applicability: bool
+    should_show_data: bool
+    should_show_recommendation: bool
+    should_show_warning: bool
+    should_offer_followup: bool
+
+
 class ParsedIntent(TypedDict):
     """Structured representation of what the user is asking.
 
@@ -128,6 +160,11 @@ class ParsedIntent(TypedDict):
 
     Milestone 5 additions:
       - query_type extended with "risk_explanation"
+
+    V2.2-F additions:
+      - intent: fine-grained intent string (LOCATION_QUERY, WEATHER_QUERY, TIDE_QUERY, etc.)
+      - intent_name: alias for intent
+      - response_mode: response mode for synthesis
     """
 
     location_name: Optional[str]
@@ -136,7 +173,7 @@ class ParsedIntent(TypedDict):
     time_window: str        # e.g. "tomorrow_morning", "now", "next_24h"
     time_start_utc: str     # e.g. "2026-09-13T00:30:00Z"
     time_end_utc: str       # e.g. "2026-09-13T06:30:00Z"
-    query_type: Literal["safety_check", "pfz_lookup", "general", "risk_explanation", "ocean_tide"]
+    query_type: Literal["safety_check", "pfz_lookup", "general", "risk_explanation", "ocean_tide", "weather_only", "hazard_only", "location_only"]
     needs_weather: bool
     needs_pfz: bool
     needs_hazard: bool
@@ -145,6 +182,10 @@ class ParsedIntent(TypedDict):
     needs_ocean: NotRequired[bool]
     location_status: NotRequired[Optional[Literal["coastal", "inland", "unresolved"]]]
     distance_to_coast_km: NotRequired[Optional[float]]
+    intent: NotRequired[Optional[str]]
+    intent_name: NotRequired[Optional[str]]
+    response_mode: NotRequired[Optional[str]]
+    answer_plan: NotRequired[Optional[AnswerPlan]]
 
 
 class ConversationTurn(TypedDict):
@@ -225,5 +266,16 @@ class ORCAState(TypedDict):
     # Browser geolocation & Language Override (for backward compatibility)
     user_location: Optional[Dict[str, Any]]        # {"lat": float, "lon": float, "name": Optional[str]}
     language_override: Optional[str]               # BCP-47 tag from UI toggle: "en", "hi", "ta"
+
+    # V2.2-F: Conversational Intelligence & Answer Planning
+    intent: NotRequired[Optional[str]]
+    response_mode: NotRequired[Optional[str]]
+    answer_plan: NotRequired[Optional[AnswerPlan]]
+    query_signature: NotRequired[Optional[Dict[str, Any]]]
+
+    # V2.2.1: Semantic Domain Memory & Context Persistence
+    previous_marine_assessment: NotRequired[Optional[Dict[str, Any]]]
+    semantic_context: NotRequired[Optional[Dict[str, Any]]]
+    is_recheck: NotRequired[Optional[bool]]
 
 

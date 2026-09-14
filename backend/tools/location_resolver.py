@@ -447,6 +447,12 @@ def resolve_location(query: str) -> Dict[str, Any]:
         "also", "and", "or", "so", "show", "give", "get", "view", "see", "info", "information",
         "report", "details", "tide", "tides", "water", "waves", "wind", "winds", "cyclone",
         "storm", "kal", "aaj", "subah", "shaam", "naale", "indru", "kaalai", "maalai",
+        # Conversational follow-up and evaluation tokens (V2.2.1)
+        "still", "that", "this", "why", "again", "yet", "recheck", "warning", "warnings",
+        "alert", "alerts", "lightning", "rain", "pressure", "good", "bad", "okay", "ok",
+        "fine", "high", "low", "moderate", "extreme", "score", "factor", "factors",
+        "breakdown", "reason", "because", "explain", "explanation", "kyun", "kyon",
+        "samjhao", "iska", "woh", "khatra", "tufan", "bijli",
     }
     tokens = [w for w in re.findall(r'\b[A-Za-z]+\b', query) if w.lower() not in _STOP_WORDS]
     if not tokens:

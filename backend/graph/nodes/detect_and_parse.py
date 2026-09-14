@@ -34,7 +34,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 import config
-from graph.state import ORCAState, ParsedIntent
+from graph.state import ORCAState, ParsedIntent, AnswerPlan, ResponseMode
 from location.resolver import LocationResolver
 from location.models import DeviceLocation, QueryLocation, ResolvedLocation, LocationMode
 from session.session_store import get_or_create_session
@@ -213,110 +213,264 @@ def _is_risk_explanation(text: str) -> bool:
 # Query-type + needs_* flags
 # ---------------------------------------------------------------------------
 
-def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
+# ---------------------------------------------------------------------------
+# Fine-grained Intent Classification (V2.2 Conversational Pipeline)
+# ---------------------------------------------------------------------------
+
+_LOCATION_QUERY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(what('?s| is)? (my|our|this|the current) location|where am i|where are we|what is this place|my current location|current location|tell me my location|show my location|what is my current location)\b", re.I),
+    re.compile(r"^\s*my location\s*$", re.I),
+    re.compile(r"\b(coordinates|my coordinates|gps coordinates|latitude|longitude|lat\s*lon)\b", re.I),
+    re.compile(r"\b(mera|meri) location\b", re.I),
+    re.compile(r"\b(kahan (hoon|hu|hai|hain)|main kahan|hum kahan|mera sthan|sthan kya hai|sthan batao)\b", re.I),
+    re.compile(r"\b(en idam|naan enge|idam enna|engae irukkiren|enathu idam)\b", re.I),
+    re.compile(r"[\u0915\u0939\u093E\u0901][\u0939\u0948\u0902]?"),  # कहाँ / स्थान
+]
+
+_PRESSURE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(sea\s*level\s*pressure|msl\s*pressure|mean\s*sea\s*level\s*pressure|barometric\s*pressure|atmospheric\s*pressure|surface\s*pressure)\b", re.I),
+    re.compile(r"\b(vayu\s*dabav|samudra\s*tal\s*dabav|hawa\s*ka\s*dabav)\b", re.I),
+]
+
+_WATER_LEVEL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(water\s*level|sea\s*level|sea\s*water\s*level|chart\s*datum|samudra\s*jal\s*star|kadal\s*neer\s*mattam)\b", re.I),
+]
+
+_TIDE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(tide|tides|high\s*tide|low\s*tide|tidal|jwar|bhata|alahi|lehar\s*star)\b", re.I),
+    re.compile(r"\b(jwar-bhata|jwar\s*bhata)\b", re.I),
+]
+
+_BOUNDARY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(boundary|border|imbl|sri\s*lanka|international\s*waters|maritime\s*limit|seema)\b", re.I),
+]
+
+_FOLLOWUP_PREFIX_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^\s*(what\s+about|how\s+about|aur\s+kal|aur\s+aaj|and\s+tomorrow|and\s+today|what\s+for)\b", re.I),
+]
+
+_RECHECK_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(still\s+safe|safe\s+now|recheck|check\s+again|is\s+it\s+still|kya\s+abhi\s+bhi|update\s+safety|still\s+okay|still\s+good|now\s+safe)\b", re.I),
+]
+
+
+
+def classify_query_intent(
+    text: str,
+    last_intent: Optional[ParsedIntent] = None,
+) -> tuple[str, str, dict[str, bool], str]:
     """
-    Returns (query_type, needs_flags_dict).
-    query_type: "safety_check" | "pfz_lookup" | "hazard_only" | "weather_only" |
-                "risk_explanation" | "general"
+    Returns (intent_name, query_type, needs_dict, response_mode).
+
+    Intents:
+      - LOCATION_QUERY
+      - WEATHER_QUERY
+      - TIDE_QUERY
+      - WATER_LEVEL_QUERY
+      - SEA_LEVEL_PRESSURE_QUERY
+      - PFZ_QUERY
+      - HAZARD_QUERY
+      - BOUNDARY_QUERY
+      - MARINE_SAFETY_QUERY
+      - TRIP_QUERY
+      - RISK_EXPLANATION
+      - GENERAL_FOLLOWUP
     """
-    # Milestone 4: check for explanation intent first (takes priority)
+    text_lower = text.lower().strip()
+
+    # 1. Explanation intent (takes precedence)
     if _is_risk_explanation(text):
-        return "risk_explanation", {
+        return "RISK_EXPLANATION", "risk_explanation", {
             "needs_weather": False,
             "needs_pfz": False,
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
-        }
+            "needs_ocean": False,
+        }, "DIRECT_FACT"
 
-    text_lower = text.lower()
+    # 2. Location query (Section 7, 8, 27: hard bypass for location inquiries)
+    if any(pat.search(text) for pat in _LOCATION_QUERY_PATTERNS):
+        return "LOCATION_QUERY", "location_only", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+        }, "DIRECT_FACT"
+
+    # 3. Sea-level atmospheric pressure query (Section 10)
+    if any(pat.search(text) for pat in _PRESSURE_PATTERNS):
+        return "SEA_LEVEL_PRESSURE_QUERY", "weather_only", {
+            "needs_weather": True,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+        }, "DATA_SUMMARY"
+
+    # 4. Local water level / tide query (Section 10, 28)
+    is_water_level = any(pat.search(text) for pat in _WATER_LEVEL_PATTERNS)
+    is_tide = any(pat.search(text) for pat in _TIDE_PATTERNS)
+    if is_water_level and not any(kw in text_lower for kw in ["safe", "safety", "jaana", "surakshit", "fish", "machli"]):
+        return "WATER_LEVEL_QUERY", "ocean_tide", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": True,
+        }, "DATA_SUMMARY"
+    if is_tide and not any(kw in text_lower for kw in ["safe", "safety", "jaana", "surakshit"]):
+        return "TIDE_QUERY", "ocean_tide", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": True,
+        }, "DATA_SUMMARY"
+
+    # 5. Maritime boundary query
+    if any(pat.search(text) for pat in _BOUNDARY_PATTERNS) and not any(kw in text_lower for kw in ["safe", "safety", "fish"]):
+        return "BOUNDARY_QUERY", "general", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": True,
+            "needs_risk": False,
+            "needs_ocean": False,
+        }, "DATA_SUMMARY"
+
+    _TRIP_SAFETY_PATTERNS = [
+        re.compile(r"\b(can i go|can we go|should i go|should we go|okay to go|safe to go|go out|head out|sail out|going out|venture out|go to sea|head to sea|out to sea)\b", re.I),
+        re.compile(r"\b(kya main ja sakta|kya hum ja sakte|jaana sahi hai|jaana theek hai|samundar mein utarna)\b", re.I),
+    ]
 
     safety_keywords = {
         "safe", "safety", "jaana", "जाना", "surakshit", "सुरक्षित",
-        "paadhukaappu", "risk", "danger", "खतरा", "hazard",
+        "paadhukaappu", "risk", "danger", "खतरा", "hazard", "suitability",
+        "venture", "trip", "craft", "boat", "sail",
     }
     pfz_keywords = {
         "fish", "fishing", "pfz", "zone", "machli", "मछली", "meen",
         "மீன்", "மீன்பிடி", "machliyon", "fishing zone", "potential",
+        "chlorophyll",
     }
     hazard_keywords = {
         "cyclone", "storm", "lightning", "warning", "alert", "dangerous",
         "tufan", "तूफान", "bijli", "बिजली", "advisory", "khatra",
     }
     weather_keywords = {
-        "weather", "wave", "wind", "sea", "ocean", "condition", "forecast",
-        "mausam", "lehar", "samudra", "தரங்கு", "அலை",
+        "weather", "wave", "wind", "sea state", "ocean condition", "condition", "forecast",
+        "mausam", "lehar", "samudra", "தரங்கு", "அலை", "temperature", "rain",
+        "rainfall", "baarish", "hawa",
     }
 
-    is_safety = bool(set(text_lower.split()) & safety_keywords) or any(
-        kw in text_lower for kw in safety_keywords
-    )
-    is_pfz = bool(set(text_lower.split()) & pfz_keywords) or any(
-        kw in text_lower for kw in pfz_keywords
-    )
-    is_hazard = bool(set(text_lower.split()) & hazard_keywords) or any(
-        kw in text_lower for kw in hazard_keywords
-    )
-    is_weather = bool(set(text_lower.split()) & weather_keywords) or any(
-        kw in text_lower for kw in weather_keywords
-    )
+    words = set(text_lower.split())
+    is_trip_pattern = any(p.search(text) for p in _TRIP_SAFETY_PATTERNS)
+    is_safety = is_trip_pattern or bool(words & safety_keywords) or any(kw in text_lower for kw in safety_keywords)
+    is_pfz = bool(words & pfz_keywords) or any(kw in text_lower for kw in pfz_keywords)
+    is_hazard = bool(words & hazard_keywords) or any(kw in text_lower for kw in hazard_keywords)
+    is_weather = bool(words & weather_keywords) or any(kw in text_lower for kw in weather_keywords)
 
-    # "fishing ke liye jaana safe hai?" → both PFZ and safety
-    if is_safety and is_pfz:
-        return "safety_check", {
+    # 6. Safety check takes priority when safety keywords are explicitly present
+    if is_safety:
+        return "MARINE_SAFETY_QUERY", "safety_check", {
             "needs_weather": True,
             "needs_pfz": True,
             "needs_hazard": True,
             "needs_geofence": True,
             "needs_risk": True,
             "needs_ocean": True,
-        }
-    elif is_safety:
-        return "safety_check", {
-            "needs_weather": True,
-            "needs_pfz": False,
-            "needs_hazard": True,
-            "needs_geofence": True,
-            "needs_risk": True,
-            "needs_ocean": True,
-        }
-    elif is_pfz:
-        # Pure PFZ query — no weather/hazard/risk needed
-        return "pfz_lookup", {
+        }, "DECISION_ASSESSMENT"
+
+    # 7. Pure PFZ lookup (no safety asked)
+    if is_pfz:
+        return "PFZ_QUERY", "pfz_lookup", {
             "needs_weather": False,
             "needs_pfz": True,
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
             "needs_ocean": False,
-        }
-    elif is_hazard:
-        return "hazard_only", {
+        }, "DATA_SUMMARY"
+
+    # 8. Pure Hazard lookup (no safety asked)
+    if is_hazard:
+        return "HAZARD_QUERY", "hazard_only", {
             "needs_weather": True,
             "needs_pfz": False,
             "needs_hazard": True,
             "needs_geofence": False,
             "needs_risk": False,
             "needs_ocean": False,
-        }
-    elif is_weather:
-        return "weather_only", {
+        }, "DATA_SUMMARY"
+
+    # 9. Pure Weather lookup (no safety asked)
+    if is_weather:
+        return "WEATHER_QUERY", "weather_only", {
             "needs_weather": True,
             "needs_pfz": False,
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
-            "needs_ocean": True,
-        }
-    else:
-        return "general", {
-            "needs_weather": True,
-            "needs_pfz": True,
-            "needs_hazard": True,
-            "needs_geofence": True,
-            "needs_risk": True,
-            "needs_ocean": True,
-        }
+            "needs_ocean": False,
+        }, "DATA_SUMMARY"
+
+    # 10. Follow-up inheritance (e.g. "what about tomorrow?", "what about here?")
+    is_followup = any(pat.search(text) for pat in _FOLLOWUP_PREFIX_PATTERNS) or text_lower in ("tomorrow", "here", "kal", "yahan")
+    if is_followup and last_intent is not None:
+        if isinstance(last_intent, str):
+            prior_intent = last_intent
+            prior_qtype = (
+                "weather_only" if last_intent in ("WEATHER_QUERY", "SEA_LEVEL_PRESSURE_QUERY")
+                else "safety_check" if last_intent in ("MARINE_SAFETY_QUERY", "TRIP_QUERY")
+                else "ocean_tide" if last_intent in ("TIDE_QUERY", "WATER_LEVEL_QUERY")
+                else "pfz_lookup" if last_intent == "PFZ_QUERY"
+                else "general"
+            )
+            prior_needs = {
+                "needs_weather": last_intent in ("WEATHER_QUERY", "SEA_LEVEL_PRESSURE_QUERY", "MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+                "needs_pfz": last_intent in ("PFZ_QUERY", "MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+                "needs_hazard": last_intent in ("HAZARD_QUERY", "MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+                "needs_geofence": last_intent in ("BOUNDARY_QUERY", "MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+                "needs_risk": last_intent in ("MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+                "needs_ocean": last_intent in ("TIDE_QUERY", "WATER_LEVEL_QUERY", "MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+            }
+            prior_mode = "specialist_card" if prior_qtype != "safety_check" else "safety_assessment"
+            return prior_intent, prior_qtype, prior_needs, prior_mode
+        elif last_intent.get("intent") or last_intent.get("intent_name"):
+            prior_intent = last_intent.get("intent") or last_intent.get("intent_name") or "MARINE_SAFETY_QUERY"
+            prior_qtype = last_intent.get("query_type", "general")
+            prior_needs = {
+                "needs_weather": last_intent.get("needs_weather", True),
+                "needs_pfz": last_intent.get("needs_pfz", False),
+                "needs_hazard": last_intent.get("needs_hazard", False),
+                "needs_geofence": last_intent.get("needs_geofence", False),
+                "needs_risk": last_intent.get("needs_risk", False),
+                "needs_ocean": last_intent.get("needs_ocean", False),
+            }
+            prior_mode = last_intent.get("response_mode", "specialist_card")
+            return prior_intent, prior_qtype, prior_needs, prior_mode
+
+    # Default fallback: general marine safety check
+    return "MARINE_SAFETY_QUERY", "general", {
+        "needs_weather": True,
+        "needs_pfz": True,
+        "needs_hazard": True,
+        "needs_geofence": True,
+        "needs_risk": True,
+        "needs_ocean": True,
+    }, "DECISION_ASSESSMENT"
+
+
+def _classify_query(text: str) -> tuple[str, dict[str, bool]]:
+    """Backward compatibility wrapper for legacy callers."""
+    _, q_type, needs, _ = classify_query_intent(text)
+    return q_type, needs
 
 
 # ---------------------------------------------------------------------------
@@ -495,23 +649,29 @@ def detect_and_parse(state: ORCAState) -> dict:
         time_window = _explicit_time
 
     time_start_utc, time_end_utc = _resolve_time_range(time_window)
-    query_type, needs = _classify_query(raw)
-
-    # Check for tides / water level keywords
-    raw_lower = raw.lower()
-    needs_ocean = any(w in raw_lower for w in [
-        "tide", "tides", "water level", "sea level", "jwar", "bhata", "alahi", "high tide", "low tide"
-    ])
-    needs["needs_ocean"] = needs_ocean
+    intent_name, query_type, needs, response_mode = classify_query_intent(raw, last_intent)
 
     logger.info(
-        "[DetectAndParse] Mode=%s Resolved=%s QLoc=%s Lang=%s",
-        mode, resolved.get("name") if resolved else None, q_loc.get("source"), detected_lang
+        "[DetectAndParse] Mode=%s Resolved=%s QLoc=%s Lang=%s Intent=%s QType=%s",
+        mode, resolved.get("name") if resolved else None, q_loc.get("source"), detected_lang, intent_name, query_type
     )
 
     # 6. Early-Exit Case A: User asked for "here" / "near me" but device location is missing
     if mode == "DEVICE" and resolved is None:
         clarification_text = _get_relative_missing_clarification_text(detected_lang)
+        unresolved_plan: AnswerPlan = {
+            "intent": intent_name,
+            "answer_type": "ClarificationCard",
+            "requested_location": None,
+            "resolved_location": None,
+            "required_capabilities": [],
+            "should_answer_directly": True,
+            "should_explain_applicability": False,
+            "should_show_data": False,
+            "should_show_recommendation": False,
+            "should_show_warning": False,
+            "should_offer_followup": False,
+        }
         unresolved_intent: ParsedIntent = {
             "location_name": None,
             "lat": None,
@@ -527,6 +687,9 @@ def detect_and_parse(state: ORCAState) -> dict:
             "needs_risk": False,
             "needs_ocean": False,
             "location_status": "unresolved",
+            "intent": intent_name,
+            "response_mode": "CLARIFICATION",
+            "answer_plan": unresolved_plan,
         }
         return {
             "detected_language": detected_lang,
@@ -538,11 +701,33 @@ def detect_and_parse(state: ORCAState) -> dict:
             "changed_fields": [],
             "final_answer_text": clarification_text,
             "parse_method": "rule_based_fallback",
+            "intent": intent_name,
+            "response_mode": "CLARIFICATION",
+            "answer_plan": unresolved_plan,
+            "query_signature": {
+                "intent": intent_name,
+                "location": None,
+                "time_context": time_window,
+                "relevant_capabilities": [],
+            },
         }
 
     # 7. Early-Exit Case B: Completely Unresolved Location
     if resolved is None:
         clarification_text = _get_location_clarification_text(detected_lang)
+        unresolved_plan = {
+            "intent": intent_name,
+            "answer_type": "ClarificationCard",
+            "requested_location": None,
+            "resolved_location": None,
+            "required_capabilities": [],
+            "should_answer_directly": True,
+            "should_explain_applicability": False,
+            "should_show_data": False,
+            "should_show_recommendation": False,
+            "should_show_warning": False,
+            "should_offer_followup": False,
+        }
         unresolved_intent = {
             "location_name": None,
             "lat": None,
@@ -558,6 +743,9 @@ def detect_and_parse(state: ORCAState) -> dict:
             "needs_risk": False,
             "needs_ocean": False,
             "location_status": "unresolved",
+            "intent": intent_name,
+            "response_mode": "CLARIFICATION",
+            "answer_plan": unresolved_plan,
         }
         return {
             "detected_language": detected_lang,
@@ -569,60 +757,354 @@ def detect_and_parse(state: ORCAState) -> dict:
             "changed_fields": [],
             "final_answer_text": clarification_text,
             "parse_method": "rule_based_fallback",
+            "intent": intent_name,
+            "response_mode": "CLARIFICATION",
+            "answer_plan": unresolved_plan,
+            "query_signature": {
+                "intent": intent_name,
+                "location": None,
+                "time_context": time_window,
+                "relevant_capabilities": [],
+            },
         }
 
-    # 8. Applicability Check (PRD §4–§9)
-    from location.applicability import check_applicability
-    app_res = check_applicability(resolved, raw)
+    # 8. Case C: Direct Location Query (Sections 7, 8, 18, 27)
+    # Hard rule: LOCATION_QUERY completely bypasses marine synthesis and specialist agents
+    if intent_name == "LOCATION_QUERY":
+        loc_name = resolved["name"]
+        lat = resolved["lat"]
+        lon = resolved["lon"]
+        is_coastal = resolved.get("coastal", False)
 
+        if detected_lang == "hi":
+            status_hi = "तटीय क्षेत्र" if is_coastal else "अंतर्देशीय क्षेत्र"
+            loc_text = f"आप वर्तमान में **{loc_name}** में हैं। आपका अनुमानित स्थान {lat:.2f}°N, {lon:.2f}°E ({status_hi}) है।"
+        elif detected_lang == "ta":
+            status_ta = "கடலோர பகுதி" if is_coastal else "உள்நாட்டு பகுதி"
+            loc_text = f"நீங்கள் தற்போது **{loc_name}** இல் உள்ளீர்கள். உங்கள் தோராயமான இருப்பிடம் {lat:.2f}°N, {lon:.2f}°E ({status_ta}) ஆகும்."
+        else:
+            status_en = "coastal" if is_coastal else "inland"
+            loc_text = f"You're currently in **{loc_name}**. Your approximate location is {lat:.2f}°N, {lon:.2f}°E ({status_en} location)."
+
+        loc_plan: AnswerPlan = {
+            "intent": "LOCATION_QUERY",
+            "intent_name": "LOCATION_QUERY",
+            "answer_type": "LocationCard",
+            "presentation_hint": "location_card",
+            "primary_capability": "location_reporting",
+            "required_capabilities": ["location_context"],
+            "required_agents": [],
+            "response_mode": "factual_direct",
+            "location_scope": "device" if mode == "DEVICE" else "explicit",
+            "evidence_needed": [],
+            "requested_location": loc_name,
+            "resolved_location": resolved,
+            "should_answer_directly": True,
+            "should_explain_applicability": False,
+            "should_show_data": False,
+            "should_show_recommendation": False,
+            "should_show_warning": False,
+            "should_offer_followup": True,
+        }
+        loc_intent: ParsedIntent = {
+            "location_name": loc_name,
+            "lat": lat,
+            "lon": lon,
+            "time_window": time_window,
+            "time_start_utc": time_start_utc,
+            "time_end_utc": time_end_utc,
+            "query_type": "location_only",
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+            "location_status": "coastal" if is_coastal else "inland",
+            "distance_to_coast_km": resolved.get("nearest_coast_km", 0.0),
+            "intent": "LOCATION_QUERY",
+            "intent_name": "LOCATION_QUERY",
+            "response_mode": "factual_direct",
+            "answer_plan": loc_plan,
+        }
+        changed_fields = _compute_changed_fields(loc_intent, last_intent)
+        new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+        query_sig = {
+            "intent": "LOCATION_QUERY",
+            "location": loc_name,
+            "time_context": time_window,
+            "relevant_capabilities": ["location_context"],
+        }
+        return {
+            "detected_language": detected_lang,
+            "parsed_intent": loc_intent,
+            "device_location": device_loc,
+            "query_location": q_loc,
+            "resolved_location": resolved,
+            "location_mode": mode,
+            "changed_fields": changed_fields,
+            "conversation_history": new_history,
+            "last_parsed_intent": loc_intent,
+            "final_answer_text": loc_text,
+            "parse_method": "rule_based_fallback",
+            "intent": "LOCATION_QUERY",
+            "intent_name": "LOCATION_QUERY",
+            "response_mode": "factual_direct",
+            "answer_plan": loc_plan,
+            "query_signature": query_sig,
+        }
+
+    # 9. Case D: Inland Location Handling (PRD §4–§9, §11, §28, §35, §54)
     if not resolved["coastal"]:
         dist_km = resolved.get("nearest_coast_km")
 
-        # PRD §8: If user specifically asked for weather inland ("What's the weather here in Delhi?")
-        # Weather agent MUST run!
-        raw_lower = raw.lower()
-        is_explicit_weather = (
-            query_type in ("weather_only", "weather")
-            or any(w in raw_lower for w in ["weather", "mausam", "வானிலை", "temperature", "wind"])
-        ) and not any(w in raw_lower for w in ["fish", "machli", "zone", "pfz", "tide", "jwar", "மீன்"])
+        # 9a. Local Tide / Water Level Query inland -> Scientific inapplicability explanation (Section 11, 28)
+        if intent_name in ("WATER_LEVEL_QUERY", "TIDE_QUERY"):
+            if detected_lang == "hi":
+                inland_ocean_text = (
+                    f"आपकी वर्तमान स्थिति **{resolved['name']}** अंतर्देशीय (inland) है, इसलिए यहाँ स्थानीय ज्वार-भाटा या समुद्री जल स्तर का माप लागू नहीं होता है।\n\n"
+                    f"समुद्री जल स्तर या ज्वार की स्थिति देखने के लिए किसी तटीय बंदरगाह का नाम बताएं:\n"
+                    f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **थूथुकुडी (Thoothukudi)**"
+                )
+            elif detected_lang == "ta":
+                inland_ocean_text = (
+                    f"உங்கள் தற்போதைய இருப்பிடம் **{resolved['name']}** உள்நாட்டுப் பகுதியாகும், எனவே உள்ளூர் கடல் அலை அல்லது கடல் நீர்மட்ட அளவீடு இங்கு பொருந்தாது.\n\n"
+                    f"கடல் அலை அல்லது நீர்மட்ட தகவல்களை அறிய கடலோர இடத்தை முயற்சிக்கவும்:\n"
+                    f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **தூத்துக்குடி (Thoothukudi)**"
+                )
+            else:
+                inland_ocean_text = (
+                    f"Your current location is inland in **{resolved['name']}**, so a local tide or sea-water level measurement is not applicable here.\n\n"
+                    f"{resolved['name']} is inland and has no direct marine tidal coastline. I can check the tide or water level for a coastal location instead.\n\n"
+                    f"Try a coastal location:\n"
+                    f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Thoothukudi**"
+                )
 
-        if is_explicit_weather:
-            # Allow weather agent to run for inland location!
-            inland_intent: ParsedIntent = ParsedIntent(
-                location_name=resolved["name"],
-                lat=resolved["lat"],
-                lon=resolved["lon"],
-                time_window=time_window,
-                time_start_utc=time_start_utc,
-                time_end_utc=time_end_utc,
-                query_type="weather_only",
-                needs_weather=True,
-                needs_pfz=False,
-                needs_hazard=False,
-                needs_geofence=False,
-                needs_risk=False,
-                needs_ocean=False,
-                location_status="inland",
-                distance_to_coast_km=dist_km,
-            )
-            changed_fields = _compute_changed_fields(inland_intent, last_intent)
-            new_history = (conversation_history + [{"role": "user", "content": raw}])[
-                -config.MAX_CONVERSATION_TURNS:
-            ]
+            inland_ocean_plan: AnswerPlan = {
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "answer_type": "ApplicabilityCard",
+                "presentation_hint": "applicability_card",
+                "primary_capability": "inland_marine_explanation",
+                "required_capabilities": ["ocean"],
+                "required_agents": [],
+                "response_mode": "applicability_explanation",
+                "location_scope": "inland",
+                "evidence_needed": [],
+                "requested_location": resolved["name"],
+                "resolved_location": resolved,
+                "should_answer_directly": True,
+                "should_explain_applicability": True,
+                "should_show_data": False,
+                "should_show_recommendation": False,
+                "should_show_warning": False,
+                "should_offer_followup": True,
+            }
+            inland_ocean_intent: ParsedIntent = {
+                "location_name": resolved["name"],
+                "lat": resolved["lat"],
+                "lon": resolved["lon"],
+                "time_window": time_window,
+                "time_start_utc": "",
+                "time_end_utc": "",
+                "query_type": "ocean_tide",
+                "needs_weather": False,
+                "needs_pfz": False,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+                "location_status": "inland",
+                "distance_to_coast_km": dist_km,
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_ocean_plan,
+            }
+            changed_fields = _compute_changed_fields(inland_ocean_intent, last_intent)
+            new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+            query_sig = {
+                "intent": intent_name,
+                "location": resolved["name"],
+                "time_context": time_window,
+                "relevant_capabilities": ["ocean"],
+            }
             return {
                 "detected_language": detected_lang,
-                "parsed_intent": inland_intent,
+                "parsed_intent": inland_ocean_intent,
                 "device_location": device_loc,
                 "query_location": q_loc,
                 "resolved_location": resolved,
                 "location_mode": mode,
                 "changed_fields": changed_fields,
                 "conversation_history": new_history,
-                "last_parsed_intent": inland_intent,
+                "last_parsed_intent": inland_ocean_intent,
+                "final_answer_text": inland_ocean_text,
                 "parse_method": "rule_based_fallback",
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_ocean_plan,
+                "query_signature": query_sig,
             }
+
+        # 9b. Weather or MSL Pressure query inland -> Weather agent MUST run (PRD §8, Section 9)
+        elif intent_name in ("WEATHER_QUERY", "SEA_LEVEL_PRESSURE_QUERY"):
+            weather_plan: AnswerPlan = {
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "answer_type": "WeatherCard",
+                "presentation_hint": "weather_card",
+                "primary_capability": "weather_inquiry",
+                "required_capabilities": ["weather"],
+                "required_agents": ["weather_agent"],
+                "response_mode": "specialist_card",
+                "location_scope": "inland",
+                "evidence_needed": ["temperature", "wind_speed", "surface_pressure"],
+                "requested_location": resolved["name"],
+                "resolved_location": resolved,
+                "should_answer_directly": True,
+                "should_explain_applicability": False,
+                "should_show_data": True,
+                "should_show_recommendation": False,
+                "should_show_warning": False,
+                "should_offer_followup": True,
+            }
+            inland_weather_intent: ParsedIntent = {
+                "location_name": resolved["name"],
+                "lat": resolved["lat"],
+                "lon": resolved["lon"],
+                "time_window": time_window,
+                "time_start_utc": time_start_utc,
+                "time_end_utc": time_end_utc,
+                "query_type": "weather_only",
+                "needs_weather": True,
+                "needs_pfz": False,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+                "location_status": "inland",
+                "distance_to_coast_km": dist_km,
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "specialist_card",
+                "answer_plan": weather_plan,
+            }
+            changed_fields = _compute_changed_fields(inland_weather_intent, last_intent)
+            new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+            query_sig = {
+                "intent": intent_name,
+                "location": resolved["name"],
+                "time_context": time_window,
+                "relevant_capabilities": ["weather"],
+            }
+            return {
+                "detected_language": detected_lang,
+                "parsed_intent": inland_weather_intent,
+                "device_location": device_loc,
+                "query_location": q_loc,
+                "resolved_location": resolved,
+                "location_mode": mode,
+                "changed_fields": changed_fields,
+                "conversation_history": new_history,
+                "last_parsed_intent": inland_weather_intent,
+                "parse_method": "rule_based_fallback",
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "specialist_card",
+                "answer_plan": weather_plan,
+                "query_signature": query_sig,
+            }
+
+        # 9c. PFZ Query inland -> Specific inapplicability (Section 26)
+        elif intent_name == "PFZ_QUERY":
+            dist_str = f"~{round(dist_km / 10) * 10:.0f}" if dist_km is not None else "~300+"
+            if detected_lang == "hi":
+                inland_pfz_text = (
+                    f"आपकी वर्तमान स्थिति **{resolved['name']}** अंतर्देशीय (inland) है ({dist_str} किमी समुद्र तट से दूर)। यहाँ समुद्री मत्स्य संभावित क्षेत्र (PFZ) लागू नहीं होता है।\n\n"
+                    f"मत्स्य संभावित क्षेत्र देखने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, थूथुकुडी) का चयन करें।"
+                )
+            elif detected_lang == "ta":
+                inland_pfz_text = (
+                    f"உங்கள் தற்போதைய இருப்பிடம் **{resolved['name']}** உள்நாட்டுப் பகுதியாகும் (கடற்கரையிலிருந்து {dist_str} கி.மீ). கடல் மீன்பிடி மண்டலங்கள் (PFZ) இங்கு பொருந்தாது.\n\n"
+                    f"மீன்பிடி மண்டலங்களை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, தூத்துக்குடி) தேர்வு செய்யவும்."
+                )
+            else:
+                inland_pfz_text = (
+                    f"You're currently in **{resolved['name']}**, which is inland ({dist_str} km from the nearest coast). Marine potential fishing zones (PFZ) are not applicable at this location.\n\n"
+                    f"Choose a coastal location (such as Kochi, Mumbai, Chennai, or Thoothukudi) to check fishing zones."
+                )
+            inland_pfz_plan: AnswerPlan = {
+                "intent": "PFZ_QUERY",
+                "intent_name": "PFZ_QUERY",
+                "answer_type": "ApplicabilityCard",
+                "presentation_hint": "applicability_card",
+                "primary_capability": "inland_marine_explanation",
+                "required_capabilities": ["pfz"],
+                "required_agents": [],
+                "response_mode": "applicability_explanation",
+                "location_scope": "inland",
+                "evidence_needed": [],
+                "requested_location": resolved["name"],
+                "resolved_location": resolved,
+                "should_answer_directly": True,
+                "should_explain_applicability": True,
+                "should_show_data": False,
+                "should_show_recommendation": False,
+                "should_show_warning": False,
+                "should_offer_followup": True,
+            }
+            inland_pfz_intent: ParsedIntent = {
+                "location_name": resolved["name"],
+                "lat": resolved["lat"],
+                "lon": resolved["lon"],
+                "time_window": time_window,
+                "time_start_utc": "",
+                "time_end_utc": "",
+                "query_type": "pfz_lookup",
+                "needs_weather": False,
+                "needs_pfz": False,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+                "location_status": "inland",
+                "distance_to_coast_km": dist_km,
+                "intent": "PFZ_QUERY",
+                "intent_name": "PFZ_QUERY",
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_pfz_plan,
+            }
+            changed_fields = _compute_changed_fields(inland_pfz_intent, last_intent)
+            new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+            query_sig = {
+                "intent": "PFZ_QUERY",
+                "location": resolved["name"],
+                "time_context": time_window,
+                "relevant_capabilities": ["pfz"],
+            }
+            return {
+                "detected_language": detected_lang,
+                "parsed_intent": inland_pfz_intent,
+                "device_location": device_loc,
+                "query_location": q_loc,
+                "resolved_location": resolved,
+                "location_mode": mode,
+                "changed_fields": changed_fields,
+                "conversation_history": new_history,
+                "last_parsed_intent": inland_pfz_intent,
+                "final_answer_text": inland_pfz_text,
+                "parse_method": "rule_based_fallback",
+                "intent": "PFZ_QUERY",
+                "intent_name": "PFZ_QUERY",
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_pfz_plan,
+                "query_signature": query_sig,
+            }
+
+        # 9d. General marine safety query inland (PRD §9, §35, §54)
         else:
-            # User asked about marine fishing / trip / ocean at an inland location (PRD §9, §35, §54)
             inland_text = _get_inland_clarification_text(
                 detected_lang,
                 resolved["name"],
@@ -630,7 +1112,27 @@ def detect_and_parse(state: ORCAState) -> dict:
                 resolved["lon"],
                 dist_km,
             )
-            inland_intent: ParsedIntent = {
+            inland_safety_plan: AnswerPlan = {
+                "intent": "MARINE_SAFETY_QUERY",
+                "intent_name": "MARINE_SAFETY_QUERY",
+                "answer_type": "ApplicabilityCard",
+                "presentation_hint": "applicability_card",
+                "primary_capability": "inland_marine_explanation",
+                "required_capabilities": ["marine_safety"],
+                "required_agents": [],
+                "response_mode": "applicability_explanation",
+                "location_scope": "inland",
+                "evidence_needed": [],
+                "requested_location": resolved["name"],
+                "resolved_location": resolved,
+                "should_answer_directly": True,
+                "should_explain_applicability": True,
+                "should_show_data": False,
+                "should_show_recommendation": False,
+                "should_show_warning": False,
+                "should_offer_followup": True,
+            }
+            inland_safety_intent: ParsedIntent = {
                 "location_name": resolved["name"],
                 "lat": resolved["lat"],
                 "lon": resolved["lon"],
@@ -646,10 +1148,20 @@ def detect_and_parse(state: ORCAState) -> dict:
                 "needs_ocean": False,
                 "location_status": "inland",
                 "distance_to_coast_km": dist_km,
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_safety_plan,
+            }
+            query_sig = {
+                "intent": intent_name,
+                "location": resolved["name"],
+                "time_context": time_window,
+                "relevant_capabilities": ["marine_safety"],
             }
             return {
                 "detected_language": detected_lang,
-                "parsed_intent": inland_intent,
+                "parsed_intent": inland_safety_intent,
                 "device_location": device_loc,
                 "query_location": q_loc,
                 "resolved_location": resolved,
@@ -657,26 +1169,82 @@ def detect_and_parse(state: ORCAState) -> dict:
                 "changed_fields": [],
                 "final_answer_text": inland_text,
                 "parse_method": "rule_based_fallback",
+                "intent": intent_name,
+                "intent_name": intent_name,
+                "response_mode": "applicability_explanation",
+                "answer_plan": inland_safety_plan,
+                "query_signature": query_sig,
             }
 
-    # 9. Case D: Coastal Location Verified
+    # 10. Case E: Coastal Location Verified
     loc_name = resolved["name"]
     lat = resolved["lat"]
     lon = resolved["lon"]
 
-    # Special case: risk explanation
-    if query_type == "risk_explanation":
-        needs_weather = False
-        needs_pfz = False
-        needs_hazard = False
-        needs_geofence = False
-        needs_risk = False
-    else:
-        needs_weather = needs.get("needs_weather", True)
-        needs_pfz = needs.get("needs_pfz", True)
-        needs_hazard = needs.get("needs_hazard", True)
-        needs_geofence = needs.get("needs_geofence", True)
-        needs_risk = needs.get("needs_risk", True)
+    # Assign answer card type and capability requirements based on intent
+    if intent_name in ("WEATHER_QUERY", "SEA_LEVEL_PRESSURE_QUERY"):
+        card_type = "WeatherCard"
+        pres_hint = "weather_card"
+        required_caps = ["weather"]
+        required_agents = ["weather_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name in ("TIDE_QUERY", "WATER_LEVEL_QUERY"):
+        card_type = "OceanCard"
+        pres_hint = "ocean_card"
+        required_caps = ["ocean"]
+        required_agents = ["ocean_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name == "PFZ_QUERY":
+        card_type = "PFZCard"
+        pres_hint = "pfz_card"
+        required_caps = ["pfz"]
+        required_agents = ["pfz_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name == "HAZARD_QUERY":
+        card_type = "HazardCard"
+        pres_hint = "hazard_card"
+        required_caps = ["hazard"]
+        required_agents = ["hazard_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name == "BOUNDARY_QUERY":
+        card_type = "SafetyCard"
+        pres_hint = "safety_card"
+        required_caps = ["geofence"]
+        required_agents = ["geofence_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name == "RISK_EXPLANATION":
+        card_type = "SafetyCard"
+        pres_hint = "safety_card"
+        required_caps = ["risk"]
+        required_agents = ["risk_agent"]
+        resp_mode_str = "safety_assessment"
+    else:  # MARINE_SAFETY_QUERY / TRIP_QUERY / general
+        card_type = "SafetyCard"
+        pres_hint = "safety_card"
+        required_caps = ["weather", "pfz", "ocean", "hazard", "geofence", "risk"]
+        required_agents = ["weather_agent", "pfz_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
+        resp_mode_str = "safety_assessment"
+
+    coastal_plan: AnswerPlan = {
+        "intent": intent_name,
+        "intent_name": intent_name,
+        "answer_type": card_type,
+        "presentation_hint": pres_hint,
+        "primary_capability": "marine_safety_assessment" if intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY") else card_type.lower(),
+        "requested_location": loc_name,
+        "resolved_location": resolved,
+        "required_capabilities": required_caps,
+        "required_agents": required_agents,
+        "response_mode": resp_mode_str,
+        "location_scope": "device" if mode == "DEVICE" else "inherited" if mode == "INHERITED" else "explicit",
+        "evidence_needed": required_caps,
+        "should_answer_directly": True,
+        "should_explain_applicability": False,
+        "should_show_data": True,
+        "should_show_recommendation": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY"),
+        "should_show_warning": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "HAZARD_QUERY"),
+        "should_offer_followup": True,
+    }
 
     new_intent: ParsedIntent = ParsedIntent(
         location_name=loc_name,
@@ -686,20 +1254,34 @@ def detect_and_parse(state: ORCAState) -> dict:
         time_start_utc=time_start_utc,
         time_end_utc=time_end_utc,
         query_type=query_type,
-        needs_weather=needs_weather,
-        needs_pfz=needs_pfz,
-        needs_hazard=needs_hazard,
-        needs_geofence=needs_geofence,
-        needs_risk=needs_risk,
-        needs_ocean=needs_ocean,
+        needs_weather=needs.get("needs_weather", False),
+        needs_pfz=needs.get("needs_pfz", False),
+        needs_hazard=needs.get("needs_hazard", False),
+        needs_geofence=needs.get("needs_geofence", False),
+        needs_risk=needs.get("needs_risk", False),
+        needs_ocean=needs.get("needs_ocean", False),
         location_status="coastal",
         distance_to_coast_km=resolved.get("nearest_coast_km", 0.0),
+        intent=intent_name,
+        intent_name=intent_name,
+        response_mode=resp_mode_str,
+        answer_plan=coastal_plan,
     )
 
+    is_recheck = any(p.search(raw) for p in _RECHECK_PATTERNS)
     changed_fields = _compute_changed_fields(new_intent, last_intent)
+    if is_recheck and "recheck" not in changed_fields:
+        changed_fields.append("recheck")
+
     new_history = (conversation_history + [{"role": "user", "content": raw}])[
         -config.MAX_CONVERSATION_TURNS:
     ]
+    query_sig = {
+        "intent": intent_name,
+        "location": loc_name,
+        "time_context": time_window,
+        "relevant_capabilities": required_caps,
+    }
 
     return {
         "detected_language": detected_lang,
@@ -711,5 +1293,11 @@ def detect_and_parse(state: ORCAState) -> dict:
         "changed_fields": changed_fields,
         "conversation_history": new_history,
         "parse_method": "rule_based_fallback",
+        "intent": intent_name,
+        "intent_name": intent_name,
+        "response_mode": resp_mode_str,
+        "answer_plan": coastal_plan,
+        "query_signature": query_sig,
+        "is_recheck": is_recheck,
     }
 

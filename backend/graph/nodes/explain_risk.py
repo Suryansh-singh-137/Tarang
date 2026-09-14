@@ -143,21 +143,30 @@ _DISCLAIMER: dict[str, str] = {
 def explain_risk(state: ORCAState) -> dict:
     """
     LangGraph node: produce a plain-language explanation of the risk score
-    breakdown using previously computed risk_result in state.
+    breakdown using previously computed risk_result or previous_marine_assessment in state.
 
     No external API calls are made; this is a pure formatting node.
     """
     lang = state.get("detected_language", "en")
     risk = state.get("risk_result")
 
+    d = None
+    if risk and risk.get("status") == "success" and isinstance(risk.get("data"), dict):
+        d = risk["data"]
+    elif state.get("previous_marine_assessment"):
+        d = state["previous_marine_assessment"]
+    elif state.get("last_results") and "risk_agent" in state["last_results"]:
+        cached = state["last_results"]["risk_agent"]
+        if cached.get("status") == "success" and isinstance(cached.get("data"), dict):
+            d = cached["data"]
+
     # If no risk data from prior turn — inform the user gracefully
-    if risk is None or risk.get("status") != "success":
+    if d is None:
         return {
             "final_answer_text": _NO_RISK_DATA.get(lang, _NO_RISK_DATA["en"]),
             "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
         }
 
-    d = risk["data"]
     components = d.get("components", [])
     total = d.get("composite_score", 0.0)
     label = d.get("risk_label", "UNKNOWN")
@@ -183,22 +192,26 @@ def explain_risk(state: ORCAState) -> dict:
         if template:
             try:
                 raw_value = comp.get("raw_value", 0)
-                # Format numeric raw values; pass string as-is
-                if isinstance(raw_value, float):
-                    raw_value_fmt = f"{raw_value:.2f}"
-                else:
-                    raw_value_fmt = str(raw_value)
+                # Ensure numeric type for templates expecting float formatting like {:.0f}
+                try:
+                    val_num = float(raw_value)
+                except (ValueError, TypeError):
+                    val_num = raw_value
 
                 line = template.format(
-                    raw_value=raw_value_fmt if not isinstance(raw_value, float) or factor_label == "Boundary Proximity" else raw_value,
+                    raw_value=val_num,
                     raw_unit=comp.get("raw_unit", ""),
                     component_score=comp.get("component_score", 0),
                     weight_pct=comp.get("weight", 0) * 100,
                     contribution=comp.get("contribution", 0),
                 )
                 lines.append(line)
-            except (KeyError, ValueError) as exc:
+            except (KeyError, ValueError, TypeError) as exc:
                 logger.warning("[ExplainRisk] Format error for %s: %s", factor_label, exc)
+                lines.append(
+                    f"• **{factor_label}**: score {comp.get('component_score', 0):.0f}/100 "
+                    f"→ contribution {comp.get('contribution', 0):.1f}"
+                )
         else:
             lines.append(
                 f"• **{factor_label}**: score {comp.get('component_score', 0):.0f}/100 "
@@ -212,7 +225,7 @@ def explain_risk(state: ORCAState) -> dict:
     lines.append(_DISCLAIMER.get(lang, _DISCLAIMER["en"]))
 
     answer_text = "\n".join(lines)
-    logger.info("[ExplainRisk] Explanation generated for lang=%s, label=%s", lang, label)
+    logger.info("[ExplainRisk] Explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
 
     return {
         "final_answer_text": answer_text,

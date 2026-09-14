@@ -151,6 +151,8 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
         conversation_history=session.conversation_history or body.conversation[:config.MAX_CONVERSATION_TURNS],
         last_parsed_intent=session.last_parsed_intent or body.last_parsed_intent,
         last_results=session.last_results or {k: v for k, v in body.last_results.items()},
+        previous_marine_assessment=session.last_marine_assessment,
+        semantic_context=session.semantic_context,
         changed_fields=[],
         parse_method="rule_based_fallback",
         synthesis_method="template_fallback",
@@ -181,8 +183,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
     final_state: ORCAState | None = None
 
     try:
-        # astream yields state deltas after each node
-        async for chunk in graph.astream(initial_state):
+        # astream yields state deltas after each node (threaded via checkpointer)
+        async for chunk in graph.astream(initial_state, config={"configurable": {"thread_id": conv_id}}):
             for node_name, state_delta in chunk.items():
                 logger.info(f"[TRACE] Node completed: {node_name}")
                 if not state_delta:
@@ -252,15 +254,18 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         for r in (final_state.get("trace") or [])
     ]
 
-    # --- Build last_results dict for caching ---
-    last_results_dict: dict = {}
+    # Persist in Server-Side SessionStore
+    session = get_or_create_session(conv_id)
+
+    # --- Build and merge last_results dict for caching (Never wipe out prior agent results on skipped turns) ---
+    merged_results = dict(session.last_results or {})
     for agent_key in [
         "weather_result", "pfz_result", "ocean_result", "hazard_result", "geofence_result", "risk_result"
     ]:
         ar = final_state.get(agent_key)
         if ar and ar.get("status") == "success":
             agent_name = ar.get("agent_name", agent_key.replace("_result", "_agent"))
-            last_results_dict[agent_name] = {
+            merged_results[agent_name] = {
                 "agent_name":   ar.get("agent_name"),
                 "status":       ar.get("status"),
                 "data":         ar.get("data", {}),
@@ -273,20 +278,117 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
                 "evidence":     ar.get("evidence", []),
             }
 
+    # Update last_marine_assessment when risk assessment is performed
+    risk_res = final_state.get("risk_result")
+    if risk_res and risk_res.get("status") == "success" and isinstance(risk_res.get("data"), dict):
+        risk_data = risk_res["data"]
+        resolved_loc = final_state.get("resolved_location") or {}
+        session.last_marine_assessment = {
+            "location": {
+                "name": resolved_loc.get("name"),
+                "lat": resolved_loc.get("lat"),
+                "lon": resolved_loc.get("lon"),
+                "coastal": resolved_loc.get("coastal", True),
+            },
+            "composite_score": risk_data.get("composite_score", 0.0),
+            "risk_label": risk_data.get("risk_label", "UNKNOWN"),
+            "components": risk_data.get("components", []),
+            "inputs": risk_data.get("inputs", {}),
+            "recommendation": risk_data.get("recommendation", ""),
+            "evidence_coverage": risk_data.get("evidence_coverage", ""),
+            "summary": risk_res.get("summary", ""),
+            "timestamp": risk_res.get("timestamp", ""),
+        }
+
     # Append assistant reply to conversation history
     answer_text = final_state.get("final_answer_text", "")
     updated_history = list(final_state.get("conversation_history") or [])
     updated_history.append({"role": "assistant", "content": answer_text[:500]})
     updated_history = updated_history[-config.MAX_CONVERSATION_TURNS:]
 
-    # Persist in Server-Side SessionStore
-    session = get_or_create_session(conv_id)
     session.conversation_history = updated_history
     session.last_parsed_intent = final_state.get("parsed_intent")
-    session.last_results = last_results_dict
+    session.last_results = merged_results
     if final_state.get("resolved_location"):
         session.last_query_location = final_state.get("resolved_location")
+    if not session.semantic_context:
+        session.semantic_context = {}
+    parsed_intent = final_state.get("parsed_intent") or {}
+    session.semantic_context["last_intent"] = parsed_intent.get("intent") or "UNKNOWN"
+    if session.last_marine_assessment:
+        session.semantic_context["last_risk_label"] = session.last_marine_assessment.get("risk_label")
+        session.semantic_context["last_risk_score"] = session.last_marine_assessment.get("composite_score")
+        session.semantic_context["last_active_warnings"] = session.last_marine_assessment.get("inputs", {}).get("active_warnings", [])
     save_session(session)
+
+    # Debug Logging (PRD Section 46)
+    raw_query = final_state.get("raw_query", "")
+    parsed_intent = final_state.get("parsed_intent") or {}
+    intent_name = parsed_intent.get("intent", "UNKNOWN")
+    resp_mode = parsed_intent.get("response_mode", "UNKNOWN")
+    resolved = final_state.get("resolved_location")
+    resolved_name = resolved.get("name") if resolved else "None"
+    is_coastal = resolved.get("coastal", False) if resolved else False
+    answer_plan = final_state.get("answer_plan") or parsed_intent.get("answer_plan") or {}
+    trace_items = final_state.get("trace") or []
+    executed_caps = [r.get("agent_name") for r in trace_items if r.get("status") == "success"]
+
+    logger.info(
+        f"\n=======================================================\n"
+        f"[REQUEST DEBUG]\n"
+        f"  REQUEST: {req_id}\n"
+        f"  QUERY: {raw_query!r}\n"
+        f"  INTENT: {intent_name}\n"
+        f"  RESPONSE_MODE: {resp_mode}\n"
+        f"  LOCATION: {resolved_name} (coastal={is_coastal})\n"
+        f"  REQUIRED_CAPABILITIES: {answer_plan.get('required_capabilities', [])}\n"
+        f"  EXECUTED_CAPABILITIES: {executed_caps}\n"
+        f"  ANSWER_PLAN: {answer_plan.get('answer_type', 'None')}\n"
+        f"  SYNTHESIS: {final_state.get('synthesis_method', 'unknown')}\n"
+        f"======================================================="
+    )
+
+    _RESPONSE_MODE_MAP = {
+        "DIRECT_FACT": "factual_direct",
+        "factual_direct": "factual_direct",
+        "DATA_SUMMARY": "specialist_card",
+        "specialist_card": "specialist_card",
+        "APPLICABILITY_EXPLANATION": "applicability_explanation",
+        "applicability_explanation": "applicability_explanation",
+        "DECISION_ASSESSMENT": "safety_assessment",
+        "safety_assessment": "safety_assessment",
+        "CLARIFICATION": "clarification",
+        "clarification": "clarification",
+    }
+    _PRESENTATION_HINT_MAP = {
+        "LocationCard": "location_card",
+        "location_card": "location_card",
+        "WeatherCard": "weather_card",
+        "weather_card": "weather_card",
+        "OceanCard": "ocean_card",
+        "ocean_card": "ocean_card",
+        "PFZCard": "pfz_card",
+        "pfz_card": "pfz_card",
+        "HazardCard": "hazard_card",
+        "hazard_card": "hazard_card",
+        "SafetyCard": "safety_card",
+        "safety_card": "safety_card",
+        "ApplicabilityCard": "applicability_card",
+        "applicability_card": "applicability_card",
+        "ClarificationCard": "clarification_card",
+        "clarification_card": "clarification_card",
+    }
+    norm_resp_mode = _RESPONSE_MODE_MAP.get(resp_mode, resp_mode)
+
+    if answer_plan:
+        card_type = answer_plan.get("answer_type", "SafetyCard")
+        answer_plan["presentation_hint"] = answer_plan.get("presentation_hint") or _PRESENTATION_HINT_MAP.get(card_type, "safety_card")
+        answer_plan["intent_name"] = answer_plan.get("intent_name") or answer_plan.get("intent") or intent_name
+        answer_plan["response_mode"] = answer_plan.get("response_mode") or norm_resp_mode
+
+    if parsed_intent:
+        parsed_intent["intent_name"] = parsed_intent.get("intent_name") or parsed_intent.get("intent") or intent_name
+        parsed_intent["response_mode"] = norm_resp_mode
 
     # Canonical TarangResponse Payload
     result_payload = {
@@ -315,7 +417,9 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "risk_data": (
             final_state.get("risk_result", {}).get("data", {})
             if final_state.get("risk_result")
-            else {}
+            and final_state.get("risk_result", {}).get("status") == "success"
+            and intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "RISK_EXPLANATION")
+            else None
         ),
         "evidence": [
             {
@@ -329,9 +433,12 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
             for ev in (final_state.get("evidence") or [])
         ],
         "parsed_intent": final_state.get("parsed_intent"),
+        "answer_plan": answer_plan,
+        "response_mode": norm_resp_mode,
+        "query_signature": final_state.get("query_signature"),
         "conversation_history": updated_history,
         "last_parsed_intent":   final_state.get("parsed_intent"),
-        "last_results":         last_results_dict,
+        "last_results":         merged_results,
         "changed_fields":       final_state.get("changed_fields") or [],
     }
 

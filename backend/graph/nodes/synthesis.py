@@ -30,6 +30,7 @@ Explainability contract (PRD §4.3):
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 import json
 import re
@@ -39,7 +40,7 @@ import config
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
-from graph.state import AgentResult, EvidenceItem, ORCAState
+from graph.state import AgentResult, EvidenceItem, ORCAState, AnswerPlan
 
 # ---------------------------------------------------------------------------
 # Language-specific phrase tables
@@ -476,12 +477,11 @@ def _build_geojson(
 
 
 # ---------------------------------------------------------------------------
-# Public node function
-# ---------------------------------------------------------------------------
-# Public node function (LLM Path - Milestone 6)
+# Intent-specific response formatters (Section 16, 17, 39-43)
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
+
 
 def _extract_numbers(text: str) -> set[float]:
     """Extract all numbers from text as floats for grounding checks."""
@@ -494,30 +494,274 @@ def _extract_numbers(text: str) -> set[float]:
             pass
     return nums
 
+
+def _render_location_response(lang: str, resolved: Optional[dict]) -> str:
+    if not resolved:
+        return "Unable to determine your location. Please provide a place name or enable device location access."
+    name = resolved.get("name", "Unknown")
+    lat = resolved.get("lat", 0.0)
+    lon = resolved.get("lon", 0.0)
+    is_coastal = resolved.get("coastal", False)
+
+    if lang == "hi":
+        status_hi = "तटीय क्षेत्र" if is_coastal else "अंतर्देशीय क्षेत्र"
+        return f"आप वर्तमान में **{name}** में हैं।\n\n• **स्थान**: {name}\n• **अनुमानित निर्देशांक**: {lat:.2f}°N, {lon:.2f}°E\n• **प्रकार**: {status_hi}"
+    elif lang == "ta":
+        status_ta = "கடலோர பகுதி" if is_coastal else "உள்நாட்டு பகுதி"
+        return f"நீங்கள் தற்போது **{name}** இல் உள்ளீர்கள்.\n\n• **இருப்பிடம்**: {name}\n• **ஆயத்தொலைவுகள்**: {lat:.2f}°N, {lon:.2f}°E\n• **வகை**: {status_ta}"
+    else:
+        status_en = "coastal location" if is_coastal else "inland location"
+        return f"You're currently in **{name}**.\n\n• **Location**: {name}\n• **Approximate coordinates**: {lat:.2f}°N, {lon:.2f}°E\n• **Area type**: {status_en}"
+
+
+def _render_inland_ocean_applicability(lang: str, resolved: Optional[dict]) -> str:
+    name = resolved.get("name", "your location") if resolved else "your location"
+    if lang == "hi":
+        return (
+            f"आपकी वर्तमान स्थिति **{name}** अंतर्देशीय (inland) है, इसलिए यहाँ स्थानीय ज्वार-भाटा या समुद्री जल स्तर का माप लागू नहीं होता है।\n\n"
+            f"समुद्री जल स्तर या ज्वार की स्थिति देखने के लिए किसी तटीय बंदरगाह का नाम बताएं:\n"
+            f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **थूथुकुडी (Thoothukudi)**"
+        )
+    elif lang == "ta":
+        return (
+            f"உங்கள் தற்போதைய இருப்பிடம் **{name}** உள்நாட்டுப் பகுதியாகும், எனவே உள்ளூர் கடல் அலை அல்லது கடல் நீர்மட்ட அளவீடு இங்கு பொருந்தாது.\n\n"
+            f"கடல் அலை அல்லது நீர்மட்ட தகவல்களை அறிய கடலோர இடத்தை முயற்சிக்கவும்:\n"
+            f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **தூத்துக்குடி (Thoothukudi)**"
+        )
+    else:
+        return (
+            f"Your current location is inland in **{name}**, so a local tide or sea-water level measurement is not applicable here.\n\n"
+            f"{name} is inland and has no direct marine tidal coastline. I can check the tide or water level for a coastal location instead.\n\n"
+            f"Try a coastal location:\n"
+            f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Thoothukudi**"
+        )
+
+
+def _render_weather_response(
+    lang: str,
+    resolved: Optional[dict],
+    time_window: str,
+    weather: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "your location") if resolved else "your location"
+    tw = _TIME_LABELS.get(lang, _TIME_LABELS["en"]).get(time_window, time_window)
+
+    lines = []
+    if lang == "hi":
+        lines.append(f"🌤 **{loc_name} में मौसम स्थिति ({tw})**\n")
+    elif lang == "ta":
+        lines.append(f"🌤 **{loc_name} வானிலை நிலவரம் ({tw})**\n")
+    else:
+        lines.append(f"🌤 **Current weather in {loc_name} ({tw}):**\n")
+
+    if not weather or weather.get("status") in ("error", "insufficient_data") or not weather.get("data"):
+        lines.append("Live weather data is currently unavailable for this location.")
+    else:
+        d = weather.get("data", {})
+        temp = d.get("temperature_c") or d.get("air_temperature_c")
+        wind = d.get("wind_speed_kmh")
+        wind_dir = _deg_to_compass(d.get("wind_direction_deg"))
+        pressure = d.get("pressure_msl_hpa")
+        wave = d.get("wave_height_m")
+        rain = d.get("precipitation_mm", 0.0)
+
+        if temp is not None:
+            lines.append(f"• **Temperature**: {temp} °C")
+        if wind is not None:
+            lines.append(f"• **Wind speed**: {wind} km/h ({wind_dir})")
+        if wave is not None:
+            wave_dir = _deg_to_compass(d.get("wave_direction_deg"))
+            lines.append(f"• **Wave height**: {wave} m ({wave_dir})")
+        if rain is not None:
+            lines.append(f"• **Precipitation**: {rain} mm")
+        if pressure is not None:
+            lines.append(f"• **Atmospheric surface pressure (MSL)**: {pressure} hPa")
+        if d.get("sea_state"):
+            lines.append(f"• **Sea state**: {d['sea_state']}")
+        if d.get("visibility_km"):
+            lines.append(f"• **Visibility**: {d['visibility_km']} km")
+
+        src = weather.get("source", "Open-Meteo")
+        lines.append(f"\n*(Source: {src})*")
+    return "\n".join(lines)
+
+
+def _render_ocean_response(
+    lang: str,
+    resolved: Optional[dict],
+    ocean: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "coastal waters") if resolved else "coastal waters"
+    lines = []
+    if lang == "hi":
+        lines.append(f"🌊 **{loc_name} — ज्वार एवं समुद्री जल स्तर (Chart Datum)**\n")
+    elif lang == "ta":
+        lines.append(f"🌊 **{loc_name} — கடல் அலை மற்றும் நீர்மட்டம் (Chart Datum)**\n")
+    else:
+        lines.append(f"🌊 **Tide & Water Level — {loc_name} (Chart Datum)**\n")
+
+    if not ocean or ocean.get("status") in ("error", "insufficient_data") or not ocean.get("data"):
+        lines.append("Live tide and ocean water level data is currently unavailable for this location.")
+    else:
+        od = ocean.get("data", {})
+        wl = od.get("water_level_m", 0.0)
+        phase = od.get("current_phase", "Normal")
+        lines.append(f"• **Current phase**: {phase}")
+        lines.append(f"• **Predicted water level**: **{wl:.2f} m** above Chart Datum")
+        if od.get("next_high_tide"):
+            ht = od["next_high_tide"]
+            lines.append(f"• **Next High Tide**: {ht.get('time_ist')} ({ht.get('height_m')} m CD)")
+        if od.get("next_low_tide"):
+            lt = od["next_low_tide"]
+            lines.append(f"• **Next Low Tide**: {lt.get('time_ist')} ({lt.get('height_m')} m CD)")
+        if od.get("tidal_stream_knots"):
+            lines.append(f"• **Tidal Stream**: ~{od['tidal_stream_knots']} knots")
+        lines.append(f"\n*(Source: {ocean.get('source', 'INCOIS ERDDAP')} • Type: Harmonic prediction)*")
+    return "\n".join(lines)
+
+
+def _render_pressure_response(
+    lang: str,
+    resolved: Optional[dict],
+    weather: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "your location") if resolved else "your location"
+    lines = [f"🌡 **Mean Sea-Level Pressure (MSL) — {loc_name}**\n"]
+    if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
+        p = weather["data"]["pressure_msl_hpa"]
+        lines.append(f"• **Atmospheric surface pressure**: **{p} hPa** (mean sea level datum)")
+        lines.append(f"\n*(Source: {weather.get('source', 'Open-Meteo')})*")
+    else:
+        lines.append("Atmospheric surface pressure data is currently unavailable for this location.")
+    return "\n".join(lines)
+
+
+def _render_pfz_response(
+    lang: str,
+    resolved: Optional[dict],
+    pfz: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "waters") if resolved else "waters"
+    p = _PHRASES.get(lang, _PHRASES["en"])
+    lines = [f"🐟 **Fishing Potential Indicator (Chlorophyll Proxy) — {loc_name}**\n"]
+    if pfz and pfz.get("status") == "success" and pfz.get("data"):
+        d = pfz["data"]
+        n_zones = len(d.get("zones", []))
+        nearest = d.get("nearest_zone_km", "?")
+        productivity = d.get("overall_productivity", "unknown")
+        lines.append(f"• **{n_zones}** indicator zone(s) identified")
+        if isinstance(nearest, (int, float)):
+            lines.append(f"• Nearest PFZ indicator: **{nearest:.0f} km** away")
+        if d.get("avg_chl"):
+            lines.append(f"• Average chlorophyll-a: {d['avg_chl']:.2f} mg/m³ (productivity: {productivity})")
+        for z in d.get("zones", [])[:2]:
+            lines.append(f"  – Zone at {z['lat']:.2f}°N, {z['lon']:.2f}°E ({z.get('distance_km', 0):.0f} km away)")
+        lines.append(f"\n*(Source: {pfz.get('source', 'INCOIS ERDDAP')})*")
+        lines.append(f"\n{p['pfz_proxy_note']}")
+    else:
+        lines.append("Live fishing-zone data is currently unavailable for this location.")
+    return "\n".join(lines)
+
+
+def _render_hazard_response(
+    lang: str,
+    resolved: Optional[dict],
+    hazard: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "monitored area") if resolved else "monitored area"
+    p = _PHRASES.get(lang, _PHRASES["en"])
+    lines = [f"⚠️ **Weather Condition Hazard Indicators — {loc_name}**\n"]
+    if hazard and hazard.get("status") == "success" and hazard.get("data"):
+        d = hazard["data"]
+        active = d.get("active_warnings", [])
+        level = d.get("overall_hazard_level", "none")
+        if not active:
+            lines.append(f"No active high-severity hazard was detected for {loc_name} in the available data. This does not guarantee absence of hazard.")
+        else:
+            lines.append(f"⚠️ **Hazard Level: {level.upper()}**")
+            for h in d.get("hazards", []):
+                lines.append(f"• **{h['title']}** ({h.get('severity', 'advisory')}): {h.get('detail', '')}")
+        lines.append(f"\n*(Source: {hazard.get('source', 'IMD / Open-Meteo')})*")
+        lines.append(f"\n{p['cyclone_note']}")
+    else:
+        lines.append("Live hazard warning data is currently unavailable for this location.")
+    return "\n".join(lines)
+
+
+def _validate_response(
+    text: str,
+    answer_plan: Optional[AnswerPlan],
+    resolved: Optional[dict],
+) -> tuple[bool, str]:
+    """Lightweight response validator (Section 32, 33, 34)."""
+    if not answer_plan:
+        return True, "OK"
+
+    intent = answer_plan.get("intent", "")
+    text_lower = text.lower()
+
+    # 1. Location query validation: must not contain unprompted marine safety jargon
+    if intent == "LOCATION_QUERY":
+        banned = [
+            "pfz", "chlorophyll", "composite score", "marine safety assessment",
+            "high risk", "moderate risk", "extreme risk", "fishing assessment",
+            "fishing potential", "imbl",
+        ]
+        if any(b in text_lower for b in banned):
+            return False, "IRRELEVANT_CONTENT"
+
+    # 2. Inland tide/water-level query: must not fabricate numbers or give fishing risk
+    if intent in ("WATER_LEVEL_QUERY", "TIDE_QUERY") and resolved and not resolved.get("coastal"):
+        banned = ["composite score", "risk score", "high risk", "moderate risk", "marine safety assessment"]
+        if any(b in text_lower for b in banned):
+            return False, "IRRELEVANT_CONTENT"
+
+    # 3. Pure weather query: must not contain unprompted PFZ or fishing risk verdict
+    if intent == "WEATHER_QUERY":
+        banned = ["chlorophyll", "pfz proxy", "fishing potential indicator", "composite score", "overall risk assessment", "fishing assessment"]
+        if any(b in text_lower for b in banned):
+            return False, "IRRELEVANT_CONTENT"
+
+    return True, "OK"
+
+
+# ---------------------------------------------------------------------------
+# Public node function (LLM Path - Milestone 6)
+# ---------------------------------------------------------------------------
+
 def synthesis(state: ORCAState) -> dict:
     """
-    LangGraph node: fuse all agent results into a cited natural-language
+    LangGraph node: fuse relevant agent results into an intent-aware, cited natural-language
     answer and a GeoJSON map payload using Groq LLM.
     """
     lang = state.get("detected_language", "en")
     intent = state.get("parsed_intent")
+    answer_plan = state.get("answer_plan") or (intent.get("answer_plan") if intent else None)
+    intent_name = (answer_plan.get("intent") if answer_plan else None) or (intent.get("intent") if intent else None) or "MARINE_SAFETY_QUERY"
+    response_mode = (answer_plan.get("answer_type") if answer_plan else None) or state.get("response_mode") or "DECISION_ASSESSMENT"
+    raw_query = state.get("raw_query", "").strip()
+    resolved = state.get("resolved_location")
 
     # Handle early-exit cases where a previous node already generated the final text
-    if intent:
-        existing_answer = state.get("final_answer_text", "")
-        is_invalid_loc = not intent.get("lat") and not intent.get("lon")
-        is_explanation = intent.get("query_type") == "risk_explanation"
-        
-        if (is_invalid_loc or is_explanation) and existing_answer:
-            return {
-                "final_answer_text": existing_answer,
-                "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
-            }
+    existing_answer = state.get("final_answer_text", "")
+    is_invalid_loc = not intent.get("lat") and not intent.get("lon") if intent else True
+    is_explanation = (intent.get("query_type") == "risk_explanation" or intent_name == "RISK_EXPLANATION") if intent else False
+    is_location = intent_name == "LOCATION_QUERY" or (intent and intent.get("query_type") == "location_only")
+    is_applicability = state.get("response_mode") == "APPLICABILITY_EXPLANATION" or (intent and intent.get("response_mode") == "APPLICABILITY_EXPLANATION")
 
-    location = intent["location_name"] if intent else "the requested location"
-    lat = intent["lat"] if intent else 8.7642
-    lon = intent["lon"] if intent else 78.1348
-    
+    if (is_invalid_loc or is_explanation or is_location or is_applicability) and existing_answer:
+        return {
+            "final_answer_text": existing_answer,
+            "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
+            "synthesis_method": "direct_fact" if is_location else "applicability" if is_applicability else "llm",
+        }
+
+    location = (resolved.get("name") if resolved else None) or (intent["location_name"] if intent else "the requested location")
+    lat = resolved["lat"] if resolved else (intent["lat"] if intent else 8.7642)
+    lon = resolved["lon"] if resolved else (intent["lon"] if intent else 78.1348)
+    is_coastal = resolved.get("coastal", True) if resolved else True
+    area_type = "coastal" if is_coastal else "inland"
+
     weather = state.get("weather_result")
     pfz = state.get("pfz_result")
     ocean = state.get("ocean_result")
@@ -536,89 +780,124 @@ def synthesis(state: ORCAState) -> dict:
     )
 
     if not config.GROQ_API_KEY:
-        logger.warning("GROQ_API_KEY not set. Falling back to template synthesis.")
+        logger.warning("GROQ_API_KEY not set. Falling back to intent-aware template synthesis.")
         fallback_res = _fallback_synthesis(state)
         fallback_res["map_geojson"] = map_geojson
         fallback_res["synthesis_method"] = "template_fallback"
         return fallback_res
 
-    # Prepare evidence context for LLM
-    evidence_payload = {
-        "weather": weather.get("data") if weather and weather.get("status") == "success" else None,
-        "ocean_tides": ocean.get("data") if ocean and ocean.get("status") == "success" else None,
-        "pfz": pfz.get("data") if pfz and pfz.get("status") == "success" else None,
-        "hazard": hazard.get("data") if hazard and hazard.get("status") == "success" else None,
-        "geofence": geofence.get("data") if geofence and geofence.get("status") == "success" else None,
-        "risk_components": risk.get("data", {}).get("components") if risk and risk.get("status") == "success" else None,
-        "risk_score": risk.get("data", {}).get("composite_score") if risk and risk.get("status") == "success" else None,
-        "risk_label": risk.get("data", {}).get("risk_label") if risk and risk.get("status") == "success" else None,
-    }
-    
+    # Prepare selective evidence context for LLM based on AnswerPlan (Section 44)
+    req_caps = answer_plan.get("required_capabilities", []) if answer_plan else []
+    evidence_payload: dict = {}
+    if not req_caps or "weather" in req_caps:
+        evidence_payload["weather"] = weather.get("data") if weather and weather.get("status") == "success" else None
+    if not req_caps or "ocean" in req_caps:
+        evidence_payload["ocean_tides"] = ocean.get("data") if ocean and ocean.get("status") == "success" else None
+    if not req_caps or "pfz" in req_caps:
+        evidence_payload["pfz"] = pfz.get("data") if pfz and pfz.get("status") == "success" else None
+    if not req_caps or "hazard" in req_caps:
+        evidence_payload["hazard"] = hazard.get("data") if hazard and hazard.get("status") == "success" else None
+    if not req_caps or "geofence" in req_caps:
+        evidence_payload["geofence"] = geofence.get("data") if geofence and geofence.get("status") == "success" else None
+    if not req_caps or "risk" in req_caps:
+        evidence_payload["risk_components"] = risk.get("data", {}).get("components") if risk and risk.get("status") == "success" else None
+        evidence_payload["risk_score"] = risk.get("data", {}).get("composite_score") if risk and risk.get("status") == "success" else None
+        evidence_payload["risk_label"] = risk.get("data", {}).get("risk_label") if risk and risk.get("status") == "success" else None
+
     evidence_str = json.dumps(evidence_payload, indent=2)
 
     # Note if any fallback data was used
     data_quality_notes = []
     for agent_name, res in [("weather", weather), ("pfz", pfz), ("hazard", hazard)]:
-
         if res and res.get("status") == "success":
             dq = res.get("data_quality", "live")
             if dq == "fallback":
                 data_quality_notes.append(f"{agent_name.capitalize()} agent used cached fallback data.")
             elif dq == "historical_proxy":
                 data_quality_notes.append(f"{agent_name.capitalize()} agent used historical proxy data.")
-    
-    dq_str = " ".join(data_quality_notes) if data_quality_notes else "All data is live."
-    
-    system_template = """You are Tarang, a marine safety decision-support assistant. Synthesize a conversational, evidence-based assessment for {location}.
 
-STRICT RULES:
-1. NEVER state a numeric value that is not present in the provided JSON data.
-2. ALWAYS refer to PFZ output as a "chlorophyll-based fishing-potential proxy", never a "PFZ advisory".
-3. ALWAYS refer to hazard output as "weather-condition hazard indicators", never a "cyclone warning".
-4. NEVER say "it is safe" or "it is not safe" as a bare claim. Always frame it as: "Tarang assesses conditions as [LABEL] risk based on current evidence".
-5. ALWAYS append this disclaimer at the end: "Disclaimer: This is a decision-support assessment, not an official safety clearance. Always follow advisories from IMD, INCOIS, and the Indian Coast Guard."
-6. The response must be in the {lang} language.
-7. Data Quality: {dq_str}. You MUST mention if any data is fallback or historical proxy.
-8. For any factor breakdowns, use clean bullet points. DO NOT emit markdown table syntax (|...|).
-9. NEVER use internal pipeline/agent failure language (e.g. 'agent encountered an error', 'pipeline failed', 'node exception', or raw codes). If data is missing, state calmly: 'Live fishing-zone data is currently unavailable for this location' or 'Live marine weather data is currently unavailable'.
-10. Follow the answer hierarchy: Direct answer & assessment first, then key reasons, warnings, and supporting data.
+    dq_str = " ".join(data_quality_notes) if data_quality_notes else "All data is live."
+
+    # Intent-driven synthesis prompt (Sections 15, 31, 44, 45)
+    system_template = """You are Tarang, an intelligent agentic coastal & marine assistant.
+Current User Query: {raw_query}
+Current Intent: {intent_name}
+Response Mode: {response_mode}
+Location: {location} (Coordinates: {lat:.2f}°N, {lon:.2f}°E, Area: {area_type})
+Answer Plan: {answer_plan_str}
+
+STRICT INSTRUCTIONS:
+1. The user's current query is authoritative. Answer the query DIRECTLY without defaulting to a generic marine safety assessment.
+2. Only mention capabilities and data that are relevant to the current intent ({intent_name}).
+3. If the intent is LOCATION_QUERY: provide a concise, direct answer stating the user's current location and coordinates. Do NOT mention marine safety, PFZ, or tides.
+4. If the intent is WEATHER_QUERY or SEA_LEVEL_PRESSURE_QUERY: summarize temperature, wind, precipitation, MSL pressure, and conditions for {location}. Do NOT mention PFZ, tides, or fishing risk.
+5. If the intent is TIDE_QUERY or WATER_LEVEL_QUERY:
+   - For coastal locations: summarize water level above Chart Datum, current phase (rising/falling), next high/low tides, and prediction source.
+   - For inland locations: politely explain that local coastal tide/water level measurements are not applicable to inland {location}, and suggest checking a coastal harbour (e.g. Mumbai, Kochi, Chennai, Thoothukudi). Never claim that sea level itself does not exist.
+6. If the intent is PFZ_QUERY: discuss fishing zones, chlorophyll proxy indicator, and distance. Always refer to PFZ output as a 'chlorophyll-based fishing-potential proxy', never a 'PFZ advisory'.
+7. If the intent is HAZARD_QUERY: discuss active weather condition hazard indicators. Always refer to hazard output as 'weather-condition hazard indicators', never an official 'cyclone warning'.
+8. If the intent is MARINE_SAFETY_QUERY or TRIP_QUERY: evaluate conditions for fishing, state risk level as 'Tarang assesses conditions as [LABEL] risk based on current evidence', name top contributing factors, and append: 'Disclaimer: This is a decision-support assessment, not an official safety clearance. Always follow advisories from IMD, INCOIS, and the Indian Coast Guard.'
+9. NEVER state a numeric value that is not present in the provided evidence or location coordinates.
+10. The response must be in the {lang} language.
 
 JSON Evidence:
 {evidence_str}
 """
-    
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_template),
-        ("user", "Synthesize the assessment based on the provided evidence.")
+        ("user", f"Answer this query directly: {raw_query}")
     ])
-    
+
     llm = ChatGroq(
-        model=config.GROQ_MODEL_QUALITY, 
-        api_key=config.GROQ_API_KEY, 
-        temperature=0.2, 
-        max_retries=0, 
+        model=config.GROQ_MODEL_QUALITY,
+        api_key=config.GROQ_API_KEY,
+        temperature=0.2,
+        max_retries=0,
         timeout=10.0
     )
     chain = prompt | llm
-    
+
     try:
         res = chain.invoke({
+            "raw_query": raw_query,
+            "intent_name": intent_name,
+            "response_mode": response_mode,
             "location": location,
+            "lat": lat,
+            "lon": lon,
+            "area_type": area_type,
+            "answer_plan_str": json.dumps(answer_plan, indent=2) if answer_plan else "None",
             "lang": lang,
             "dq_str": dq_str,
             "evidence_str": evidence_str,
         })
         output_text = res.content
-        
-        # Numeric grounding check
+
+        # Grounding check: include coordinates, query numbers, and standard constants
         output_nums = _extract_numbers(output_text)
         evidence_nums = _extract_numbers(evidence_str)
-        
-        # It's possible for LLM to write "100" from risk score/100, or numbers like "2" for factors. 
-        # For a strict grounding check, we remove common small integers/percentages/known constants.
-        safe_nums = {0, 1, 2, 3, 4, 5, 10, 100, 24}
+        if resolved:
+            evidence_nums.update(_extract_numbers(json.dumps(resolved)))
+            if "lat" in resolved and isinstance(resolved["lat"], (int, float)):
+                evidence_nums.update({round(resolved["lat"], 2), round(resolved["lat"], 1), round(resolved["lat"], 3), float(int(resolved["lat"]))})
+            if "lon" in resolved and isinstance(resolved["lon"], (int, float)):
+                evidence_nums.update({round(resolved["lon"], 2), round(resolved["lon"], 1), round(resolved["lon"], 3), float(int(resolved["lon"]))})
+        if intent:
+            if intent.get("lat") and isinstance(intent["lat"], (int, float)):
+                evidence_nums.update({round(intent["lat"], 2), round(intent["lat"], 1), round(intent["lat"], 3), float(int(intent["lat"]))})
+            if intent.get("lon") and isinstance(intent["lon"], (int, float)):
+                evidence_nums.update({round(intent["lon"], 2), round(intent["lon"], 1), round(intent["lon"], 3), float(int(intent["lon"]))})
+        evidence_nums.update(_extract_numbers(raw_query))
+        now_utc = datetime.now(timezone.utc)
+        safe_nums = {float(n) for n in range(32)} | {
+            float(now_utc.year), float(now_utc.year - 1), float(now_utc.year + 1),
+            float(now_utc.month), float(now_utc.day),
+            0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5,
+            48.0, 72.0, 100.0, 300.0, 500.0, 1000.0, 1013.25
+        }
         ungrounded = output_nums - evidence_nums - safe_nums
-        
+
         if ungrounded:
             logger.warning(f"Numeric grounding check failed. Ungrounded numbers: {ungrounded}. Falling back to template.")
             fallback_res = _fallback_synthesis(state)
@@ -626,10 +905,15 @@ JSON Evidence:
             fallback_res["synthesis_method"] = "template_fallback"
             return fallback_res
 
-        # If parse_method fell back, we can mention it at the bottom.
-        # However, the user PRD states "surface this the same way other fallbacks are surfaced".
-        # We can just return synthesis_method in state and let the frontend/logger handle it.
-        
+        # Lightweight Response Validation Layer (Sections 32-34)
+        is_valid, reason = _validate_response(output_text, answer_plan, resolved)
+        if not is_valid:
+            logger.warning(f"Response validation failed ({reason}). Falling back to intent template.")
+            fallback_res = _fallback_synthesis(state)
+            fallback_res["map_geojson"] = map_geojson
+            fallback_res["synthesis_method"] = "template_fallback"
+            return fallback_res
+
         return {
             "final_answer_text": output_text,
             "map_geojson": map_geojson,
@@ -644,55 +928,62 @@ JSON Evidence:
 
 
 # ---------------------------------------------------------------------------
-# Fallback template-based synthesis (Pre-M6 logic)
+# Fallback template-based synthesis (Intent-aware)
 # ---------------------------------------------------------------------------
 
 def _fallback_synthesis(state: ORCAState) -> dict:
     """
-    Fallback LangGraph node: fuse all agent results into a cited natural-language
-    answer using string templates.
+    Fallback LangGraph node: fuse agent results into a cited natural-language
+    answer using intent-specific templates (Section 16, 17).
     """
     lang = state.get("detected_language", "en")
     intent = state.get("parsed_intent")
+    answer_plan = state.get("answer_plan") or (intent.get("answer_plan") if intent else None)
+    intent_name = (answer_plan.get("intent") if answer_plan else None) or (intent.get("intent") if intent else None) or "MARINE_SAFETY_QUERY"
+    resolved = state.get("resolved_location")
 
-    # Handle early-exit cases where a previous node already generated the final text
-    if intent:
-        existing_answer = state.get("final_answer_text", "")
-        is_invalid_loc = not intent.get("lat") and not intent.get("lon")
-        is_explanation = intent.get("query_type") == "risk_explanation"
-        
-        if (is_invalid_loc or is_explanation) and existing_answer:
-            return {
-                "final_answer_text": existing_answer,
-                "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
-            }
+    # Early exit if final text is already produced
+    existing_answer = state.get("final_answer_text", "")
+    if existing_answer:
+        return {"final_answer_text": existing_answer}
 
-    location   = intent["location_name"] if intent else "the requested location"
-    time_window = intent["time_window"]  if intent else "next_24h"
-    lat = intent["lat"] if intent else 8.7642
-    lon = intent["lon"] if intent else 78.1348
-
-    weather  = state.get("weather_result")
-    pfz      = state.get("pfz_result")
-    ocean    = state.get("ocean_result")
-    hazard   = state.get("hazard_result")
+    time_window = intent.get("time_window", "next_24h") if intent else "next_24h"
+    weather = state.get("weather_result")
+    pfz = state.get("pfz_result")
+    ocean = state.get("ocean_result")
+    hazard = state.get("hazard_result")
     geofence = state.get("geofence_result")
-    risk     = state.get("risk_result")
+    risk = state.get("risk_result")
     evidence = state.get("evidence") or []
 
-    answer_text = _render_template(
-        lang=lang,
-        location=location,
-        time_window=time_window,
-        weather=weather,
-        pfz=pfz,
-        hazard=hazard,
-        geofence=geofence,
-        risk=risk,
-        evidence=evidence,
-        ocean=ocean,
-    )
-
+    if intent_name == "LOCATION_QUERY":
+        answer_text = _render_location_response(lang, resolved)
+    elif intent_name in ("WATER_LEVEL_QUERY", "TIDE_QUERY"):
+        if resolved and not resolved.get("coastal", False):
+            answer_text = _render_inland_ocean_applicability(lang, resolved)
+        else:
+            answer_text = _render_ocean_response(lang, resolved, ocean)
+    elif intent_name == "SEA_LEVEL_PRESSURE_QUERY":
+        answer_text = _render_pressure_response(lang, resolved, weather)
+    elif intent_name == "WEATHER_QUERY":
+        answer_text = _render_weather_response(lang, resolved, time_window, weather)
+    elif intent_name == "PFZ_QUERY":
+        answer_text = _render_pfz_response(lang, resolved, pfz)
+    elif intent_name == "HAZARD_QUERY":
+        answer_text = _render_hazard_response(lang, resolved, hazard)
+    else:
+        answer_text = _render_template(
+            lang=lang,
+            location=resolved.get("name", "the requested location") if resolved else "the requested location",
+            time_window=time_window,
+            weather=weather,
+            pfz=pfz,
+            hazard=hazard,
+            geofence=geofence,
+            risk=risk,
+            evidence=evidence,
+            ocean=ocean,
+        )
 
     return {
         "final_answer_text": answer_text,

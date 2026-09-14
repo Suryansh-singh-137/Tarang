@@ -8,6 +8,14 @@ import {
   FileCheck,
   Clock,
   ExternalLink,
+  MapPin,
+  CloudSun,
+  Waves,
+  Fish,
+  AlertTriangle,
+  Compass,
+  HelpCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { RiskBadge } from "./RiskBadge";
 import { Message, LanguageCode } from "@/lib/types";
@@ -31,6 +39,117 @@ export const MessageBubble: React.FC<Props> = ({
 
   const t = translations[language] || translations.en;
   const isUser = message.role === "user";
+
+  const isSafetyAssessment =
+    message.response_mode === "safety_assessment" ||
+    message.answer_plan?.presentation_hint === "safety_card" ||
+    message.parsed_intent?.intent_name === "MARINE_SAFETY_QUERY" ||
+    message.parsed_intent?.intent_name === "TRIP_QUERY" ||
+    (!message.answer_plan && message.parsed_intent?.query_type === "safety_check");
+
+  const renderHeaderBadge = () => {
+    if (message.isError) return null;
+
+    if (isSafetyAssessment && message.risk_data?.risk_label) {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
+          <RiskBadge
+            label={message.risk_data.risk_label}
+            score={message.risk_data.composite_score}
+            size="lg"
+          />
+
+          {message.risk_data.evidence_coverage && (
+            <span className="text-xs text-[var(--ink-muted)] font-medium bg-[var(--surface-muted)] px-2.5 py-1 rounded-full border border-[var(--border)]">
+              Signals: {message.risk_data.evidence_coverage}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    const hint = message.answer_plan?.presentation_hint;
+    const mode = message.response_mode || message.answer_plan?.response_mode;
+    const intentName = message.parsed_intent?.intent_name || message.answer_plan?.intent_name;
+
+    if (hint === "location_card" || intentName === "LOCATION_QUERY") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+            <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+            Location Context
+          </span>
+          {message.location?.resolved && (
+            <span className="text-[11px] text-[var(--ink-muted)] font-mono">
+              {message.location.resolved.lat.toFixed(2)}°N, {message.location.resolved.lon.toFixed(2)}°E
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    if (hint === "weather_card" || intentName === "WEATHER_QUERY" || intentName === "SEA_LEVEL_PRESSURE_QUERY") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs">
+            <CloudSun className="w-3.5 h-3.5 text-sky-600" />
+            Live Weather Observation
+          </span>
+          <span className="text-[11px] text-[var(--ink-muted)]">IMD / Open-Meteo</span>
+        </div>
+      );
+    }
+
+    if (hint === "ocean_card" || intentName === "TIDE_QUERY" || intentName === "WATER_LEVEL_QUERY") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
+            <Waves className="w-3.5 h-3.5 text-blue-600" />
+            Tide & Water Level Station
+          </span>
+          <span className="text-[11px] text-[var(--ink-muted)]">SOI Harmonic Datum</span>
+        </div>
+      );
+    }
+
+    if (hint === "pfz_card" || intentName === "PFZ_QUERY") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200 shadow-2xs">
+            <Fish className="w-3.5 h-3.5 text-teal-600" />
+            Potential Fishing Zone Advisory
+          </span>
+          <span className="text-[11px] text-[var(--ink-muted)]">INCOIS Satellite</span>
+        </div>
+      );
+    }
+
+    if (hint === "hazard_card" || intentName === "HAZARD_QUERY" || intentName === "BOUNDARY_QUERY") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            Coastal Hazard Advisory
+          </span>
+          <span className="text-[11px] text-[var(--ink-muted)]">INCOIS Alert</span>
+        </div>
+      );
+    }
+
+    if (mode === "applicability_explanation" || hint === "applicability_card") {
+      return (
+        <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+            <Compass className="w-3.5 h-3.5 text-indigo-600" />
+            Geographic Applicability Notice
+          </span>
+          <span className="text-[11px] text-indigo-600 font-medium">Inland Coordinate</span>
+        </div>
+      );
+    }
+
+    return null;
+  };
 
   const handleToggleAudio = async () => {
     if (isPlaying && audioElement) {
@@ -92,22 +211,8 @@ export const MessageBubble: React.FC<Props> = ({
   return (
     <div className="flex justify-start mb-6 animate-in fade-in duration-200">
       <div className={`w-full max-w-[95%] sm:max-w-[88%] rounded-2xl px-5 py-5 bg-[var(--surface)] border ${message.isError ? "border-amber-200/80 bg-amber-50/20" : "border-[var(--border)]"} shadow-xs text-[var(--ink)] space-y-4`}>
-        {/* Risk Badge Verdict prominently at top of answer */}
-        {!message.isError && message.risk_data && message.risk_data.risk_label && (
-          <div className="pb-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
-            <RiskBadge
-              label={message.risk_data.risk_label}
-              score={message.risk_data.composite_score}
-              size="lg"
-            />
-
-            {message.risk_data.evidence_coverage && (
-              <span className="text-xs text-[var(--ink-muted)] font-medium bg-[var(--surface-muted)] px-2.5 py-1 rounded-full border border-[var(--border)]">
-                Signals: {message.risk_data.evidence_coverage}
-              </span>
-            )}
-          </div>
-        )}
+        {/* Intent-aware Header Badge / Risk Badge Verdict */}
+        {renderHeaderBadge()}
 
         {/* Markdown answer content */}
         <div className="prose prose-slate max-w-none text-sm sm:text-base leading-relaxed break-words font-sans selection:bg-[var(--foam)]">
@@ -125,6 +230,7 @@ export const MessageBubble: React.FC<Props> = ({
 
         {/* Inline Fallback / Proxy Disclosures (Only when critical marine safety sources relied on fallback) */}
         {!message.isError &&
+          isSafetyAssessment &&
           message.risk_data?.risk_label !== "UNKNOWN" &&
           message.trace?.some(
             (tr) => (tr.agent_name === "weather_agent" || tr.agent_name === "hazard_agent") && tr.used_fallback

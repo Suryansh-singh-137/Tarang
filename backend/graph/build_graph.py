@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any, Optional
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 import config
@@ -107,6 +109,11 @@ def _can_reuse_cached(agent_name: str, state: ORCAState) -> bool:
     depends_on = config.AGENT_DEPENDS_ON.get(agent_name, [])
     # risk_agent always recomputes — empty depends_on means always re-run
     if not depends_on:
+        return False
+
+    # Live re-evaluation bypasses cache to force fresh sensor queries
+    if state.get("is_recheck") or "recheck" in (state.get("changed_fields") or []):
+        logger.info("[Cache] Live re-evaluation active; bypassing cache for %s", agent_name)
         return False
 
     changed_fields = state.get("changed_fields") or []
@@ -219,7 +226,7 @@ def _pfz_node(state: ORCAState) -> dict:
 def _ocean_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
     lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
-    if not intent or (not intent.get("needs_ocean") and intent.get("query_type") not in ("weather_only", "weather", "safety_check", "general", "ocean_tide")):
+    if not intent or not intent.get("needs_ocean"):
         res = _skip("ocean_agent", state)
         _log_agent_trace("ocean_agent", "SKIPPED", lat, lon, res)
         return res
@@ -273,20 +280,28 @@ def _risk_node(state: ORCAState) -> dict:
 
 
 def _explain_risk_node(state: ORCAState) -> dict:
-    """Only invoked for risk_explanation queries. Uses last turn's risk_result."""
+    """Only invoked for risk_explanation queries. Uses last turn's risk_result or previous_marine_assessment."""
     intent = state.get("parsed_intent")
-    if intent and intent.get("query_type") == "risk_explanation":
-        # Carry forward risk_result from last_results if not in current state or if skipped
+    if intent and (intent.get("query_type") == "risk_explanation" or intent.get("intent") == "RISK_EXPLANATION"):
+        # Carry forward risk_result from last_results or previous_marine_assessment if not in current state or if skipped
         risk_res = state.get("risk_result")
+        cached_risk = None
         if not risk_res or risk_res.get("status") == "skipped":
             last_results = state.get("last_results") or {}
             cached_risk = last_results.get("risk_agent")
             if cached_risk and cached_risk.get("status") == "success":
                 logger.info("[ExplainRisk] Loading risk_result from last_results cache")
-                # Temporarily inject into a modified-view state (we can't mutate TypedDict)
                 state = dict(state)  # type: ignore[assignment]
                 state["risk_result"] = cached_risk  # type: ignore[index]
-        return explain_risk(state)  # type: ignore[arg-type]
+            elif state.get("previous_marine_assessment"):
+                logger.info("[ExplainRisk] Using previous_marine_assessment from state")
+
+        res = explain_risk(state)  # type: ignore[arg-type]
+        if cached_risk and ("risk_result" not in res or not res.get("risk_result")):
+            res["risk_result"] = cached_risk
+        if state.get("previous_marine_assessment"):
+            res["previous_marine_assessment"] = state["previous_marine_assessment"]
+        return res
     # Not an explanation query — return a no-op
     return {}
 
@@ -370,7 +385,7 @@ def _status_validator_node(state: ORCAState) -> dict:
 # Build & compile the graph
 # ---------------------------------------------------------------------------
 
-def build_graph() -> "CompiledGraph":  # type: ignore[type-arg]
+def build_graph(checkpointer: Optional[Any] = None) -> "CompiledGraph":  # type: ignore[type-arg]
     """
     Build and compile the ORCA LangGraph StateGraph.
 
@@ -406,12 +421,51 @@ def build_graph() -> "CompiledGraph":  # type: ignore[type-arg]
     builder.add_edge("status_validator", "synthesis")
     builder.add_edge("synthesis", END)
 
-    return builder.compile()
+    compiled = builder.compile(checkpointer=checkpointer) if checkpointer is not None else builder.compile()
+    return CheckpointedGraphWrapper(compiled)
+
+
+class CheckpointedGraphWrapper:
+    """
+    Transparent wrapper for CompiledGraph that injects a default thread_id
+    from input['conversation_id'] when config is not explicitly provided.
+    Maintains 100% backward compatibility for tests calling graph.invoke(state).
+    """
+
+    def __init__(self, compiled_graph: Any):
+        self._graph = compiled_graph
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._graph, name)
+
+    def _ensure_config(self, input: Any, config: Optional[dict]) -> dict:
+        cfg = dict(config or {})
+        configurable = dict(cfg.get("configurable") or {})
+        if "thread_id" not in configurable:
+            cid = input.get("conversation_id") if isinstance(input, dict) else "default"
+            configurable["thread_id"] = cid or "default"
+        cfg["configurable"] = configurable
+        return cfg
+
+    def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        return self._graph.invoke(input, config=self._ensure_config(input, config), **kwargs)
+
+    async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        return await self._graph.ainvoke(input, config=self._ensure_config(input, config), **kwargs)
+
+    def stream(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        return self._graph.stream(input, config=self._ensure_config(input, config), **kwargs)
+
+    def astream(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        return self._graph.astream(input, config=self._ensure_config(input, config), **kwargs)
 
 
 # ---------------------------------------------------------------------------
 # Module-level singleton (imported by main.py)
 # ---------------------------------------------------------------------------
 
-graph = build_graph()
+checkpointer = MemorySaver()
+graph = build_graph(checkpointer=checkpointer)
+
+
 
