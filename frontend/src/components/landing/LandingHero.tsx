@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { EmptyStateHorizon } from "../illustrations/EmptyStateHorizon";
 import { LanguageCode, LiveConditionsSummary } from "@/lib/types";
@@ -7,9 +8,9 @@ import { translations } from "@/lib/i18n";
 interface Props {
   language: LanguageCode;
   liveConditions: LiveConditionsSummary | null;
-  onStartVoice: () => void;
-  onSubmitText: (query: string) => void;
-  onSelectPrompt: (prompt: string) => void;
+  onStartVoice?: () => void;
+  onSubmitText?: (query: string) => void;
+  onSelectPrompt?: (prompt: string) => void;
   className?: string;
 }
 
@@ -21,18 +22,32 @@ export const LandingHero: React.FC<Props> = ({
   onSelectPrompt,
   className = "",
 }) => {
+  const router = useRouter();
   const [showInput, setShowInput] = useState(false);
   const [typedText, setTypedText] = useState("");
   const t = translations[language] || translations.en;
 
   const handleInputSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!typedText.trim()) return;
-    onSubmitText(typedText.trim());
+    const query = typedText.trim();
+    if (!query) return;
+
+    if (onSubmitText) {
+      onSubmitText(query);
+    }
+    // Route to /app carrying query in search param per PRD §0
+    router.push(`/app?q=${encodeURIComponent(query)}`);
   };
 
   const handleCTAClick = () => {
-    setShowInput(true);
+    // If text was already typed, carry it over; otherwise navigate directly to /app
+    const query = typedText.trim();
+    if (query) {
+      if (onSubmitText) onSubmitText(query);
+      router.push(`/app?q=${encodeURIComponent(query)}`);
+    } else {
+      router.push("/app");
+    }
   };
 
   // Current time in IST
@@ -43,11 +58,11 @@ export const LandingHero: React.FC<Props> = ({
     timeZone: "Asia/Kolkata",
   });
 
-  const lat = liveConditions?.lat ?? 8.76;
-  const lon = liveConditions?.lon ?? 78.13;
+  const lat = liveConditions?.lat ?? 8.7642;
+  const lon = liveConditions?.lon ?? 78.1348;
 
   return (
-    <section className={`relative min-h-[85vh] flex flex-col justify-center ${className}`}>
+    <section className={`relative min-h-[82vh] flex flex-col justify-center ${className}`}>
       {/* ── Soft atmospheric radial glow wash — positioned behind the illustration area ── */}
       <div
         className="absolute top-1/3 right-[15%] w-[280px] sm:w-[380px] h-[280px] sm:h-[380px] bg-[var(--foam)] rounded-full blur-3xl opacity-40 pointer-events-none -z-10"
@@ -71,19 +86,12 @@ export const LandingHero: React.FC<Props> = ({
               <span className="block">{t.landingHeroLine2}</span>
             </h1>
 
-            {/* Coordinate readout — mono, muted */}
-            <div className="font-mono-data text-[11px] sm:text-xs text-[var(--ink-subtle)] mb-5 sm:mb-6 flex items-center gap-2">
-              <span>{lat.toFixed(4)}°N, {lon.toFixed(4)}°E</span>
-              <span className="text-[var(--border)]">·</span>
-              <span>{istTime} IST</span>
-            </div>
-
             {/* Subtitle copy */}
             <p className="text-sm sm:text-base text-[var(--ink-muted)] leading-relaxed font-sans max-w-[440px] mb-6 sm:mb-8">
               {t.landingHeadline}
             </p>
 
-            {/* ── Primary CTA: quiet text link, NOT a colored pill ── */}
+            {/* ── Primary CTA: quiet text link navigating to /app ── */}
             <div className="flex flex-col gap-3">
               {!showInput ? (
                 <>
@@ -234,12 +242,12 @@ export const LandingHero: React.FC<Props> = ({
             )}
           </div>
 
-          {/* ─── ROTATED 90° COORDINATE TEXT — right edge ─── */}
+          {/* ─── ROTATED 90° INSTRUMENT READOUT — right edge (PRD §0.1) ─── */}
           <div
             className="hidden lg:block absolute right-0 top-1/2 -translate-y-1/2 writing-vertical font-mono-data text-[10px] text-[var(--ink-subtle)] tracking-widest opacity-60 select-none"
             aria-hidden="true"
           >
-            {lat.toFixed(2)}°N {lon.toFixed(2)}°E · COASTAL INTELLIGENCE · EST. 2024
+            {lat.toFixed(4)}°N, {lon.toFixed(4)}°E · {istTime} IST
           </div>
 
         </div>

@@ -88,7 +88,7 @@ export const EmptyStateHorizon: React.FC<Props> = ({
       />
 
       {/* ── Coastal Fishing Boat Silhouette (1.5px stroke in --ink) ── */}
-      <g transform="translate(196, 52)">
+      <g transform="translate(196, 52)" className="animate-boat-bob">
         {/* Main mast */}
         <line
           x1="22"

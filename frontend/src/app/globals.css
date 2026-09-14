@@ -150,6 +150,33 @@ body {
   animation: wave-drift 4s ease-in-out infinite;
 }
 
+/* Subtle boat bobbing animation (PRD §1.4: 2-3px vertical drift over 5s loop) */
+@keyframes boat-bob {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2.5px);
+  }
+}
+
+.animate-boat-bob {
+  animation: boat-bob 5s ease-in-out infinite;
+}
+
+/* Scroll reveal utility classes (PRD §1.1) */
+.reveal-init {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 400ms cubic-bezier(0.16, 1, 0.3, 1), transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.reveal-visible {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}
+
 /* Vertical writing mode for rotated coordinate readout (Part 0) */
 .writing-vertical {
   writing-mode: vertical-rl;
@@ -166,13 +193,20 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Reduced motion support */
+/* Reduced motion support (PRD §1.1, §1.4, Acceptance Criteria) */
 @media (prefers-reduced-motion: reduce) {
   .animate-mic-pulse,
-  .animate-wave-drift {
-    animation: none;
+  .animate-wave-drift,
+  .animate-boat-bob {
+    animation: none !important;
+  }
+  .reveal-init {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
   }
   html {
     scroll-behavior: auto;
   }
 }
+

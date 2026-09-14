@@ -1,4 +1,6 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
 import { LanguageCode } from "@/lib/types";
 import { translations } from "@/lib/i18n";
 
@@ -10,31 +12,36 @@ interface Props {
 /**
  * FeaturesSection — below-the-fold "What Tarang Does" section.
  *
- * PRD Part 0.1 rules:
+ * PRD Part 0.1 & M10 rules:
  * - Numbered columns (01-06), NOT icon-topped cards
  * - No card borders, no shadows, no background fills per item
  * - Unequal row structure (4 columns, then 2 wider columns)
  * - Copy is specific to actual backend capabilities
+ * - Staggered scroll reveals 01 -> 06 with 75ms stagger
  */
 
 const FEATURES_ROW_1 = [
   {
     num: "01",
+    index: 0,
     title: "Marine Weather",
     body: "Live wave height, wind speed, and visibility from Open-Meteo ERA5 reanalysis and ICON NWP forecasts. Sea state classification per WMO Douglas scale.",
   },
   {
     num: "02",
+    index: 1,
     title: "Fishing Potential",
     body: "Chlorophyll-a based proxy zones from INCOIS Oceansat-2 satellite grid. Disclosed as historical scientific indicator, not a live official PFZ advisory.",
   },
   {
     num: "03",
+    index: 2,
     title: "Hazard & Cyclone",
     body: "GDACS live tropical cyclone tracking alongside weather-code hazards. Real-time distance, wind speed, and alert level from UN disaster monitoring.",
   },
   {
     num: "04",
+    index: 3,
     title: "Risk Scoring",
     body: "Deterministic, explainable composite scoring — weighted wave, wind, visibility, and cyclone proximity. No LLM in the safety-critical path.",
   },
@@ -43,11 +50,13 @@ const FEATURES_ROW_1 = [
 const FEATURES_ROW_2 = [
   {
     num: "05",
+    index: 4,
     title: "Multilingual, by voice",
     body: "Ask in English, Hindi, or Tamil — speak or type. Answers come back the same way, read aloud on request. Groq Whisper for transcription, Sarvam AI for synthesis.",
   },
   {
     num: "06",
+    index: 5,
     title: "Every claim, sourced",
     body: "Answers cite the exact agent and data source behind every number — provenance tiers from official national (INCOIS/IMD) through global awareness (GDACS) to operational model (Open-Meteo). No fabricated claims, ever.",
   },
@@ -58,18 +67,48 @@ export const FeaturesSection: React.FC<Props> = ({
   className = "",
 }) => {
   const t = translations[language] || translations.en;
+  const sectionRef = useRef<HTMLElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { threshold: 0.12 }
+    );
+
+    if (sectionRef.current) {
+      observer.observe(sectionRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <section className={`py-16 sm:py-20 lg:py-24 ${className}`}>
+    <section ref={sectionRef} className={`py-16 sm:py-20 lg:py-24 ${className}`}>
       <div className="max-w-[1200px] mx-auto w-full px-6 sm:px-10 lg:px-16">
 
         {/* Section label — small mono, left-aligned */}
-        <div className="font-mono-data text-[11px] text-[var(--ink-muted)] tracking-widest uppercase mb-4">
+        <div
+          className={`font-mono-data text-[11px] text-[var(--ink-muted)] tracking-widest uppercase mb-4 transition-all duration-500 ${
+            isVisible ? "reveal-visible" : "reveal-init"
+          }`}
+        >
           WHAT TARANG DOES
         </div>
 
         {/* Section intro — Fraunces, medium size */}
-        <p className="font-serif-display text-xl sm:text-2xl lg:text-3xl font-normal text-[var(--ink)] leading-snug max-w-[600px] mb-10 sm:mb-14">
+        <p
+          className={`font-serif-display text-xl sm:text-2xl lg:text-3xl font-normal text-[var(--ink)] leading-snug max-w-[600px] mb-10 sm:mb-14 transition-all duration-500 delay-100 ${
+            isVisible ? "reveal-visible" : "reveal-init"
+          }`}
+        >
           Six specialized agents, one grounded answer.
         </p>
 
@@ -78,7 +117,12 @@ export const FeaturesSection: React.FC<Props> = ({
           {FEATURES_ROW_1.map((feat) => (
             <div
               key={feat.num}
-              className="py-6 sm:py-8 pr-6 lg:pr-8 border-b lg:border-b-0 lg:border-r border-[var(--border)] last:border-r-0 last:border-b-0 flex flex-col"
+              style={{
+                transitionDelay: isVisible ? `${feat.index * 75}ms` : "0ms",
+              }}
+              className={`py-6 sm:py-8 pr-6 lg:pr-8 border-b lg:border-b-0 lg:border-r border-[var(--border)] last:border-r-0 last:border-b-0 flex flex-col transition-all duration-500 ${
+                isVisible ? "reveal-visible" : "reveal-init"
+              }`}
             >
               {/* Micro-diagram & Number row */}
               <div className="flex items-center justify-between mb-4">
@@ -144,7 +188,12 @@ export const FeaturesSection: React.FC<Props> = ({
           {FEATURES_ROW_2.map((feat) => (
             <div
               key={feat.num}
-              className="py-6 sm:py-8 pr-6 lg:pr-12 border-b sm:border-b-0 sm:border-r border-[var(--border)] last:border-r-0 last:border-b-0 flex flex-col"
+              style={{
+                transitionDelay: isVisible ? `${feat.index * 75}ms` : "0ms",
+              }}
+              className={`py-6 sm:py-8 pr-6 lg:pr-12 border-b sm:border-b-0 sm:border-r border-[var(--border)] last:border-r-0 last:border-b-0 flex flex-col transition-all duration-500 ${
+                isVisible ? "reveal-visible" : "reveal-init"
+              }`}
             >
               {/* Micro-diagram & Number row */}
               <div className="flex items-center justify-between mb-4">
