@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -705,4 +705,53 @@ def session_location_get(conversation_id: str | None = None):
         "conversation_id": conv_id,
         "selected_location": session.selected_location,
         "marine_context": session.marine_context,
+    }
+
+
+@app.get("/location/pfz")
+def location_pfz(lat: float, lon: float, name: Optional[str] = None):
+    """
+    Retrieve Potential Fishing Zones (PFZ) and GeoJSON feature layer for any location.
+    If the location is inland, returns is_coastal=False with an informational notice.
+    """
+    from location.service import determine_marine_context
+    ctx = determine_marine_context(lat, lon, name=name)
+    if ctx.get("type") == "inland" or ctx.get("fishing_data_available") is False:
+        return {
+            "status": "inland",
+            "is_coastal": False,
+            "location": {"name": name or "Inland Location", "lat": lat, "lon": lon, "coastal": False},
+            "zones": [],
+            "features": [],
+            "summary": "Potential fishing zones (PFZ) are not applicable to inland non-marine locations.",
+        }
+
+    from graph.nodes.pfz_agent import pfz_agent, _build_pfz_geojson_features
+    loc_name = name or "Coastal Harbour"
+    mock_state = {
+        "resolved_location": {"name": loc_name, "lat": lat, "lon": lon, "coastal": True},
+        "raw_query": f"fishing zones near {loc_name}",
+        "trace": [],
+        "evidence": [],
+        "data_quality_reports": [],
+    }
+    result_dict = pfz_agent(mock_state)
+    pfz_res = result_dict.get("pfz_result", {})
+    data = pfz_res.get("data", {})
+    zones = data.get("zones", [])
+    features = _build_pfz_geojson_features(zones, pfz_res.get("source", "INCOIS Oceansat-2"))
+
+    return {
+        "status": "success",
+        "is_coastal": True,
+        "location": {"name": loc_name, "lat": lat, "lon": lon, "coastal": True},
+        "zones": zones,
+        "nearest_zone_km": data.get("nearest_zone_km"),
+        "zone_count": len(zones),
+        "avg_chl": data.get("avg_chl"),
+        "source": pfz_res.get("source", "INCOIS Oceansat-2 (Chlorophyll Satellite Climatology)"),
+        "data_quality": pfz_res.get("data_quality", "historical_proxy"),
+        "used_fallback": pfz_res.get("used_fallback", False),
+        "summary": pfz_res.get("summary", ""),
+        "features": features,
     }

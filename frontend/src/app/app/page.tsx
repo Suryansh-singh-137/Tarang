@@ -669,6 +669,15 @@ function AppWorkspace() {
                 locationStatus={locationStatus}
                 onNavigateToMap={() => setActiveTab("map")}
                 onNavigateToChat={() => setActiveTab("chat")}
+                onPfzLoaded={(features) => {
+                  setMapGeoJson((prev) => ({
+                    type: "FeatureCollection",
+                    features: [
+                      ...(prev?.features?.filter((f) => f.properties?.feature_type !== "pfz_zone") || []),
+                      ...features,
+                    ],
+                  }));
+                }}
                 language={currentLanguage}
                 marineSnapshot={marineSnapshot}
               />
