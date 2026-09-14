@@ -16,6 +16,7 @@ import {
 import { RiskBadge } from "../chat/RiskBadge";
 import { LanguageCode, LiveConditionsSummary, RiskLabel } from "@/lib/types";
 import { translations } from "@/lib/i18n";
+import { useLocation } from "@/lib/locationContext";
 
 interface Props {
   language: LanguageCode;
@@ -33,12 +34,12 @@ interface Props {
 }
 
 const QUICK_PLACES = [
-  { name: "Thoothukudi", state: "Tamil Nadu", popular: true },
+  { name: "Kochi", state: "Kerala", popular: true },
+  { name: "Mumbai", state: "Maharashtra", popular: true },
   { name: "Chennai", state: "Tamil Nadu" },
-  { name: "Kochi", state: "Kerala" },
+  { name: "Visakhapatnam", state: "Andhra Pradesh" },
   { name: "Diu", state: "Gujarat / D&D" },
   { name: "Puri", state: "Odisha" },
-  { name: "Mumbai", state: "Maharashtra" },
 ];
 
 export const SidebarDashboard: React.FC<Props> = ({
@@ -50,6 +51,7 @@ export const SidebarDashboard: React.FC<Props> = ({
   className = "",
   hasStartedChat = false,
 }) => {
+  const { selectedLocation } = useLocation();
   const [isConditionsExpanded, setIsConditionsExpanded] = useState(false);
   const [isQuickPlacesOpen, setIsQuickPlacesOpen] = useState(!hasStartedChat);
   const [isSuggestedOpen, setIsSuggestedOpen] = useState(!hasStartedChat);
@@ -59,9 +61,9 @@ export const SidebarDashboard: React.FC<Props> = ({
 
   // Fallback live conditions if not yet fetched by initial query
   const conditions = liveConditions || {
-    locationName: "Thoothukudi Coast",
-    lat: 8.7642,
-    lon: 78.1348,
+    locationName: selectedLocation?.name || "Coastal Waters",
+    lat: selectedLocation?.lat || 9.9312,
+    lon: selectedLocation?.lon || 76.2673,
     waveHeightM: 0.9,
     windSpeedKmh: 12.4,
     seaState: "slight",

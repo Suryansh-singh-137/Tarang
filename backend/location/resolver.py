@@ -161,6 +161,21 @@ class LocationResolver:
             if session:
                 session.last_query_location = resolved
                 session.last_explicit_location = resolved
+                try:
+                    from location.service import determine_marine_context
+                    m_ctx = determine_marine_context(lat, lon, name=resolved["name"])
+                    session.selected_location = {
+                        "name": resolved["name"],
+                        "display_name": f"{resolved['name']}, India",
+                        "lat": lat,
+                        "lon": lon,
+                        "state": resolved.get("state"),
+                        "country": "India",
+                        "source": "conversation",
+                    }
+                    session.marine_context = m_ctx
+                except Exception as e:
+                    logger.warning("[Resolver] Could not update session selected_location: %s", e)
             return "EXPLICIT_COORDINATES", q_loc, resolved
 
         # ----------------------------------------------------------------------
@@ -195,32 +210,75 @@ class LocationResolver:
             if session:
                 session.last_query_location = resolved
                 session.last_explicit_location = resolved
+                try:
+                    from location.service import determine_marine_context
+                    m_ctx = determine_marine_context(lat, lon, name=resolved["name"])
+                    session.selected_location = {
+                        "name": resolved["name"],
+                        "display_name": f"{resolved['name']}, India",
+                        "lat": lat,
+                        "lon": lon,
+                        "state": resolved.get("state"),
+                        "country": "India",
+                        "source": "conversation",
+                    }
+                    session.marine_context = m_ctx
+                except Exception as e:
+                    logger.warning("[Resolver] Could not update session selected_location: %s", e)
             return "EXPLICIT_PLACE", q_loc, resolved
 
         # ----------------------------------------------------------------------
         # Priority 4: Contextual Continuation / Inheritance from Session
         # ----------------------------------------------------------------------
-        if session and session.last_query_location:
-            inherited = session.last_query_location
-            logger.info("[Resolver] Inheriting previous query location from session: %s", inherited["name"])
-            q_loc = {
-                "name": inherited["name"],
-                "lat": inherited["lat"],
-                "lon": inherited["lon"],
-                "source": "inherited",
-            }
-            resolved = {
-                "lat": inherited["lat"],
-                "lon": inherited["lon"],
-                "name": inherited["name"],
-                "source": "previous_query",
-                "confidence": inherited.get("confidence", 0.7),
-                "coastal": inherited.get("coastal", True),
-                "nearest_coast_km": inherited.get("nearest_coast_km"),
-                "state": inherited.get("state"),
-                "district": inherited.get("district"),
-            }
-            return "INHERITED", q_loc, resolved
+        # Check session.selected_location first (canonical source of truth), then last_query_location
+        if session and (session.selected_location or session.last_query_location):
+            if session.selected_location:
+                s_loc = session.selected_location
+                logger.info("[Resolver] Inheriting canonical selected location from session: %s", s_loc.get("name"))
+                m_ctx = session.marine_context or {}
+                is_coast = m_ctx.get("is_coastal", True)
+                dist_km = m_ctx.get("distance_to_coast_km")
+                q_loc = {
+                    "name": s_loc.get("name"),
+                    "lat": s_loc.get("lat"),
+                    "lon": s_loc.get("lon"),
+                    "source": "inherited",
+                }
+                resolved = {
+                    "lat": float(s_loc["lat"]),
+                    "lon": float(s_loc["lon"]),
+                    "name": s_loc.get("name") or f"{s_loc['lat']:.2f}°N, {s_loc['lon']:.2f}°E",
+                    "source": "previous_query",
+                    "confidence": 0.85,
+                    "coastal": bool(is_coast),
+                    "nearest_coast_km": dist_km,
+                    "state": s_loc.get("state"),
+                    "district": None,
+                }
+                session.last_query_location = resolved
+                return "INHERITED", q_loc, resolved
+            elif session.last_query_location:
+                inherited = session.last_query_location
+                logger.info("[Resolver] Inheriting previous query location from session: %s", inherited["name"])
+                q_loc = {
+                    "name": inherited["name"],
+                    "lat": inherited["lat"],
+                    "lon": inherited["lon"],
+                    "source": "inherited",
+                }
+                resolved = {
+                    "lat": inherited["lat"],
+                    "lon": inherited["lon"],
+                    "name": inherited["name"],
+                    "source": "previous_query",
+                    "confidence": inherited.get("confidence", 0.7),
+                    "coastal": inherited.get("coastal", True),
+                    "nearest_coast_km": inherited.get("nearest_coast_km"),
+                    "state": inherited.get("state"),
+                    "district": inherited.get("district"),
+                }
+                return "INHERITED", q_loc, resolved
+
 
         # ----------------------------------------------------------------------
         # Priority 5: Controlled Clarification (No Location)

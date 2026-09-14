@@ -453,6 +453,9 @@ def resolve_location(query: str) -> Dict[str, Any]:
         "fine", "high", "low", "moderate", "extreme", "score", "factor", "factors",
         "breakdown", "reason", "because", "explain", "explanation", "kyun", "kyon",
         "samjhao", "iska", "woh", "khatra", "tufan", "bijli",
+        # Marine activity & fishing intent tokens
+        "fishing", "fisherman", "fishermen", "fishers", "catch", "boat", "boats", "trip", "trips",
+        "sail", "sailing", "go", "going", "leave", "leaving", "possible", "advisable",
     }
     tokens = [w for w in re.findall(r'\b[A-Za-z]+\b', query) if w.lower() not in _STOP_WORDS]
     if not tokens:

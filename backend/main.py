@@ -76,10 +76,25 @@ class QueryRequest(BaseModel):
     user_lon: float | None = None             # Browser geolocation longitude
     user_location_name: str | None = None     # Optional reverse geocoded name
     language: str | None = None               # Manual language override ("en", "hi", "ta")
+    # Universal Dynamic Location System (PRD §11, §20, §21)
+    selected_location: dict | None = None
+    marine_context: dict | None = None
 
 class SpeakRequest(BaseModel):
     text: str
     language: str
+
+class LocationResolveRequest(BaseModel):
+    lat: float
+    lon: float
+    name: str | None = None
+    source: str = "search"
+
+class SessionLocationRequest(BaseModel):
+    conversation_id: str | None = None
+    location: dict
+    marine_context: dict | None = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +130,22 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
     if device_loc:
         session.device_location = device_loc
 
+    # Universal Selected Location sync (PRD §18, §20)
+    if body.selected_location and body.selected_location.get("lat") is not None and body.selected_location.get("lon") is not None:
+        session.selected_location = body.selected_location
+        if body.marine_context:
+            session.marine_context = body.marine_context
+        else:
+            try:
+                from location.service import determine_marine_context
+                session.marine_context = determine_marine_context(
+                    float(body.selected_location["lat"]),
+                    float(body.selected_location["lon"]),
+                    name=body.selected_location.get("name"),
+                )
+            except Exception as _e:
+                pass
+
     initial_lang = body.language if body.language in ("en", "hi", "ta") else "en"
 
     user_loc = None
@@ -124,6 +155,13 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
             "lon": device_loc["lon"],
             "name": body.user_location_name or "Your Location",
         }
+    elif session.selected_location:
+        user_loc = {
+            "lat": session.selected_location["lat"],
+            "lon": session.selected_location["lon"],
+            "name": session.selected_location.get("name") or "Selected Location",
+        }
+
 
     return ORCAState(
         request_id=req_id,
@@ -440,6 +478,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "last_parsed_intent":   final_state.get("parsed_intent"),
         "last_results":         merged_results,
         "changed_fields":       final_state.get("changed_fields") or [],
+        "selected_location":    session.selected_location,
+        "marine_context":       session.marine_context,
     }
 
     yield {
@@ -581,3 +621,77 @@ def speak(body: SpeakRequest):
         raise HTTPException(status_code=500, detail="Failed to synthesize speech.")
         
     return Response(content=audio_bytes, media_type="audio/wav")
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Location & Marine Context Endpoints (PRD §8, §9, §11, §21)
+# ---------------------------------------------------------------------------
+
+@app.get("/location/search")
+def location_search(q: str, limit: int = 6):
+    """
+    3-tier location search:
+    Gazetteer -> OpenWeather Geocoding API -> Nominatim OSM fallback.
+    """
+    from location.service import search_locations
+    results = search_locations(q, limit=limit)
+    return {"results": results}
+
+
+@app.get("/location/reverse")
+def location_reverse(lat: float, lon: float):
+    """
+    Reverse geocode coordinates into a standardized place name.
+    Supports offshore marine coordinates (PRD §10).
+    """
+    from location.service import reverse_geocode
+    loc = reverse_geocode(lat, lon)
+    return {"location": loc}
+
+
+@app.post("/location/resolve")
+def location_resolve(body: LocationResolveRequest):
+    """
+    Resolve coordinates to canonical SelectedLocation + MarineContext (PRD §11 & §12).
+    """
+    from location.service import resolve_canonical_location
+    resolved = resolve_canonical_location(body.lat, body.lon, name=body.name, source=body.source)
+    return resolved
+
+
+@app.post("/session/location")
+def session_location_set(body: SessionLocationRequest):
+    """
+    Set canonical selected location and marine context for conversation session (PRD §20).
+    """
+    from location.service import determine_marine_context
+    conv_id = body.conversation_id or "default"
+    session = get_or_create_session(conv_id)
+    session.selected_location = body.location
+    if body.marine_context:
+        session.marine_context = body.marine_context
+    elif "lat" in body.location and "lon" in body.location:
+        session.marine_context = determine_marine_context(
+            float(body.location["lat"]), float(body.location["lon"]), name=body.location.get("name")
+        )
+    save_session(session)
+    return {
+        "status": "ok",
+        "conversation_id": conv_id,
+        "selected_location": session.selected_location,
+        "marine_context": session.marine_context,
+    }
+
+
+@app.get("/session/location")
+def session_location_get(conversation_id: str | None = None):
+    """
+    Get current selected location and marine context for conversation session.
+    """
+    conv_id = conversation_id or "default"
+    session = get_or_create_session(conv_id)
+    return {
+        "conversation_id": conv_id,
+        "selected_location": session.selected_location,
+        "marine_context": session.marine_context,
+    }

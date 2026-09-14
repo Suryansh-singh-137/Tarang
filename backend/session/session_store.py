@@ -24,6 +24,8 @@ SESSION_TTL_SECONDS = 86400
 class SessionRecord:
     conversation_id: str
     device_location: Optional[DeviceLocation] = None
+    selected_location: Optional[Dict[str, Any]] = None
+    marine_context: Optional[Dict[str, Any]] = None
     last_query_location: Optional[ResolvedLocation] = None
     last_explicit_location: Optional[ResolvedLocation] = None
     last_results: Dict[str, Any] = field(default_factory=dict)
@@ -37,6 +39,8 @@ class SessionRecord:
         return {
             "conversation_id": self.conversation_id,
             "device_location": self.device_location,
+            "selected_location": self.selected_location,
+            "marine_context": self.marine_context,
             "last_query_location": self.last_query_location,
             "last_explicit_location": self.last_explicit_location,
             "last_results": self.last_results,
@@ -46,6 +50,7 @@ class SessionRecord:
             "conversation_history": self.conversation_history,
             "updated_at": self.updated_at,
         }
+
 
 
 # In-memory session cache: {conversation_id: SessionRecord}

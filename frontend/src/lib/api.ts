@@ -1,6 +1,13 @@
 // Unified API client for Tarang backend (SSE query streaming, STT, and TTS)
 
-import { ChatState, ProgressEventData, QueryResultPayload } from "./types";
+import {
+  ChatState,
+  ProgressEventData,
+  QueryResultPayload,
+  SelectedLocation,
+  MarineContext,
+  LocationSearchResult,
+} from "./types";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -20,6 +27,8 @@ export interface QueryOptions {
     captured_at?: string | null;
     permission_status?: string;
   } | null;
+  selected_location?: SelectedLocation | null;
+  marine_context?: MarineContext | null;
   user_lat?: number | null;
   user_lon?: number | null;
   user_location_name?: string | null;
@@ -48,12 +57,14 @@ export async function streamQuery(
         request_id: options?.request_id,
         conversation_id: options?.conversation_id,
         device_location: options?.device_location,
+        selected_location: options?.selected_location ?? null,
+        marine_context: options?.marine_context ?? null,
         conversation: state.conversation,
         last_parsed_intent: state.last_parsed_intent,
         last_results: state.last_results,
-        user_lat: options?.user_lat ?? null,
-        user_lon: options?.user_lon ?? null,
-        user_location_name: options?.user_location_name ?? null,
+        user_lat: options?.user_lat ?? (options?.selected_location ? options.selected_location.lat : null),
+        user_lon: options?.user_lon ?? (options?.selected_location ? options.selected_location.lon : null),
+        user_location_name: options?.user_location_name ?? (options?.selected_location ? options.selected_location.name : null),
         language: options?.language ?? null,
       }),
       signal: options?.signal,
@@ -178,5 +189,102 @@ export async function synthesizeSpeech(text: string, language: string): Promise<
   }
 
   return blob;
+}
+
+/**
+ * Search locations via GET /location/search
+ */
+export async function searchLocationsApi(query: string, limit: number = 6): Promise<LocationSearchResult[]> {
+  if (!query || !query.trim()) return [];
+  try {
+    const res = await fetch(`${API_BASE_URL}/location/search?q=${encodeURIComponent(query.trim())}&limit=${limit}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch (err) {
+    console.error("Failed to search locations:", err);
+    return [];
+  }
+}
+
+/**
+ * Reverse geocode coordinates via GET /location/reverse
+ */
+export async function reverseGeocodeApi(
+  lat: number,
+  lon: number
+): Promise<{ location: SelectedLocation; marine_context: MarineContext } | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/location/reverse?lat=${lat}&lon=${lon}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to reverse geocode:", err);
+    return null;
+  }
+}
+
+/**
+ * Resolve canonical location via POST /location/resolve
+ */
+export async function resolveLocationApi(
+  lat: number,
+  lon: number,
+  name?: string,
+  source: string = "search"
+): Promise<{ location: SelectedLocation; marine_context: MarineContext } | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/location/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lon, name, source }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to resolve location:", err);
+    return null;
+  }
+}
+
+/**
+ * Update session canonical location via POST /session/location
+ */
+export async function setSessionLocationApi(
+  conversationId: string,
+  location: SelectedLocation,
+  marineContext?: MarineContext
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/session/location`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        location,
+        marine_context: marineContext,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn("Failed to set session location:", err);
+    return false;
+  }
+}
+
+/**
+ * Retrieve session canonical location via GET /session/location
+ */
+export async function getSessionLocationApi(
+  conversationId: string
+): Promise<{ selected_location: SelectedLocation | null; marine_context: MarineContext | null } | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/session/location?conversation_id=${encodeURIComponent(conversationId)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn("Failed to get session location:", err);
+    return null;
+  }
 }
 

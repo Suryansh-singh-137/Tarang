@@ -196,6 +196,8 @@ export type QueryResultPayload = {
   last_parsed_intent?: ParsedIntent | null;
   last_results?: Record<string, any>;
   changed_fields?: string[];
+  selected_location?: SelectedLocation;
+  marine_context?: MarineContext;
 };
 
 export type Message = {
@@ -241,3 +243,35 @@ export type LiveConditionsSummary = {
   source: string;
   isFallback: boolean;
 };
+
+// Universal Location & Marine Context System (PRD)
+export type MarineContextType = "inland" | "coastal" | "offshore" | "unknown";
+
+export interface MarineContext {
+  type: MarineContextType;
+  is_coastal: boolean;
+  nearest_port?: string | null;
+  distance_to_coast_km?: number | null;
+  tide_available: boolean;
+  fishing_data_available: boolean;
+}
+
+export interface SelectedLocation {
+  name: string;
+  display_name: string;
+  lat: number;
+  lon: number;
+  state?: string | null;
+  country?: string | null;
+  source: "search" | "gps" | "map" | "conversation" | "default";
+}
+
+export interface LocationSearchResult {
+  name: string;
+  display_name: string;
+  lat: number;
+  lon: number;
+  state?: string | null;
+  country?: string | null;
+}
+

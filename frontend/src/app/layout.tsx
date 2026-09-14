@@ -30,6 +30,8 @@ const notoSansTamil = Noto_Sans_Tamil({
   weight: ["400", "500", "600", "700"],
 });
 
+import { AppProviders } from "@/components/providers/AppProviders";
+
 export const metadata: Metadata = {
   title: "Tarang — Marine Safety Intelligence",
   description: "Coastal decision support for Indian fishermen — real-time sea state, potential fishing zones, and safety advisories in your language.",
@@ -46,7 +48,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${notoSans.variable} ${notoSansDevanagari.variable} ${notoSansTamil.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--neutral)] text-[var(--ink)] font-sans selection:bg-[var(--foam)] selection:text-[var(--ink)]">
-        {children}
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

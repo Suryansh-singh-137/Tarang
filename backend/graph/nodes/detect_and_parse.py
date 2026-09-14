@@ -670,21 +670,21 @@ logger = logging.getLogger(__name__)
 def _get_location_clarification_text(lang: str) -> str:
     """Return clarification prompt when coastal location cannot be resolved."""
     if lang == "ta":
-        return "நீங்கள் எந்த கடலோரப் பகுதி அல்லது துறைமுகத்தில் மீன்பிடிக்க திட்டமிட்டுள்ளீர்கள் என்று குறிப்பிடவும் (எ.கா. தூத்துக்குடி, ராமேஸ்வரம், கொச்சி, அல்லது விசாகப்பட்டினம்), அல்லது உங்கள் பகுதி தகவல்களை அறிய இருப்பிட அனுமதியை இயக்கவும்."
+        return "நீங்கள் எந்த கடலோரப் பகுதி அல்லது துறைமுகத்தில் மீன்பிடிக்க திட்டமிட்டுள்ளீர்கள் என்று குறிப்பிடவும் (எ.கா. கொச்சி, ராமேஸ்வரம், மும்பை, அல்லது விசாகப்பட்டினம்), அல்லது உங்கள் பகுதி தகவல்களை அறிய இருப்பிட அனுமதியை இயக்கவும்."
     elif lang == "hi":
-        return "कृपया बताएं कि आप किस तटीय क्षेत्र या बंदरगाह के पास मछली पकड़ने की योजना बना रहे हैं (जैसे थूथुकुडी, रामेश्वरम, कोच्चि, या विशाखापट्टनम), अथवा अपना स्थान साझा करें ताकि मैं स्थानीय समुद्री सुरक्षा की जानकारी दे सकूँ।"
+        return "कृपया बताएं कि आप किस तटीय क्षेत्र या बंदरगाह के पास मछली पकड़ने की योजना बना रहे हैं (जैसे कोच्चि, रामेश्वरम, मुंबई, या विशाखापट्टनम), अथवा अपना स्थान साझा करें ताकि मैं स्थानीय समुद्री सुरक्षा की जानकारी दे सकूँ।"
     else:
-        return "I could not determine your coastal location. Please specify which harbour or coastal area you are planning to fish near (e.g., Thoothukudi, Rameswaram, Kochi, or Visakhapatnam), or enable device location access so I can assess conditions in your local waters."
+        return "I could not determine your coastal location. Please specify which harbour or coastal area you are planning to fish near (e.g., Kochi, Rameswaram, Mumbai, or Visakhapatnam), or enable device location access so I can assess conditions in your local waters."
 
 
 def _get_relative_missing_clarification_text(lang: str) -> str:
     """Return prompt when user asks for 'here' / 'near me' but device location is unavailable."""
     if lang == "hi":
-        return "आपकी क्वेरी में 'यहाँ' / 'मेरे पास' की स्थिति पूछी गई है, लेकिन डिवाइस स्थान की अनुमति उपलब्ध नहीं है। कृपया ब्राउज़र में स्थान अनुमति सक्षम करें अथवा अपने तटीय शहर (जैसे कोच्चि, मुंबई, थूथुकुडी) का नाम बताएं।"
+        return "आपकी क्वेरी में 'यहाँ' / 'मेरे पास' की स्थिति पूछी गई है, लेकिन डिवाइस स्थान की अनुमति उपलब्ध नहीं है। कृपया ब्राउज़र में स्थान अनुमति सक्षम करें अथवा अपने तटीय शहर (जैसे कोच्चि, मुंबई, चेन्नई) का नाम बताएं।"
     elif lang == "ta":
-        return "உங்கள் வினவல் 'இங்கே' / 'அருகில்' உள்ள நிலவரத்தைக் கேட்கிறது, ஆனால் சாதன இருப்பிட அனுமதி கிடைக்கவில்லை. தயவுசெய்து சாதன இருப்பிட அனுமதியை வழங்கவும் அல்லது உங்கள் கடலோர நகரத்தைக் குறிப்பிடவும் (எ.கா. கொச்சி, மும்பை, தூத்துக்குடி)."
+        return "உங்கள் வினவல் 'இங்கே' / 'அருகில்' உள்ள நிலவரத்தைக் கேட்கிறது, ஆனால் சாதன இருப்பிட அனுமதி கிடைக்கவில்லை. தயவுசெய்து சாதன இருப்பிட அனுமதியை வழங்கவும் அல்லது உங்கள் கடலோர நகரத்தைக் குறிப்பிடவும் (எ.கா. கொச்சி, மும்பை, சென்னை)."
     else:
-        return "You asked for conditions 'here', but device location access is not available. Please allow location access in your browser or specify your coastal town (e.g. Kochi, Mumbai, Thoothukudi)."
+        return "You asked for conditions 'here', but device location access is not available. Please allow location access in your browser or specify your coastal town (e.g. Kochi, Mumbai, Chennai)."
 
 
 def _get_inland_clarification_text(
@@ -711,7 +711,7 @@ def _get_inland_clarification_text(
             f"• **निकटतम समुद्र तट**: {dist_str} किमी\n"
             f"• **मत्स्य क्षेत्र (PFZ)**: इस स्थान पर लागू नहीं\n"
             f"• **ज्वार-भाटा (Tides)**: इस स्थान पर लागू नहीं\n\n"
-            f"मत्स्य पालन की स्थिति जांचने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, थूथुकुडी) का चयन करें।"
+            f"मत्स्य पालन की स्थिति जांचने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, रामेश्वरम) का चयन करें।"
         )
     elif lang == "ta":
         return (
@@ -721,7 +721,7 @@ def _get_inland_clarification_text(
             f"• **அருகிலுள்ள கடற்கரை**: {dist_str} கி.மீ\n"
             f"• **மீன்பிடி மண்டலங்கள்**: இந்த இடத்தில் பொருந்தாது\n"
             f"• **கடல் அலைகள் (Tides)**: இந்த இடத்தில் பொருந்தாது\n\n"
-            f"மீன்பிடி நிலைமைகளை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, தூத்துக்குடி) தேர்வு செய்யவும்."
+            f"மீன்பிடி நிலைமைகளை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, ராமேஸ்வரம்) தேர்வு செய்யவும்."
         )
     else:
         return (
@@ -731,8 +731,9 @@ def _get_inland_clarification_text(
             f"• **Nearest coastline**: {dist_str} km\n"
             f"• **Fishing zones**: Not applicable at this location\n"
             f"• **Tides**: Not applicable at this location\n\n"
-            f"Choose a coastal location (such as Kochi, Mumbai, or Thoothukudi) to check fishing conditions."
+            f"Choose a coastal location (such as Kochi, Mumbai, Chennai, or Rameswaram) to check fishing conditions."
         )
+
 
 
 def detect_and_parse(state: ORCAState) -> dict:
@@ -996,20 +997,20 @@ def detect_and_parse(state: ORCAState) -> dict:
                 inland_ocean_text = (
                     f"आपकी वर्तमान स्थिति **{resolved['name']}** अंतर्देशीय (inland) है, इसलिए यहाँ स्थानीय ज्वार-भाटा या समुद्री जल स्तर का माप लागू नहीं होता है।\n\n"
                     f"समुद्री जल स्तर या ज्वार की स्थिति देखने के लिए किसी तटीय बंदरगाह का नाम बताएं:\n"
-                    f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **थूथुकुडी (Thoothukudi)**"
+                    f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **विशाखापट्टनम (Visakhapatnam)**"
                 )
             elif detected_lang == "ta":
                 inland_ocean_text = (
                     f"உங்கள் தற்போதைய இருப்பிடம் **{resolved['name']}** உள்நாட்டுப் பகுதியாகும், எனவே உள்ளூர் கடல் அலை அல்லது கடல் நீர்மட்ட அளவீடு இங்கு பொருந்தாது.\n\n"
                     f"கடல் அலை அல்லது நீர்மட்ட தகவல்களை அறிய கடலோர இடத்தை முயற்சிக்கவும்:\n"
-                    f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **தூத்துக்குடி (Thoothukudi)**"
+                    f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **விசாகப்பட்டினம் (Visakhapatnam)**"
                 )
             else:
                 inland_ocean_text = (
                     f"Your current location is inland in **{resolved['name']}**, so a local tide or sea-water level measurement is not applicable here.\n\n"
                     f"{resolved['name']} is inland and has no direct marine tidal coastline. I can check the tide or water level for a coastal location instead.\n\n"
                     f"Try a coastal location:\n"
-                    f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Thoothukudi**"
+                    f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Visakhapatnam**"
                 )
 
             inland_ocean_plan: AnswerPlan = {
@@ -1155,17 +1156,17 @@ def detect_and_parse(state: ORCAState) -> dict:
             if detected_lang == "hi":
                 inland_pfz_text = (
                     f"आपकी वर्तमान स्थिति **{resolved['name']}** अंतर्देशीय (inland) है ({dist_str} किमी समुद्र तट से दूर)। यहाँ समुद्री मत्स्य संभावित क्षेत्र (PFZ) लागू नहीं होता है।\n\n"
-                    f"मत्स्य संभावित क्षेत्र देखने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, थूथुकुडी) का चयन करें।"
+                    f"मत्स्य संभावित क्षेत्र देखने के लिए किसी तटीय स्थान (जैसे कोच्चि, मुंबई, चेन्नई, रामेश्वरम) का चयन करें।"
                 )
             elif detected_lang == "ta":
                 inland_pfz_text = (
                     f"உங்கள் தற்போதைய இருப்பிடம் **{resolved['name']}** உள்நாட்டுப் பகுதியாகும் (கடற்கரையிலிருந்து {dist_str} கி.மீ). கடல் மீன்பிடி மண்டலங்கள் (PFZ) இங்கு பொருந்தாது.\n\n"
-                    f"மீன்பிடி மண்டலங்களை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, தூத்துக்குடி) தேர்வு செய்யவும்."
+                    f"மீன்பிடி மண்டலங்களை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, ராமேஸ்வரம்) தேர்வு செய்யவும்."
                 )
             else:
                 inland_pfz_text = (
                     f"You're currently in **{resolved['name']}**, which is inland ({dist_str} km from the nearest coast). Marine potential fishing zones (PFZ) are not applicable at this location.\n\n"
-                    f"Choose a coastal location (such as Kochi, Mumbai, Chennai, or Thoothukudi) to check fishing zones."
+                    f"Choose a coastal location (such as Kochi, Mumbai, Chennai, or Rameswaram) to check fishing zones."
                 )
             inland_pfz_plan: AnswerPlan = {
                 "intent": "PFZ_QUERY",

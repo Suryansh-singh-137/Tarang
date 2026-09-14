@@ -3,6 +3,9 @@
 import React from "react";
 import { Compass, Clock, Waves, Wind, AlertTriangle, ShieldCheck, Info } from "lucide-react";
 import { LiveConditionsSummary, RiskLabel, LocationStatus, LanguageCode } from "@/lib/types";
+import { useLocation } from "@/lib/locationContext";
+import { LocationUnavailable } from "@/components/location/LocationUnavailable";
+import { MarineContextBadge } from "@/components/location/MarineContextBadge";
 
 interface Props {
   liveConditions?: LiveConditionsSummary | null;
@@ -20,7 +23,9 @@ export const TripPlannerView: React.FC<Props> = ({
   latestAssistantMessage,
   onNavigateToChat,
 }) => {
-  const locName = liveConditions?.locationName || "Coastal Waters";
+  const { selectedLocation, marineContext } = useLocation();
+  const locName = selectedLocation?.name || liveConditions?.locationName || "Coastal Waters";
+  const isInland = marineContext?.type === "inland" || locationStatus === "inland";
   const wave = liveConditions?.waveHeightM ?? 0.85;
   const wind = liveConditions?.windSpeedKmh ?? 14.2;
   const sea = liveConditions?.seaState || "slight";
@@ -45,8 +50,9 @@ export const TripPlannerView: React.FC<Props> = ({
           </div>
           <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2">
             <span>Trip Planner & Windows</span>
-            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)]">
-              📍 {locName}
+            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)] flex items-center gap-1.5">
+              <span>📍 {locName}</span>
+              {marineContext && <MarineContextBadge type={marineContext.type} size="sm" />}
             </span>
           </h1>
         </div>
@@ -58,18 +64,8 @@ export const TripPlannerView: React.FC<Props> = ({
         </div>
       </div>
 
-      {locationStatus === "inland" ? (
-        <div className="bg-[var(--surface)] border border-amber-200 rounded-2xl p-8 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
-          <h2 className="text-base font-semibold text-[var(--ink)]">
-            Inland Location
-          </h2>
-          <p className="text-xs sm:text-sm text-[var(--ink-muted)] max-w-md mx-auto leading-relaxed">
-            Marine trip assessments and departure suitability windows are only applicable to coastal ports. Please select a coastal harbour to view trip conditions.
-          </p>
-        </div>
+      {isInland ? (
+        <LocationUnavailable featureName="Marine Departure Windows & Operational Suitability" />
       ) : (
         <div className="space-y-4">
           {/* Best Available Window Recommendation Card (PRD §47) */}

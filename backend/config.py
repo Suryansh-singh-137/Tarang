@@ -44,6 +44,10 @@ GROQ_MODEL_QUALITY: str = os.getenv("GROQ_MODEL_QUALITY", "openai/gpt-oss-120b")
 # Sarvam TTS configuration (Milestone 7)
 SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")
 
+# OpenWeather Geocoding configuration (PRD §8)
+OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
+OPENWEATHER_GEO_URL: str = "http://api.openweathermap.org/geo/1.0"
+
 # ---------------------------------------------------------------------------
 # HTTP client settings
 # ---------------------------------------------------------------------------

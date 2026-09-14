@@ -3,6 +3,9 @@
 import React from "react";
 import { Fish, MapPin, Compass, ExternalLink, AlertCircle, Info } from "lucide-react";
 import { MapGeoJSON, LocationStatus, LanguageCode } from "@/lib/types";
+import { useLocation } from "@/lib/locationContext";
+import { LocationUnavailable } from "@/components/location/LocationUnavailable";
+import { MarineContextBadge } from "@/components/location/MarineContextBadge";
 
 interface Props {
   geoJson?: MapGeoJSON | null;
@@ -21,6 +24,9 @@ export const FishingZonesView: React.FC<Props> = ({
   pfzData,
   onNavigateToMap,
 }) => {
+  const { selectedLocation, marineContext } = useLocation();
+  const effectiveLocationName = selectedLocation?.name || locationName;
+  const isInland = marineContext?.type === "inland" || locationStatus === "inland" || marineContext?.fishing_data_available === false;
   // Extract PFZ features from geoJson or pfzData
   const rawZones = geoJson?.features?.filter(
     (f) => f.properties?.feature_type === "pfz_zone" || f.properties?.type === "pfz"
@@ -70,8 +76,9 @@ export const FishingZonesView: React.FC<Props> = ({
           </div>
           <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2">
             <span>Fishing Zones</span>
-            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)]">
-              📍 {locationName}
+            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)] flex items-center gap-1.5">
+              <span>📍 {effectiveLocationName}</span>
+              {marineContext && <MarineContextBadge type={marineContext.type} size="sm" />}
             </span>
           </h1>
         </div>
@@ -86,19 +93,12 @@ export const FishingZonesView: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Case 1: Inland Location (PRD §53) */}
-      {locationStatus === "inland" ? (
-        <div className="bg-[var(--surface)] border border-amber-200 rounded-2xl p-8 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
-            <MapPin className="w-6 h-6" />
-          </div>
-          <h2 className="text-base font-semibold text-[var(--ink)]">
-            Inland Location
-          </h2>
-          <p className="text-xs sm:text-sm text-[var(--ink-muted)] max-w-md mx-auto leading-relaxed">
-            Marine fishing zone advisories are not applicable to your current inland location. Please specify or select a coastal harbour to view local fishing zones.
-          </p>
-        </div>
+      {/* Case 1: Inland Location (PRD §11 & §53) */}
+      {isInland ? (
+        <LocationUnavailable
+          featureName="Potential Fishing Zones (PFZ) & Chlorophyll Indicators"
+          onOpenMapPicker={onNavigateToMap}
+        />
       ) : zones.length === 0 ? (
         /* Case 2: No Zones Found */
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 text-center space-y-3">

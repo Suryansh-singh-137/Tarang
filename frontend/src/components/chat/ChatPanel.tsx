@@ -56,16 +56,13 @@ export const ChatPanel: React.FC<Props> = ({
 
           {/* Quick Locations pill chips (PRD Part 1 & 1C) */}
           <div className="w-full space-y-2 pt-1">
-            <span className="text-xs font-mono-data uppercase tracking-wider text-[var(--ink-subtle)] block">
-              Quick Locations
-            </span>
             <div className="flex flex-wrap items-center justify-center gap-2">
               {[
-                { name: "Thoothukudi", query: "Is it safe to fish near Thoothukudi today?" },
-                { name: "Rameswaram", query: "Check wave conditions and risk near Rameswaram" },
                 { name: "Kochi", query: "What is the sea state near Kochi harbour?" },
+                { name: "Mumbai", query: "What is the sea state near Mumbai harbour?" },
+                { name: "Chennai", query: "Is it safe to fish near Chennai today?" },
                 { name: "Visakhapatnam", query: "Is there any cyclone or hazard alert near Visakhapatnam?" },
-                { name: "Kanyakumari", query: "Can small motorized craft fish off Kanyakumari today?" },
+                { name: "Rameswaram", query: "Check wave conditions and risk near Rameswaram" },
               ].map((loc) => (
                 <button
                   key={loc.name}

@@ -54,7 +54,7 @@ _DEFAULT_FALLBACK = {
             "chlorophyll_mg_m3": 0.85,
             "advisory_date": "2026-09-11",
             "source": "fallback_pfz.json",
-            "description": "Moderate chlorophyll zone SE of Thoothukudi (fallback)",
+            "description": "Moderate chlorophyll zone in coastal waters (fallback)",
         },
     ],
     "nearest_zone_km": 28,

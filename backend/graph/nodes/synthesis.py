@@ -418,20 +418,20 @@ def _render_inland_ocean_applicability(lang: str, resolved: Optional[dict]) -> s
         return (
             f"आपकी वर्तमान स्थिति **{name}** अंतर्देशीय (inland) है, इसलिए यहाँ स्थानीय ज्वार-भाटा या समुद्री जल स्तर का माप लागू नहीं होता है।\n\n"
             f"समुद्री जल स्तर या ज्वार की स्थिति देखने के लिए किसी तटीय बंदरगाह का नाम बताएं:\n"
-            f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **थूथुकुडी (Thoothukudi)**"
+            f"• **मुंबई (Mumbai)**\n• **कोच्चि (Kochi)**\n• **चेन्नई (Chennai)**\n• **विशाखापट्टनम (Visakhapatnam)**"
         )
     elif lang == "ta":
         return (
             f"உங்கள் தற்போதைய இருப்பிடம் **{name}** உள்நாட்டுப் பகுதியாகும், எனவே உள்ளூர் கடல் அலை அல்லது கடல் நீர்மட்ட அளவீடு இங்கு பொருந்தாது.\n\n"
             f"கடல் அலை அல்லது நீர்மட்ட தகவல்களை அறிய கடலோர இடத்தை முயற்சிக்கவும்:\n"
-            f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **தூத்துக்குடி (Thoothukudi)**"
+            f"• **மும்பை (Mumbai)**\n• **கொச்சி (Kochi)**\n• **சென்னை (Chennai)**\n• **விசாகப்பட்டினம் (Visakhapatnam)**"
         )
     else:
         return (
             f"Your current location is inland in **{name}**, so a local tide or sea-water level measurement is not applicable here.\n\n"
             f"{name} is inland and has no direct marine tidal coastline. I can check the tide or water level for a coastal location instead.\n\n"
             f"Try a coastal location:\n"
-            f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Thoothukudi**"
+            f"• **Mumbai**\n• **Kochi**\n• **Chennai**\n• **Visakhapatnam**"
         )
 
 
@@ -844,7 +844,7 @@ USER-FACING RESPONSE POLICY (PRD §5.1, §8, §16, §19):
 9. If the intent is WEATHER_QUERY or SEA_LEVEL_PRESSURE_QUERY: summarize temperature, wind, and conditions for {location} in 2-3 short sentences. Do NOT mention PFZ, tides, or fishing risk.
 10. If the intent is TIDE_QUERY or WATER_LEVEL_QUERY:
     - For coastal locations: summarize water level above Chart Datum and whether the tide is rising or falling in 2 short sentences.
-    - For inland locations: explain that local coastal tide/water level measurements are not applicable to inland {location}, and suggest coastal harbours (e.g. Mumbai, Kochi, Chennai, Thoothukudi).
+    - For inland locations: explain that local coastal tide/water level measurements are not applicable to inland {location}, and suggest coastal harbours (e.g. Mumbai, Kochi, Chennai, Visakhapatnam).
 11. If the intent is PFZ_QUERY: refer to it as 'Fishing Potential Indicator' (satellite chlorophyll proxy), never an 'official PFZ advisory'. State distance and note that satellite data does not guarantee fish.
 12. If cached data was used (e.g. PFZ), state: 'Some fishing-zone data is from the latest available dataset rather than live data.'
 13. NEVER state a numeric value that is not present in the provided evidence or location coordinates.

@@ -25,6 +25,8 @@ import {
 } from "@/lib/types";
 import { streamQuery } from "@/lib/api";
 import { translations } from "@/lib/i18n";
+import { useLocation } from "@/lib/locationContext";
+import { LocationSelector } from "@/components/location/LocationSelector";
 
 // Dynamic Leaflet import to prevent any SSR hydration mismatch
 const MarineMap = dynamic(
@@ -44,6 +46,13 @@ function AppWorkspace() {
   const searchParams = useSearchParams();
   const initialQueryHandled = useRef(false);
 
+  const {
+    selectedLocation,
+    marineContext,
+    updateFromQueryResult,
+    syncWithSession,
+  } = useLocation();
+
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -56,9 +65,9 @@ function AppWorkspace() {
   const [mapGeoJson, setMapGeoJson] = useState<MapGeoJSON | null>(null);
   const [currentRiskLabel, setCurrentRiskLabel] = useState<RiskLabel>("LOW");
   const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary>({
-    locationName: "Thoothukudi Harbour",
-    lat: 8.7642,
-    lon: 78.1348,
+    locationName: selectedLocation?.name || "Coastal Harbour",
+    lat: selectedLocation?.lat || 9.9312,
+    lon: selectedLocation?.lon || 76.2673,
     waveHeightM: 0.85,
     windSpeedKmh: 11.8,
     seaState: "slight",
@@ -82,6 +91,23 @@ function AppWorkspace() {
 
   // Server-authoritative conversation session ID
   const [conversationId] = useState<string>(() => "conv-" + Math.random().toString(36).substring(2, 11));
+
+  useEffect(() => {
+    if (conversationId) {
+      syncWithSession(conversationId);
+    }
+  }, [conversationId, syncWithSession]);
+
+  useEffect(() => {
+    if (selectedLocation) {
+      setLiveConditions((prev) => ({
+        ...prev,
+        lat: selectedLocation.lat,
+        lon: selectedLocation.lon,
+        locationName: selectedLocation.name,
+      }));
+    }
+  }, [selectedLocation]);
 
   const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
@@ -200,6 +226,11 @@ function AppWorkspace() {
           setProgressSteps((prev) => [...prev, progressData]);
         },
         onResult: (result) => {
+          // If server returned canonical selected_location, sync with client LocationContext
+          if (result.selected_location) {
+            updateFromQueryResult(result.selected_location, result.marine_context);
+          }
+
           // Update assistant message with canonical response data
           setMessages((prev) =>
             prev.map((msg) =>
@@ -321,9 +352,11 @@ function AppWorkspace() {
         request_id: requestId,
         conversation_id: conversationId,
         device_location: deviceLocation,
-        user_lat: userCoords?.lat ?? null,
-        user_lon: userCoords?.lon ?? null,
-        user_location_name: null,
+        selected_location: selectedLocation,
+        marine_context: marineContext,
+        user_lat: userCoords?.lat ?? (selectedLocation ? selectedLocation.lat : null),
+        user_lon: userCoords?.lon ?? (selectedLocation ? selectedLocation.lon : null),
+        user_location_name: selectedLocation ? selectedLocation.name : null,
         language: currentLanguage,
       }
     );
@@ -414,17 +447,8 @@ function AppWorkspace() {
         <div className="flex items-center gap-3 sm:gap-4 font-mono-data text-[11px]">
           <span className="hidden lg:inline text-[var(--ink-subtle)]">EST. 2024 / COASTAL SYSTEMS</span>
           <span className="hidden lg:inline text-[var(--border)]">|</span>
-          <button
-            type="button"
-            onClick={() => requestBrowserLocation(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium hover:bg-[var(--foam)]/80 transition-colors border border-[var(--current)]/20 cursor-pointer"
-            title={userCoords ? "GPS active. Tap to refresh location." : "Tap to detect your current location"}
-          >
-            <span className="w-2 h-2 rounded-full bg-[var(--current)] animate-pulse" />
-            <span className="truncate max-w-[150px]">
-              📍 {locationStatus === "inland" ? "Delhi (Inland)" : liveConditions?.locationName || (userCoords ? `${userCoords.lat.toFixed(2)}°N, ${userCoords.lon.toFixed(2)}°E` : "Enable GPS")}
-            </span>
-          </button>
+          {/* Universal Dynamic Location Selector */}
+          <LocationSelector />
 
           {/* Link back to landing */}
           <Link

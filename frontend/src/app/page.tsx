@@ -11,16 +11,18 @@ import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 import { LanguageCode, LiveConditionsSummary } from "@/lib/types";
 import { ArrowRight } from "lucide-react";
+import { useLocation } from "@/lib/locationContext";
+import { LocationSelector } from "@/components/location/LocationSelector";
 
 export default function Home() {
   const router = useRouter();
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>("en");
-  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const { selectedLocation, marineContext } = useLocation();
 
   const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary>({
-    locationName: "Thoothukudi Harbour",
-    lat: 8.7642,
-    lon: 78.1348,
+    locationName: selectedLocation?.name || "Coastal Harbour",
+    lat: selectedLocation?.lat || 9.9312,
+    lon: selectedLocation?.lon || 76.2673,
     waveHeightM: 0.85,
     windSpeedKmh: 11.8,
     seaState: "slight",
@@ -29,32 +31,16 @@ export default function Home() {
     isFallback: false,
   });
 
-  // Request browser location for real-time instrument readout
-  const requestBrowserLocation = () => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        setUserCoords({ lat, lon });
-        setLiveConditions((prev) => ({
-          ...prev,
-          lat,
-          lon,
-          locationName: `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`,
-        }));
-      },
-      (err) => {
-        console.warn("[LANDING] Geolocation request error:", err.message);
-      },
-      { timeout: 10000, maximumAge: 60000 }
-    );
-  };
-
   useEffect(() => {
-    requestBrowserLocation();
-  }, []);
+    if (selectedLocation) {
+      setLiveConditions((prev) => ({
+        ...prev,
+        lat: selectedLocation.lat,
+        lon: selectedLocation.lon,
+        locationName: selectedLocation.name,
+      }));
+    }
+  }, [selectedLocation]);
 
   const handleLaunchAppWithQuery = (query: string) => {
     router.push(`/app?q=${encodeURIComponent(query)}`);
@@ -104,18 +90,8 @@ export default function Home() {
           <span className="hidden lg:inline text-[var(--ink-subtle)]">EST. 2024 / COASTAL SYSTEMS</span>
           <span className="hidden lg:inline text-[var(--border)]">|</span>
 
-          {/* GPS instrument tag */}
-          <button
-            type="button"
-            onClick={requestBrowserLocation}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium hover:bg-[var(--foam)]/80 transition-colors border border-[var(--current)]/20 cursor-pointer"
-            title={userCoords ? "GPS active. Tap to refresh." : "Tap to detect device location"}
-          >
-            <span className="w-2 h-2 rounded-full bg-[var(--current)] animate-pulse" />
-            <span className="truncate max-w-[150px]">
-              📍 {userCoords ? `${userCoords.lat.toFixed(2)}°N, ${userCoords.lon.toFixed(2)}°E` : "Thoothukudi Harbour"}
-            </span>
-          </button>
+          {/* Universal Dynamic Location Selector */}
+          <LocationSelector />
 
           {/* Language Toggle (EN / हिं / த) */}
           <LanguageToggle

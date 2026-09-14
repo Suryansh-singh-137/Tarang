@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Layers, Fish, AlertTriangle, Maximize2, HelpCircle } from "lucide-react";
 import { ShorelineCompass } from "../illustrations/ShorelineCompass";
 import { MapGeoJSON, RiskLabel } from "@/lib/types";
+import { useLocation } from "@/lib/locationContext";
 
 interface Props {
   geoJson?: MapGeoJSON | null;
@@ -18,6 +19,7 @@ export const MarineMap: React.FC<Props> = ({
   locationName = "Coastal Waters",
   className = "w-full h-full min-h-[350px]",
 }) => {
+  const { selectedLocation, selectCoordinates } = useLocation();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const geoLayerGroupRef = useRef<any>(null);
@@ -41,9 +43,12 @@ export const MarineMap: React.FC<Props> = ({
       L = (await import("leaflet")).default;
 
       if (!mapInstanceRef.current && mapContainerRef.current) {
+        const centerLat = selectedLocation?.lat || 10.5;
+        const centerLon = selectedLocation?.lon || 78.5;
+
         const map = L.map(mapContainerRef.current, {
-          center: [10.5, 78.5],
-          zoom: 6,
+          center: [centerLat, centerLon],
+          zoom: selectedLocation ? 8 : 6,
           zoomControl: true,
           attributionControl: false,
         });
@@ -62,6 +67,35 @@ export const MarineMap: React.FC<Props> = ({
           })
           .addTo(map);
 
+        // Click to pick location
+        map.on("click", (e: any) => {
+          const lat = Number(e.latlng.lat.toFixed(4));
+          const lon = Number(e.latlng.lng.toFixed(4));
+          const btnId = `btn-set-loc-${Math.round(lat * 100)}-${Math.round(lon * 100)}`;
+          L.popup()
+            .setLatLng(e.latlng)
+            .setContent(
+              `<div style="font-family: sans-serif; font-size: 12px; padding: 4px; color: #1c1917;">
+                <div style="font-weight: 600; margin-bottom: 2px;">Marine Point</div>
+                <div style="font-family: monospace; font-size: 11px; color: #57534e; margin-bottom: 6px;">${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E</div>
+                <button id="${btnId}" style="background: #f59e0b; color: #1c1917; border: none; border-radius: 6px; padding: 4px 8px; font-weight: 600; font-size: 11px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                  📍 Set Active Location
+                </button>
+              </div>`
+            )
+            .openOn(map);
+
+          setTimeout(() => {
+            const btn = document.getElementById(btnId);
+            if (btn) {
+              btn.onclick = () => {
+                selectCoordinates(lat, lon, undefined, "map");
+                map.closePopup();
+              };
+            }
+          }, 50);
+        });
+
         const layerGroup = L.layerGroup().addTo(map);
         mapInstanceRef.current = map;
         geoLayerGroupRef.current = layerGroup;
@@ -69,6 +103,8 @@ export const MarineMap: React.FC<Props> = ({
 
       if (hasGeoData) {
         renderFeatures(L);
+      } else if (selectedLocation && mapInstanceRef.current) {
+        mapInstanceRef.current.setView([selectedLocation.lat, selectedLocation.lon], 8);
       }
     };
 
