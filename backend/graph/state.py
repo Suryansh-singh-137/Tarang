@@ -129,8 +129,19 @@ ResponseMode = Literal[
 ]
 
 
+class RiskAssessment(TypedDict, total=False):
+    """Deterministic risk assessment output contract (PRD §25)."""
+    composite_score: Optional[float]
+    base_level: str
+    override_active: bool
+    override_reason: Optional[str]
+    final_level: str
+    critical_hazard: bool
+    data_completeness: float
+
+
 class AnswerPlan(TypedDict, total=False):
-    """Structured plan created before synthesis instructing how to shape the response (PRD §5)."""
+    """Structured plan created before synthesis instructing how to shape the response (PRD §5, §24)."""
     intent: str
     intent_name: str
     answer_type: str
@@ -149,6 +160,13 @@ class AnswerPlan(TypedDict, total=False):
     should_show_recommendation: bool
     should_show_warning: bool
     should_offer_followup: bool
+    # PRD §24 additions
+    evidence_scope: List[str]
+    primary_message_style: str
+    max_primary_sentences: int
+    show_score: bool
+    safety_action: str
+    intent_groups: List[Dict[str, Any]]
 
 
 class ParsedIntent(TypedDict):
@@ -186,6 +204,8 @@ class ParsedIntent(TypedDict):
     intent_name: NotRequired[Optional[str]]
     response_mode: NotRequired[Optional[str]]
     answer_plan: NotRequired[Optional[AnswerPlan]]
+    intent_groups: NotRequired[Optional[List[Dict[str, Any]]]]
+    is_multi_intent: NotRequired[Optional[bool]]
 
 
 class ConversationTurn(TypedDict):
@@ -277,5 +297,7 @@ class ORCAState(TypedDict):
     previous_marine_assessment: NotRequired[Optional[Dict[str, Any]]]
     semantic_context: NotRequired[Optional[Dict[str, Any]]]
     is_recheck: NotRequired[Optional[bool]]
+    is_multi_intent: NotRequired[Optional[bool]]
+    intent_groups: NotRequired[Optional[List[Dict[str, Any]]]]
 
 

@@ -119,24 +119,21 @@ def _risk_label(score: float) -> str:
 def _recommendation(risk_label: str) -> str:
     return {
         "LOW": (
-            "Conditions appear manageable. Proceed with standard safety precautions. "
-            "This is a decision-support assessment, not an official safety clearance."
+            "Conditions are currently rated low risk by Tarang. Check the latest official advisory before leaving shore."
         ),
         "MODERATE": (
-            "Exercise caution. Monitor conditions closely before and during the voyage. "
-            "This is a decision-support assessment, not an official safety clearance."
+            "Conditions need caution. Check the latest advisory and sea conditions before leaving shore."
         ),
         "HIGH": (
-            "Conditions are adverse. Avoid venturing to sea if possible. "
-            "Consult IMD/INCOIS advisories before departure. "
-            "This is a decision-support assessment, not an official safety clearance."
+            "Conditions are risky right now. Avoid going out until conditions improve and official advisories allow it."
         ),
         "EXTREME": (
-            "Do NOT go to sea. Conditions are dangerous. "
-            "Follow all official advisories from IMD / INCOIS / Coast Guard. "
-            "This is a decision-support assessment, not an official safety clearance."
+            "Conditions are dangerous right now. Avoid going out until conditions improve and official advisories allow it."
         ),
-    }[risk_label]
+        "UNKNOWN": (
+            "Tarang does not have enough reliable data to assess the trip safely right now."
+        ),
+    }.get(risk_label, "Tarang does not have enough reliable data to assess the trip safely right now.")
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +200,7 @@ def risk_agent(state: ORCAState) -> dict:
         and hazard.get("data_status") == "live"
         and bool(hazard.get("data"))
     )
+    total_signals = 4
     critical_data_ok = weather_ok and hazard_ok and all_critical_data_available(dq_reports)
     logger.info(f"[TRACE][5] risk_agent critical_data_ok={critical_data_ok} (weather_ok={weather_ok}, hazard_ok={hazard_ok})")
 
@@ -210,6 +208,13 @@ def risk_agent(state: ORCAState) -> dict:
         logger.warning("[Risk] CRITICAL DATA MISSING/UNAVAILABLE. Failing closed with UNKNOWN.")
         data = {
             "composite_score": None,
+            "base_level": "UNKNOWN",
+            "final_level": "UNKNOWN",
+            "override_active": False,
+            "override_reason": "Missing or unavailable critical marine weather/hazard data",
+            "critical_hazard": False,
+            "data_completeness": 0.0,
+            "risk_inputs_evaluated": f"0/{total_signals}",
             "risk_label": "UNKNOWN",
             "component_scores": {},
             "weights": config.RISK_WEIGHTS,
@@ -217,7 +222,7 @@ def risk_agent(state: ORCAState) -> dict:
             "evidence_coverage": "insufficient",
             "inputs": {},
             "recommendation": (
-                "UNKNOWN: Unable to determine safe conditions due to missing or unavailable critical marine data. "
+                "Tarang does not have enough reliable data to assess the trip safely right now. "
                 "Do NOT go to sea until official live data is available. "
                 "Consult local port authorities immediately."
             ),
@@ -297,9 +302,43 @@ def risk_agent(state: ORCAState) -> dict:
     # ---- Weighted composite ----
     composite = sum(raw_scores[k] * weights[k] for k in weights)
     composite = round(composite, 1)
-    label = _risk_label(composite)
+    base_level = _risk_label(composite)
 
-    logger.info("[Risk] Score=%.1f (%s) signals=%d/%d", composite, label, available_signals, total_signals)
+    # ---- PRD §7, §25: Deterministic Safety Override Logic ----
+    override_active = False
+    override_reason = None
+    final_level = base_level
+    critical_hazard = False
+
+    warnings_lower = [str(w).lower() for w in active_warnings]
+    has_severe_warning = any(
+        w in warnings_lower for w in ["cyclone_warning", "severe_lightning", "gale_warning", "storm_warning", "squall"]
+    ) or any("lightning" in w for w in warnings_lower)
+
+    if hazard_level == "extreme" or "cyclone_warning" in warnings_lower:
+        critical_hazard = True
+        override_active = True
+        override_reason = f"Active severe hazard detected ({hazard_level})"
+        final_level = "EXTREME"
+    elif hazard_level == "high" or has_severe_warning:
+        critical_hazard = True
+        if base_level in ("LOW", "MODERATE"):
+            override_active = True
+            override_reason = f"High hazard advisory/warning ({hazard_level})"
+            final_level = "HIGH"
+    elif hazard_level == "moderate":
+        if base_level == "LOW":
+            override_active = True
+            override_reason = "Moderate hazard advisory requires at least CAUTION"
+            final_level = "MODERATE"
+
+    label = final_level
+    data_completeness = round(available_signals / total_signals, 2)
+
+    logger.info(
+        "[Risk] Score=%.1f (base=%s, final=%s, override=%s) signals=%d/%d",
+        composite, base_level, final_level, override_active, available_signals, total_signals,
+    )
 
     # ---- Milestone 4: Build structured RiskComponent breakdown ----
     component_meta = {
@@ -346,6 +385,13 @@ def risk_agent(state: ORCAState) -> dict:
 
     data = {
         "composite_score": composite,
+        "base_level": base_level,
+        "final_level": final_level,
+        "override_active": override_active,
+        "override_reason": override_reason,
+        "critical_hazard": critical_hazard,
+        "data_completeness": data_completeness,
+        "risk_inputs_evaluated": f"{available_signals}/{total_signals}",
         "risk_label": label,
         # Legacy flat component_scores kept for backward compatibility
         "component_scores": {k: v for k, v in raw_scores.items()},
@@ -372,7 +418,7 @@ def risk_agent(state: ORCAState) -> dict:
     summary = (
         f"Overall decision-support risk score: {composite}/100 ({label}). "
         f"Top factor: {components[0]['label']} (contribution: {components[0]['contribution']:.1f}/100). "
-        f"Evidence coverage: {evidence_coverage} signal types."
+        f"Risk inputs evaluated: {evidence_coverage}."
     )
 
     evidence: list[EvidenceItem] = [

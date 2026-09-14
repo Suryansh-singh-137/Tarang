@@ -254,6 +254,101 @@ _RECHECK_PATTERNS: list[re.Pattern] = [
 ]
 
 
+def _detect_multi_intent(text: str, default_location: Optional[str] = None) -> Optional[list[dict[str, Any]]]:
+    """
+    Detects supported multi-intent combinations (PRD §16, §17).
+    Supported combinations:
+      - water_level + safety
+      - tide + safety
+      - weather + safety
+      - hazard + safety
+      - pfz + safety
+      - location + weather
+      - location + fishing zone
+    """
+    text_lower = text.lower().strip()
+
+    if _is_risk_explanation(text):
+        return None
+
+    # Check for punctuation or conjunction dividing compound requests
+    has_divider = bool(re.search(r"(\?|\.|\band\b|\baur\b|\b&|\balso\b)", text_lower))
+
+    has_loc = any(pat.search(text) for pat in _LOCATION_QUERY_PATTERNS)
+    has_wl = any(pat.search(text) for pat in _WATER_LEVEL_PATTERNS)
+    has_tide = any(pat.search(text) for pat in _TIDE_PATTERNS)
+    has_pressure = any(pat.search(text) for pat in _PRESSURE_PATTERNS)
+
+    _TRIP_PATTERNS = [
+        re.compile(r"\b(can i go|can we go|should i go|should we go|okay to go|safe to go|go out|head out|sail out|going out|venture out|go to sea|head to sea|out to sea)\b", re.I),
+        re.compile(r"\b(kya main ja sakta|kya hum ja sakte|jaana sahi hai|jaana theek hai|samundar mein utarna)\b", re.I),
+        re.compile(r"\b(safe to fish|safe for fishing|fish there|fishing there)\b", re.I),
+    ]
+    has_trip = any(p.search(text) for p in _TRIP_PATTERNS)
+    has_safety = has_trip or any(kw in text_lower for kw in ["safe", "safety", "surakshit", "paadhukaappu", "is it safe", "kya safe"])
+
+    pfz_keywords = {"pfz", "fishing zone", "fish zone", "potential fishing", "chlorophyll", "machli zone"}
+    has_pfz = any(kw in text_lower for kw in pfz_keywords) or (("fish" in text_lower or "machli" in text_lower) and not has_safety)
+
+    hazard_keywords = {"cyclone", "storm", "lightning", "gale", "high wave warning", "tsunami", "tufan", "bijli", "warning", "alert"}
+    has_hazard = any(kw in text_lower for kw in hazard_keywords)
+
+    weather_keywords = {"weather", "temperature", "rainfall", "rain", "wind speed", "mausam", "baarish", "hawa"}
+    has_weather = any(kw in text_lower for kw in weather_keywords) or has_pressure
+
+    loc_val = default_location or "the requested location"
+
+    # Multi-intent 1: water_level + safety
+    if has_wl and has_safety:
+        return [
+            {"intent": "WATER_LEVEL_QUERY", "location": loc_val},
+            {"intent": "MARINE_SAFETY_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 2: tide + safety
+    if has_tide and has_safety:
+        return [
+            {"intent": "TIDE_QUERY", "location": loc_val},
+            {"intent": "MARINE_SAFETY_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 3: weather + safety
+    if has_weather and has_safety and has_divider:
+        return [
+            {"intent": "WEATHER_QUERY", "location": loc_val},
+            {"intent": "MARINE_SAFETY_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 4: hazard + safety
+    if has_hazard and has_safety and has_divider:
+        return [
+            {"intent": "HAZARD_QUERY", "location": loc_val},
+            {"intent": "MARINE_SAFETY_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 5: pfz + safety
+    if has_pfz and has_safety and has_divider:
+        return [
+            {"intent": "PFZ_QUERY", "location": loc_val},
+            {"intent": "MARINE_SAFETY_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 6: location + weather
+    if has_loc and has_weather and has_divider:
+        return [
+            {"intent": "LOCATION_QUERY", "location": loc_val},
+            {"intent": "WEATHER_QUERY", "location": loc_val},
+        ]
+
+    # Multi-intent 7: location + fishing zone
+    if has_loc and has_pfz and has_divider:
+        return [
+            {"intent": "LOCATION_QUERY", "location": loc_val},
+            {"intent": "PFZ_QUERY", "location": loc_val},
+        ]
+
+    return None
+
 
 def classify_query_intent(
     text: str,
@@ -263,6 +358,7 @@ def classify_query_intent(
     Returns (intent_name, query_type, needs_dict, response_mode).
 
     Intents:
+      - MULTI_INTENT (when multiple sub-intents detected)
       - LOCATION_QUERY
       - WEATHER_QUERY
       - TIDE_QUERY
@@ -277,6 +373,42 @@ def classify_query_intent(
       - GENERAL_FOLLOWUP
     """
     text_lower = text.lower().strip()
+
+    # 0. Check multi-intent (PRD §16, §17)
+    multi = _detect_multi_intent(text)
+    if multi:
+        has_safe = any(g["intent"] == "MARINE_SAFETY_QUERY" for g in multi)
+        has_wl_or_tide = any(g["intent"] in ("WATER_LEVEL_QUERY", "TIDE_QUERY") for g in multi)
+        has_weath = any(g["intent"] == "WEATHER_QUERY" for g in multi)
+        has_pf = any(g["intent"] == "PFZ_QUERY" for g in multi)
+
+        if has_safe:
+            return "MULTI_INTENT", "safety_check", {
+                "needs_weather": True,
+                "needs_pfz": True,
+                "needs_hazard": True,
+                "needs_geofence": True,
+                "needs_risk": True,
+                "needs_ocean": has_wl_or_tide,
+            }, "DECISION_ASSESSMENT"
+        elif has_weath:
+            return "MULTI_INTENT", "weather_only", {
+                "needs_weather": True,
+                "needs_pfz": False,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+            }, "DATA_SUMMARY"
+        elif has_pf:
+            return "MULTI_INTENT", "pfz_lookup", {
+                "needs_weather": False,
+                "needs_pfz": True,
+                "needs_hazard": False,
+                "needs_geofence": False,
+                "needs_risk": False,
+                "needs_ocean": False,
+            }, "DATA_SUMMARY"
 
     # 1. Explanation intent (takes precedence)
     if _is_risk_explanation(text):
@@ -1218,6 +1350,33 @@ def detect_and_parse(state: ORCAState) -> dict:
         required_caps = ["risk"]
         required_agents = ["risk_agent"]
         resp_mode_str = "safety_assessment"
+    elif intent_name == "MULTI_INTENT":
+        multi_groups = _detect_multi_intent(raw, loc_name) or []
+        for g in multi_groups:
+            g["location"] = loc_name
+        has_safe = any(g.get("intent") == "MARINE_SAFETY_QUERY" for g in multi_groups)
+        has_ocean = any(g.get("intent") in ("WATER_LEVEL_QUERY", "TIDE_QUERY") for g in multi_groups)
+        has_weather = any(g.get("intent") == "WEATHER_QUERY" for g in multi_groups)
+        has_pfz = any(g.get("intent") == "PFZ_QUERY" for g in multi_groups)
+
+        if has_safe:
+            card_type = "SafetyCard"
+            pres_hint = "safety_card"
+            required_caps = ["weather", "pfz", "ocean", "hazard", "geofence", "risk"]
+            required_agents = ["weather_agent", "pfz_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
+            resp_mode_str = "safety_assessment"
+        else:
+            card_type = "WeatherCard" if has_weather else "PFZCard" if has_pfz else "OceanCard"
+            pres_hint = card_type.lower()
+            required_caps = []
+            if has_weather:
+                required_caps.append("weather")
+            if has_pfz:
+                required_caps.append("pfz")
+            if has_ocean:
+                required_caps.append("ocean")
+            required_agents = [f"{c}_agent" for c in required_caps]
+            resp_mode_str = "specialist_card"
     else:  # MARINE_SAFETY_QUERY / TRIP_QUERY / general
         card_type = "SafetyCard"
         pres_hint = "safety_card"
@@ -1230,7 +1389,7 @@ def detect_and_parse(state: ORCAState) -> dict:
         "intent_name": intent_name,
         "answer_type": card_type,
         "presentation_hint": pres_hint,
-        "primary_capability": "marine_safety_assessment" if intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY") else card_type.lower(),
+        "primary_capability": "multi_intent" if intent_name == "MULTI_INTENT" else "marine_safety_assessment" if intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY") else card_type.lower(),
         "requested_location": loc_name,
         "resolved_location": resolved,
         "required_capabilities": required_caps,
@@ -1241,10 +1400,12 @@ def detect_and_parse(state: ORCAState) -> dict:
         "should_answer_directly": True,
         "should_explain_applicability": False,
         "should_show_data": True,
-        "should_show_recommendation": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY"),
-        "should_show_warning": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "HAZARD_QUERY"),
+        "should_show_recommendation": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "MULTI_INTENT"),
+        "should_show_warning": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "HAZARD_QUERY", "MULTI_INTENT"),
         "should_offer_followup": True,
     }
+    if intent_name == "MULTI_INTENT":
+        coastal_plan["intent_groups"] = multi_groups
 
     new_intent: ParsedIntent = ParsedIntent(
         location_name=loc_name,
@@ -1266,6 +1427,8 @@ def detect_and_parse(state: ORCAState) -> dict:
         intent_name=intent_name,
         response_mode=resp_mode_str,
         answer_plan=coastal_plan,
+        intent_groups=multi_groups if intent_name == "MULTI_INTENT" else None,
+        is_multi_intent=intent_name == "MULTI_INTENT",
     )
 
     is_recheck = any(p.search(raw) for p in _RECHECK_PATTERNS)
@@ -1299,5 +1462,7 @@ def detect_and_parse(state: ORCAState) -> dict:
         "answer_plan": coastal_plan,
         "query_signature": query_sig,
         "is_recheck": is_recheck,
+        "is_multi_intent": intent_name == "MULTI_INTENT",
+        "intent_groups": multi_groups if intent_name == "MULTI_INTENT" else None,
     }
 

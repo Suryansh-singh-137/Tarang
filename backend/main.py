@@ -417,7 +417,7 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "risk_data": (
             final_state.get("risk_result", {}).get("data", {})
             if final_state.get("risk_result")
-            and final_state.get("risk_result", {}).get("status") == "success"
+            and final_state.get("risk_result", {}).get("status") in ("success", "insufficient_data")
             and intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "RISK_EXPLANATION")
             else None
         ),

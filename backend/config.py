@@ -38,8 +38,8 @@ OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
 
 # Groq configuration (Milestone 6)
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL_FAST: str = "openai/gpt-oss-20b"
-GROQ_MODEL_QUALITY: str = "openai/gpt-oss-120b"
+GROQ_MODEL_FAST: str = os.getenv("GROQ_MODEL_FAST", "openai/gpt-oss-20b")
+GROQ_MODEL_QUALITY: str = os.getenv("GROQ_MODEL_QUALITY", "openai/gpt-oss-120b")
 
 # Sarvam TTS configuration (Milestone 7)
 SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")

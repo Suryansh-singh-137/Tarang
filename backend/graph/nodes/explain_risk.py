@@ -169,63 +169,108 @@ def explain_risk(state: ORCAState) -> dict:
 
     components = d.get("components", [])
     total = d.get("composite_score", 0.0)
-    label = d.get("risk_label", "UNKNOWN")
+    label = d.get("risk_label", "UNKNOWN").upper()
     recommendation = d.get("recommendation", "")
-    evidence_coverage = d.get("evidence_coverage", "?")
 
-    lines: list[str] = [_INTROS.get(lang, _INTROS["en"]), ""]
-
-    # Emit the coverage note
-    if lang == "en":
-        lines.append(f"*Evidence coverage: {evidence_coverage} data signal types used.*")
-    elif lang == "hi":
-        lines.append(f"*साक्ष्य कवरेज: {evidence_coverage} डेटा संकेत प्रकार उपयोग किए गए।*")
-    else:
-        lines.append(f"*சான்று கவரேஜ்: {evidence_coverage} தரவு சமிக்ஞை வகைகள் பயன்படுத்தப்பட்டன.*")
-    lines.append("")
-
-    templates = _FACTOR_TEMPLATES.get(lang, _FACTOR_TEMPLATES["en"])
-
-    for comp in components:
-        factor_label = comp.get("label", "")
-        template = templates.get(factor_label)
-        if template:
-            try:
-                raw_value = comp.get("raw_value", 0)
-                # Ensure numeric type for templates expecting float formatting like {:.0f}
-                try:
-                    val_num = float(raw_value)
-                except (ValueError, TypeError):
-                    val_num = raw_value
-
-                line = template.format(
-                    raw_value=val_num,
-                    raw_unit=comp.get("raw_unit", ""),
-                    component_score=comp.get("component_score", 0),
-                    weight_pct=comp.get("weight", 0) * 100,
-                    contribution=comp.get("contribution", 0),
-                )
-                lines.append(line)
-            except (KeyError, ValueError, TypeError) as exc:
-                logger.warning("[ExplainRisk] Format error for %s: %s", factor_label, exc)
-                lines.append(
-                    f"• **{factor_label}**: score {comp.get('component_score', 0):.0f}/100 "
-                    f"→ contribution {comp.get('contribution', 0):.1f}"
-                )
+    # PRD §9: Generate simple, fisherman-friendly explanation
+    if lang == "hi":
+        if label == "LOW":
+            intro = "जोखिम अभी कम है क्योंकि समुद्र शांत है।"
+            cond = "लहरें छोटी हैं, हवा हल्की है और कोई बड़ी चेतावनी सक्रिय नहीं है।"
+        elif label == "MODERATE":
+            intro = "जोखिम मध्यम है और सावधानी बरतने की आवश्यकता है।"
+            cond = "मध्यम लहरों या हवा के कारण समुद्र की स्थिति पर नज़र रखें।"
+        elif label in ("HIGH", "EXTREME"):
+            intro = "जोखिम अभी अधिक है। समुद्र में जाना खतरनाक हो सकता है।"
+            cond = "प्रतिकूल लहरों, हवा या सक्रिय चेतावनी के कारण तट पर ही रहें।"
         else:
-            lines.append(
-                f"• **{factor_label}**: score {comp.get('component_score', 0):.0f}/100 "
-                f"→ contribution {comp.get('contribution', 0):.1f}"
-            )
+            intro = "वर्तमान में जोखिम की स्थिति का आकलन किया गया है।"
+            cond = "कृपया आधिकारिक चेतावनी का पालन करें।"
+        
+        main_factor = ""
+        if components:
+            top_name = components[0].get("label", "लहर ऊंचाई")
+            main_factor = f"स्कोर को प्रभावित करने वाला मुख्य कारक {top_name} है।"
+        
+        lines = [intro, cond]
+        if main_factor:
+            lines.append(main_factor)
+        if recommendation:
+            lines.append(recommendation)
+        else:
+            lines.append("तट छोड़ने से पहले नवीनतम आधिकारिक सलाह की जांच करें।")
+    elif lang == "ta":
+        if label == "LOW":
+            intro = "கடல் அமைதியாக இருப்பதால் ஆபத்து தற்போது குறைவாக உள்ளது."
+            cond = "அலைகள் சிறியவை, காற்று மென்மையானது மற்றும் பெரிய எச்சரிக்கை எதுவும் இல்லை."
+        elif label == "MODERATE":
+            intro = "ஆபத்து நடுத்தரமாக உள்ளது, கூடுதல் எச்சரிக்கை தேவை."
+            cond = "நடுத்தர அலைகள் அல்லது காற்றின் காரணமாக கடல் நிலையை கண்காணிக்கவும்."
+        elif label in ("HIGH", "EXTREME"):
+            intro = "ஆபத்து தற்போது அதிகமாக உள்ளது. கடலுக்கு செல்வதை தவிர்க்கவும்."
+            cond = "பாதகமான கடல் நிலை அல்லது செயலில் உள்ள எச்சரிக்கை காரணமாக கரையில் இருங்கள்."
+        else:
+            intro = "தற்போதைய ஆபத்து நிலை மதிப்பிடப்பட்டுள்ளது."
+            cond = "அதிகாரப்பூர்வ எச்சரிக்கைகளை பின்பற்றவும்."
 
-    total_fmt = _TOTALS.get(lang, _TOTALS["en"]).format(
-        total=total, label=label, recommendation=recommendation
-    )
-    lines.append(total_fmt)
-    lines.append(_DISCLAIMER.get(lang, _DISCLAIMER["en"]))
+        main_factor = ""
+        if components:
+            top_name = components[0].get("label", "அலை உயரம்")
+            main_factor = f"மதிப்பெண்ணை பாதிக்கும் முக்கிய காரணி {top_name} ஆகும்."
+
+        lines = [intro, cond]
+        if main_factor:
+            lines.append(main_factor)
+        if recommendation:
+            lines.append(recommendation)
+        else:
+            lines.append("புறப்படுவதற்கு முன் அதிகாரப்பூர்வ ஆலோசனையை சரிபார்க்கவும்.")
+    else:  # en (default)
+        if label == "LOW":
+            intro = "The risk is low because the sea is fairly calm right now."
+            cond = "Waves are small, wind is light, and no major hazard is active."
+        elif label == "MODERATE":
+            intro = "The risk is currently moderate and conditions need caution."
+            cond = "Moderate waves or winds require monitoring sea conditions closely."
+        elif label in ("HIGH", "EXTREME"):
+            intro = "The risk is currently high right now."
+            cond = "Adverse conditions or active weather warnings make venturing out unsafe."
+        else:
+            intro = "Tarang does not have enough reliable data to assess the trip safely right now."
+            cond = "Please consult local port authorities before leaving shore."
+
+        main_factor = ""
+        if components:
+            top_name = components[0].get("label", "Wave Height")
+            main_factor = f"The main factor affecting the score is {top_name}."
+
+        lines = [intro, cond]
+        if main_factor:
+            lines.append(main_factor)
+
+        if components:
+            lines.append("\n**Risk Factor Breakdown:**")
+            for comp in components:
+                lbl = comp.get("label", "")
+                tmpl = _FACTOR_TEMPLATES.get(lang, _FACTOR_TEMPLATES["en"]).get(lbl)
+                if tmpl:
+                    lines.append(tmpl.format(
+                        raw_value=comp.get("raw_value", "?"),
+                        raw_unit=comp.get("raw_unit", ""),
+                        component_score=comp.get("component_score", 0),
+                        weight_pct=comp.get("weight", 0) * 100,
+                        contribution=comp.get("contribution", 0),
+                    ))
+                else:
+                    lines.append(f"• **{lbl}**: {comp.get('component_score', 0):.0f}/100 ({comp.get('contribution', 0):.1f} pts)")
+
+        if recommendation:
+            lines.append("\n" + recommendation)
+        else:
+            lines.append("\nCheck the latest official advisory before leaving shore.")
 
     answer_text = "\n".join(lines)
-    logger.info("[ExplainRisk] Explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
+    logger.info("[ExplainRisk] Simple explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
 
     return {
         "final_answer_text": answer_text,

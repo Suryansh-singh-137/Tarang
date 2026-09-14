@@ -108,14 +108,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         "error": "இந்த இடத்திற்கான நேரடி {aspect} தரவு தற்போது கிடைக்கவில்லை.",
         "fallback_note": "⚠️ **தற்காலிக சேமிக்கப்பட்ட தரவு பயன்படுத்தப்படுகிறது**: {agents}.",
         "pfz_proxy_note": (
-            "ℹ️ **தரவு தர குறிப்பு**: மீன்பிடி வலயங்கள் INCOIS Oceansat-2 குளோரோஃபில்-a "
-            "வரலாற்று செயற்கைக்கோள் தரவை அடிப்படையாகக் கொண்ட வைஞ்ஞானிக சுட்டி "
-            "— இது அதிகாரப்பூர்வ INCOIS PFZ ஆலோசனை அல்ல."
+            "Data quality note: Fishing potential zones are derived from INCOIS Oceansat-2 satellite proxy."
         ),
-        "cyclone_note": "ℹ️ **புயல் ஆலோசனை**: நேரடி புயல் எச்சரிக்கைகளுக்கு IMD/INCOIS-ஐ நேரடியாக சரிபார்க்கவும்.",
+        "cyclone_note": "Cyclone advisory: Real-time warnings require consultation with IMD or INCOIS.",
         "disclaimer": (
-            "⚠️ **மறுப்பு**: இது ஒரு முடிவு-ஆதரவு மதிப்பீடு, அதிகாரப்பூர்வ பாதுகாப்பு அனுமதி அல்ல. "
-            "IMD, INCOIS மற்றும் இந்திய கடலோர காவலர் ஆலோசனைகளை பின்பற்றவும்."
+            "Disclaimer: This is a decision-support assessment, not an official safety clearance."
         ),
     },
 }
@@ -153,21 +150,14 @@ _TIME_LABELS: dict[str, dict[str, str]] = {
     },
 }
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _deg_to_compass(deg: Optional[float]) -> str:
     if deg is None:
         return "—"
-    dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
-            "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+    dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
     return dirs[round(deg / 22.5) % 16]
 
-
-# ---------------------------------------------------------------------------
-# Template renderer
-# ---------------------------------------------------------------------------
 
 def _render_template(
     lang: str,
