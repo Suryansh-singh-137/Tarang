@@ -192,7 +192,36 @@ def _extract_time_window(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Risk-explanation query detection (Milestone 4)
+# Message quality classification (PRD §5.1)
+# ---------------------------------------------------------------------------
+
+_EMPTY_RE = re.compile(r"^\s*$")
+_AMBIGUOUS_RE = re.compile(r"^[\s\.\,\?\!\:\;\-\_\'\"\`\~\@\#\$\%\^\&\*\(\)\/\\\|]+$")
+_ACKNOWLEDGEMENT_WORDS = {
+    "ok", "okay", "k", "kk", "hmm", "hmmm", "hum", "yep", "yeah", "yes", "sure",
+    "theek hai", "thik hai", "accha", "achha", "sahi", "badhiya",
+    "thanks", "thank you", "dhanyawad", "shukriya", "nandri",
+    "சரி", "ஆம்", "நன்றி"
+}
+
+
+def classify_message_quality(text: str) -> str:
+    """Classify message quality into MEANINGFUL, EMPTY, AMBIGUOUS, ACKNOWLEDGEMENT (PRD §5.1)."""
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return "EMPTY"
+    if _AMBIGUOUS_RE.match(cleaned):
+        return "AMBIGUOUS"
+    word_stripped = re.sub(r"[^\w\s]", "", cleaned).strip()
+    if word_stripped in _ACKNOWLEDGEMENT_WORDS or cleaned in _ACKNOWLEDGEMENT_WORDS:
+        return "ACKNOWLEDGEMENT"
+    if len(word_stripped) == 0 or (len(word_stripped) == 1 and not word_stripped.isalnum()):
+        return "AMBIGUOUS"
+    return "MEANINGFUL"
+
+
+# ---------------------------------------------------------------------------
+# Risk-explanation query detection & sub-intents (Milestone 4 & PRD §6)
 # ---------------------------------------------------------------------------
 
 _EXPLAIN_PATTERNS: list[re.Pattern] = [
@@ -203,10 +232,52 @@ _EXPLAIN_PATTERNS: list[re.Pattern] = [
     re.compile(r"explain.*risk|risk.*explain|score.*why|why.*score", re.I),
 ]
 
+_WHAT_DOES_MEAN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(what\s+do\s+you\s+mean|what\s+is\s+meant\s+by|what\s+does\s+.*mean|why\s+did\s+you\s+say|i\s+didn'?t\s+ask|didn'?t\s+ask\s+anything)\b", re.I),
+    re.compile(r"\b(kya\s+matlab|matlab\s+kya|maine\s+kab\s+pucha)\b", re.I),
+    re.compile(r"\b(arthe\s+enna|enna\s+artham)\b", re.I),
+]
+
+_COMPARE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(what('?s|\s+is)?\s+changed|what\s+changed|what('?s|\s+is)?\s+different|changed\s+since|how\s+does\s+this\s+compare|compare\s+with|different\s+from|is\s+it\s+different|kya\s+badla|kya\s+alag\s+hai|enna\s+maatram)\b", re.I),
+]
+
+_HAZARD_IMPACT_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(hazard\s+impact|warning\s+impact|how.*warning\s+affect|warning.*affect.*risk|cyclone.*impact|warning.*asar|khatre.*asar)\b", re.I),
+]
+
+_WHAT_CAUSED_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(what\s+caused|what\s+factors|how.*calculated|how.*scored|breakdown|factor.*breakdown|score.*breakdown)\b", re.I),
+]
+
+_WHY_THIS_RISK_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(why\s+is\s+.*risk|why\s+risk|why\s+is\s+it\s+unsafe|why\s+is\s+it\s+high|why\s+high|kyun\s+high|kyun\s+unsafe|yen\s+appadi)\b", re.I),
+]
+
+
+def classify_risk_sub_intent(text: str) -> str:
+    """Classify risk explanation into fine-grained sub-intents (PRD §6)."""
+    if any(pat.search(text) for pat in _COMPARE_PATTERNS):
+        return "COMPARE_WITH_PREVIOUS"
+    if any(pat.search(text) for pat in _WHAT_DOES_MEAN_PATTERNS):
+        return "WHAT_DOES_THIS_LEVEL_MEAN"
+    if any(pat.search(text) for pat in _HAZARD_IMPACT_PATTERNS):
+        return "HAZARD_IMPACT"
+    if any(pat.search(text) for pat in _WHAT_CAUSED_PATTERNS):
+        return "WHAT_CAUSED_THIS_RISK"
+    return "WHY_THIS_RISK"
+
 
 def _is_risk_explanation(text: str) -> bool:
-    """Return True if the query is asking WHY the risk score is what it is."""
-    return any(pat.search(text) for pat in _EXPLAIN_PATTERNS)
+    """Return True if the query is asking WHY the risk score is what it is, questioning previous verdict, or asking what changed."""
+    return (
+        any(pat.search(text) for pat in _EXPLAIN_PATTERNS)
+        or any(pat.search(text) for pat in _WHAT_DOES_MEAN_PATTERNS)
+        or any(pat.search(text) for pat in _COMPARE_PATTERNS)
+        or any(pat.search(text) for pat in _HAZARD_IMPACT_PATTERNS)
+        or any(pat.search(text) for pat in _WHAT_CAUSED_PATTERNS)
+        or any(pat.search(text) for pat in _WHY_THIS_RISK_PATTERNS)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +445,19 @@ def classify_query_intent(
     """
     text_lower = text.lower().strip()
 
-    # 0. Check multi-intent (PRD §16, §17)
+    # 0a. Check message quality (PRD §5.1)
+    mq = classify_message_quality(text)
+    if mq != "MEANINGFUL":
+        return "CONVERSATIONAL_GUIDANCE", "guidance", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+        }, "CLARIFICATION"
+
+    # 0b. Check multi-intent (PRD §16, §17)
     multi = _detect_multi_intent(text)
     if multi:
         has_safe = any(g["intent"] == "MARINE_SAFETY_QUERY" for g in multi)
@@ -749,6 +832,10 @@ def detect_and_parse(state: ORCAState) -> dict:
     # 1. Authoritative Server-Side Session
     conv_id = state.get("conversation_id") or "default"
     session = get_or_create_session(conv_id)
+    if not session.last_query_location and state.get("resolved_location"):
+        session.last_query_location = state.get("resolved_location")
+    if not session.last_parsed_intent and state.get("last_parsed_intent"):
+        session.last_parsed_intent = state.get("last_parsed_intent")
 
     # 2. Extract Device Location
     device_loc: Optional[DeviceLocation] = state.get("device_location")
@@ -772,6 +859,95 @@ def detect_and_parse(state: ORCAState) -> dict:
 
     # 4. Language Detection
     detected_lang = language_override if language_override in ("en", "hi", "ta") else _detect_language(raw)
+
+    # 4b. Message Quality Gate (PRD §5.1)
+    mq = classify_message_quality(raw)
+    if mq != "MEANINGFUL":
+        if detected_lang == "hi":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "ठीक है! जब भी आप मौसम, ज्वार-भाटा, मछली पकड़ने के क्षेत्र या समुद्री सुरक्षा की जानकारी चाहें, मुझे बताएं।"
+            else:
+                guidance_text = "आप क्या जानना चाहते हैं? आप मौसम, समुद्र की स्थिति, मछली पकड़ने के क्षेत्र, ज्वार-भाटा, खतरों या यात्रा सुरक्षा के बारे में पूछ सकते हैं।"
+        elif detected_lang == "ta":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "சரி! வானிலை, கடல் அலைகள், மீன்பிடி மண்டலங்கள் அல்லது பாதுகாப்பு விவரங்களை அறிய எப்போது வேண்டுமானாலும் கேளுங்கள்."
+            else:
+                guidance_text = "நீங்கள் என்ன தெரிந்து கொள்ள விரும்புகிறீர்கள்? வானிலை, கடல் நிலை, மீன்பிடி மண்டலங்கள், அலைகள், ஆபத்துகள் அல்லது பயணப் பாதுகாப்பு பற்றி கேட்கலாம்."
+        else:
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "Understood! Feel free to ask whenever you'd like to check weather, sea conditions, fishing indicators, tides, or trip safety."
+            else:
+                guidance_text = "What would you like to know? You can ask about weather, sea conditions, fishing indicators, tides, hazards, or trip safety."
+
+        guidance_plan: AnswerPlan = {
+            "intent": "CONVERSATIONAL_GUIDANCE",
+            "intent_name": "CONVERSATIONAL_GUIDANCE",
+            "answer_type": "ClarificationCard",
+            "presentation_hint": "clarification_card",
+            "primary_capability": "conversational_guidance",
+            "requested_location": None,
+            "resolved_location": None,
+            "required_capabilities": [],
+            "required_agents": [],
+            "response_mode": "clarification",
+            "location_scope": "none",
+            "evidence_needed": [],
+            "should_answer_directly": True,
+            "should_explain_applicability": False,
+            "should_show_data": False,
+            "should_show_recommendation": False,
+            "should_show_warning": False,
+            "should_offer_followup": True,
+        }
+
+        guidance_intent: ParsedIntent = {
+            "location_name": None,
+            "lat": None,
+            "lon": None,
+            "time_window": "now",
+            "time_start_utc": "",
+            "time_end_utc": "",
+            "query_type": "guidance",
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_hazard": False,
+            "needs_geofence": False,
+            "needs_risk": False,
+            "needs_ocean": False,
+            "location_status": "unresolved",
+            "intent": "CONVERSATIONAL_GUIDANCE",
+            "intent_name": "CONVERSATIONAL_GUIDANCE",
+            "response_mode": "clarification",
+            "answer_plan": guidance_plan,
+            "message_quality": mq,
+        }
+
+        new_history = (conversation_history + [{"role": "user", "content": raw}])[-config.MAX_CONVERSATION_TURNS:]
+
+        return {
+            "detected_language": detected_lang,
+            "parsed_intent": guidance_intent,
+            "device_location": device_loc,
+            "query_location": q_loc,
+            "resolved_location": None,
+            "location_mode": "NONE",
+            "changed_fields": [],
+            "conversation_history": new_history,
+            "final_answer_text": guidance_text,
+            "parse_method": "rule_based_fallback",
+            "intent": "CONVERSATIONAL_GUIDANCE",
+            "intent_name": "CONVERSATIONAL_GUIDANCE",
+            "response_mode": "clarification",
+            "answer_plan": guidance_plan,
+            "message_quality": mq,
+            "risk_result": None,
+            "query_signature": {
+                "intent": "CONVERSATIONAL_GUIDANCE",
+                "location": None,
+                "time_context": "now",
+                "relevant_capabilities": [],
+            },
+        }
 
     # 5. Temporal Extraction & Intent Classification
     _explicit_time = _extract_time_window(raw)
@@ -1411,6 +1587,9 @@ def detect_and_parse(state: ORCAState) -> dict:
         "show_score": False,
         "safety_action": "check_official_advisory",
     }
+    risk_sub_intent = classify_risk_sub_intent(raw) if intent_name == "RISK_EXPLANATION" else None
+    if risk_sub_intent:
+        coastal_plan["intent_subtype"] = risk_sub_intent
     if intent_name == "MULTI_INTENT":
         coastal_plan["intent_groups"] = multi_groups
 
@@ -1432,6 +1611,8 @@ def detect_and_parse(state: ORCAState) -> dict:
         distance_to_coast_km=resolved.get("nearest_coast_km", 0.0),
         intent=intent_name,
         intent_name=intent_name,
+        intent_subtype=risk_sub_intent,
+        message_quality="MEANINGFUL",
         response_mode=resp_mode_str,
         answer_plan=coastal_plan,
         intent_groups=multi_groups if intent_name == "MULTI_INTENT" else None,
@@ -1465,6 +1646,8 @@ def detect_and_parse(state: ORCAState) -> dict:
         "parse_method": "rule_based_fallback",
         "intent": intent_name,
         "intent_name": intent_name,
+        "intent_subtype": risk_sub_intent,
+        "message_quality": "MEANINGFUL",
         "response_mode": resp_mode_str,
         "answer_plan": coastal_plan,
         "query_signature": query_sig,

@@ -204,6 +204,9 @@ class ParsedIntent(TypedDict):
     intent_name: NotRequired[Optional[str]]
     response_mode: NotRequired[Optional[str]]
     answer_plan: NotRequired[Optional[AnswerPlan]]
+    # V2.3 additions:
+    message_quality: NotRequired[Optional[Literal["MEANINGFUL", "EMPTY", "AMBIGUOUS", "ACKNOWLEDGEMENT"]]]
+    intent_subtype: NotRequired[Optional[Literal["WHY_THIS_RISK", "WHAT_DOES_THIS_LEVEL_MEAN", "WHAT_CAUSED_THIS_RISK", "HAZARD_IMPACT", "COMPARE_WITH_PREVIOUS"]]]
     intent_groups: NotRequired[Optional[List[Dict[str, Any]]]]
     is_multi_intent: NotRequired[Optional[bool]]
 
@@ -300,5 +303,13 @@ class ORCAState(TypedDict):
     is_multi_intent: NotRequired[Optional[bool]]
     intent_groups: NotRequired[Optional[List[Dict[str, Any]]]]
     risk_assessment: NotRequired[Optional[RiskAssessment]]
+
+    # V2.3: Conversational Intelligence Repair + Unified Marine Snapshot
+    message_quality: NotRequired[Optional[Literal["MEANINGFUL", "EMPTY", "AMBIGUOUS", "ACKNOWLEDGEMENT"]]]
+    intent_subtype: NotRequired[Optional[Literal["WHY_THIS_RISK", "WHAT_DOES_THIS_LEVEL_MEAN", "WHAT_CAUSED_THIS_RISK", "HAZARD_IMPACT", "COMPARE_WITH_PREVIOUS"]]]
+    previous_relevant_result: NotRequired[Optional[Dict[str, Any]]]
+    marine_snapshot: NotRequired[Optional[Dict[str, Any]]]
+    change_summary: NotRequired[Optional[Dict[str, Any]]]
+    risk_explanation_data: NotRequired[Optional[Dict[str, Any]]]
 
 
