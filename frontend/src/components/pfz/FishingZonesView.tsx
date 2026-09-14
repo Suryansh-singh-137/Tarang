@@ -74,10 +74,11 @@ export const FishingZonesView: React.FC<Props> = ({
             <Fish className="w-4 h-4 text-[#1B8755]" />
             <span>Potential Fishing Zones (PFZ)</span>
           </div>
-          <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2.5">
             <span>Fishing Zones</span>
-            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)] flex items-center gap-1.5">
-              <span>📍 {effectiveLocationName}</span>
+            <span className="text-xs font-sans px-2.5 py-1 rounded-full bg-[var(--surface-muted)] text-[var(--ink)] font-medium border border-[var(--border)] flex items-center gap-1.5 shadow-2xs">
+              <MapPin className="w-3.5 h-3.5 text-[var(--current)]" />
+              <span>{effectiveLocationName}</span>
               {marineContext && <MarineContextBadge type={marineContext.type} size="sm" />}
             </span>
           </h1>

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Compass, Clock, Waves, Wind, AlertTriangle, ShieldCheck, Info } from "lucide-react";
+import { Compass, Clock, Waves, Wind, AlertTriangle, ShieldCheck, Info, MapPin } from "lucide-react";
 import { LiveConditionsSummary, RiskLabel, LocationStatus, LanguageCode } from "@/lib/types";
 import { useLocation } from "@/lib/locationContext";
 import { LocationUnavailable } from "@/components/location/LocationUnavailable";
@@ -48,10 +48,11 @@ export const TripPlannerView: React.FC<Props> = ({
             <Compass className="w-4 h-4 text-[var(--current)]" />
             <span>Operational Suitability</span>
           </div>
-          <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-serif-display text-[var(--ink)] flex items-center gap-2.5">
             <span>Trip Planner & Windows</span>
-            <span className="text-xs font-sans px-2.5 py-0.5 rounded-full bg-[var(--foam)] text-[var(--current)] font-medium border border-[var(--border)] flex items-center gap-1.5">
-              <span>📍 {locName}</span>
+            <span className="text-xs font-sans px-2.5 py-1 rounded-full bg-[var(--surface-muted)] text-[var(--ink)] font-medium border border-[var(--border)] flex items-center gap-1.5 shadow-2xs">
+              <MapPin className="w-3.5 h-3.5 text-[var(--current)]" />
+              <span>{locName}</span>
               {marineContext && <MarineContextBadge type={marineContext.type} size="sm" />}
             </span>
           </h1>

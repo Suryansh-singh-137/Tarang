@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "@/lib/locationContext";
 import { MarineContextBadge } from "./MarineContextBadge";
 import { MarineContextType } from "@/lib/types";
+import { Check, Loader2 } from "lucide-react";
 
 interface LocationMapPickerProps {
   onClose: () => void;
@@ -48,15 +49,15 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(map);
 
-      // Custom icon
+      // Custom editorial pin matching Coastal Dawn
       const pinIcon = L.divIcon({
         className: "custom-map-pin",
         html: `<div style="transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center;">
-          <div style="background-color: #f59e0b; color: #1c1917; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5);">📍</div>
-          <div style="width: 2px; height: 8px; background-color: #f59e0b;"></div>
+          <div style="background-color: #2E8FA0; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; border: 2.5px solid white; box-shadow: 0 4px 8px rgba(22, 36, 43, 0.25);">📍</div>
+          <div style="width: 2px; height: 6px; background-color: #2E8FA0;"></div>
         </div>`,
-        iconSize: [26, 34],
-        iconAnchor: [13, 34],
+        iconSize: [28, 34],
+        iconAnchor: [14, 34],
       });
 
       const marker = L.marker([initialLat, initialLon], { icon: pinIcon }).addTo(map);
@@ -121,11 +122,13 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
   };
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div className="flex flex-col h-full w-full bg-[var(--surface)]">
       {/* Top instruction bar */}
-      <div className="p-3 bg-stone-900 border-b border-stone-800 flex flex-wrap items-center justify-between gap-2">
+      <div className="p-3.5 bg-[var(--surface-muted)] border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-stone-100">Click anywhere on the map or enter coordinates</span>
+          <span className="text-xs font-medium text-[var(--ink)]">
+            Click anywhere on open sea or mainland to place pin
+          </span>
           <MarineContextBadge type={pinContextType} size="sm" />
         </div>
 
@@ -136,19 +139,19 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
             value={manualLat}
             onChange={(e) => setManualLat(e.target.value)}
             placeholder="Lat"
-            className="w-16 px-2 py-1 bg-stone-800 border border-stone-700 rounded text-stone-200 font-mono text-center focus:border-amber-400 focus:outline-none"
+            className="w-16 px-2 py-1 bg-[var(--surface)] border border-[var(--border)] rounded text-[var(--ink)] font-mono-data text-center focus:border-[var(--current)] focus:outline-none"
           />
-          <span className="text-stone-400">,</span>
+          <span className="text-[var(--ink-muted)]">,</span>
           <input
             type="text"
             value={manualLon}
             onChange={(e) => setManualLon(e.target.value)}
             placeholder="Lon"
-            className="w-16 px-2 py-1 bg-stone-800 border border-stone-700 rounded text-stone-200 font-mono text-center focus:border-amber-400 focus:outline-none"
+            className="w-16 px-2 py-1 bg-[var(--surface)] border border-[var(--border)] rounded text-[var(--ink)] font-mono-data text-center focus:border-[var(--current)] focus:outline-none"
           />
           <button
             type="submit"
-            className="px-2 py-1 bg-stone-700 hover:bg-stone-600 rounded text-stone-200 text-xs transition-colors"
+            className="px-2.5 py-1 bg-[var(--surface)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] rounded text-xs font-mono-data transition-colors cursor-pointer"
           >
             Go
           </button>
@@ -156,15 +159,15 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
       </div>
 
       {/* Map container */}
-      <div className="relative flex-1 min-h-[380px] w-full bg-stone-950">
+      <div className="relative flex-1 min-h-[380px] w-full bg-[#E2ECEE]">
         <div ref={mapContainerRef} className="w-full h-full" />
       </div>
 
       {/* Footer with confirmation */}
-      <div className="p-3 bg-stone-900 border-t border-stone-800 flex items-center justify-between gap-3">
+      <div className="p-3.5 bg-[var(--surface)] border-t border-[var(--border)] flex items-center justify-between gap-3">
         <div className="flex flex-col text-xs">
-          <span className="font-semibold text-stone-200">{pinName}</span>
-          <span className="text-stone-400 font-mono text-[11px]">
+          <span className="font-semibold text-[var(--ink)]">{pinName}</span>
+          <span className="text-[var(--ink-muted)] font-mono-data text-[11px]">
             {pin.lat.toFixed(4)}° N, {pin.lon.toFixed(4)}° E
           </span>
         </div>
@@ -173,7 +176,7 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg border border-stone-700 text-stone-300 hover:bg-stone-800 text-xs transition-colors"
+            className="px-3.5 py-1.5 rounded-full border border-[var(--border)] text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)] text-xs font-sans font-medium transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -181,9 +184,19 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
             type="button"
             onClick={handleConfirmLocation}
             disabled={isLoading}
-            className="px-4 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-stone-950 font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md"
+            className="px-4 py-1.5 rounded-full bg-[var(--ink)] hover:bg-[var(--current)] text-white font-sans font-medium text-xs transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
           >
-            {isLoading ? "Resolving..." : "Select this location"}
+            {isLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Resolving...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                <span>Select this location</span>
+              </>
+            )}
           </button>
         </div>
       </div>

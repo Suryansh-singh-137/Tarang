@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Compass, MapPin, Anchor, ArrowRight } from "lucide-react";
 import { useLocation } from "@/lib/locationContext";
 
 interface LocationUnavailableProps {
@@ -8,6 +9,13 @@ interface LocationUnavailableProps {
   onOpenMapPicker?: () => void;
   className?: string;
 }
+
+const POPULAR_COASTAL_PORTS = [
+  { name: "Kochi", state: "Kerala", lat: 9.9312, lon: 76.2673 },
+  { name: "Mumbai", state: "Maharashtra", lat: 18.9388, lon: 72.8354 },
+  { name: "Chennai", state: "Tamil Nadu", lat: 13.0827, lon: 80.2707 },
+  { name: "Visakhapatnam", state: "Andhra Pradesh", lat: 17.6868, lon: 83.2185 },
+];
 
 export function LocationUnavailable({
   featureName = "Marine intelligence & fishing forecasts",
@@ -20,59 +28,69 @@ export function LocationUnavailable({
     ? `${Math.round(marineContext.distance_to_coast_km)} km`
     : "several hundred km";
 
-  const popularCoastalPorts = [
-    { name: "Kochi", state: "Kerala", lat: 9.9312, lon: 76.2673 },
-    { name: "Mumbai", state: "Maharashtra", lat: 18.9388, lon: 72.8354 },
-    { name: "Chennai", state: "Tamil Nadu", lat: 13.0827, lon: 80.2707 },
-    { name: "Visakhapatnam", state: "Andhra Pradesh", lat: 17.6868, lon: 83.2185 },
-  ];
-
   return (
     <div
-      className={`rounded-2xl border border-amber-500/30 bg-amber-950/20 p-6 text-center max-w-xl mx-auto shadow-lg backdrop-blur-sm ${className}`}
+      className={`bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 sm:p-8 text-center max-w-xl mx-auto shadow-xs space-y-4 ${className}`}
     >
-      <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-2xl">
-        ⚓
+      {/* Icon Badge */}
+      <div className="w-12 h-12 rounded-full bg-[#FEF3C7] text-[#D97706] border border-[#FDE68A] flex items-center justify-center mx-auto shadow-2xs">
+        <Anchor className="w-5 h-5 text-[#D97706]" />
       </div>
-      <h3 className="text-lg font-serif font-semibold text-amber-200 mb-1">
-        Marine Data Not Applicable for Inland Location
+
+      {/* Eyebrow */}
+      <div className="font-mono-data text-[11px] text-[#B45309] uppercase tracking-widest font-medium">
+        COASTAL SERVICE ADVISORY
+      </div>
+
+      {/* Heading in Fraunces / Instrument Serif */}
+      <h3 className="font-serif-display text-xl sm:text-2xl text-[var(--ink)] font-normal leading-snug">
+        Marine Intelligence Not Applicable for Inland Location
       </h3>
-      <p className="text-sm text-stone-300 mb-4 leading-relaxed">
-        <span className="font-semibold text-white">{selectedLocation?.name || "Current place"}</span> is situated approximately{" "}
-        <span className="font-semibold text-amber-300">{dist}</span> from the nearest coastline.{" "}
+
+      {/* Body Copy */}
+      <p className="text-xs sm:text-sm text-[var(--ink-muted)] leading-relaxed max-w-md mx-auto">
+        <strong className="text-[var(--ink)] font-semibold">{selectedLocation?.name || "Selected location"}</strong> is situated approximately{" "}
+        <span className="font-mono-data font-semibold text-[var(--ink)]">{dist}</span> from the nearest coastline.{" "}
         {featureName} (such as Potential Fishing Zones, tidal baselines, and swell warnings) are specifically modeled for coastal and open-sea waters.
       </p>
 
-      <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
+      {/* Action CTA Buttons */}
+      <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
         <button
+          type="button"
           onClick={() => setPickerOpen(true)}
-          className="px-4 py-2 text-xs font-semibold text-stone-900 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--ink)] hover:bg-[var(--current)] text-white text-xs font-sans font-medium transition-all shadow-xs cursor-pointer"
         >
-          <span>📍</span> Choose coastal location
+          <MapPin className="w-3.5 h-3.5" />
+          <span>Choose coastal harbour</span>
         </button>
-        {onOpenMapPicker ? (
-          <button
-            onClick={onOpenMapPicker}
-            className="px-4 py-2 text-xs font-semibold text-amber-300 border border-amber-500/40 hover:bg-amber-500/10 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            <span>🗺️</span> Pick offshore on map
-          </button>
-        ) : (
-          <button
-            onClick={() => setPickerOpen(true)}
-            className="px-4 py-2 text-xs font-semibold text-amber-300 border border-amber-500/40 hover:bg-amber-500/10 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            <span>🗺️</span> Pick on map
-          </button>
-        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpenMapPicker) {
+              onOpenMapPicker();
+            } else {
+              setPickerOpen(true);
+            }
+          }}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--surface)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)]/40 text-[var(--ink)] text-xs font-sans font-medium transition-all cursor-pointer"
+        >
+          <Compass className="w-3.5 h-3.5 text-[var(--current)]" />
+          <span>Pick offshore on map</span>
+        </button>
       </div>
 
-      <div className="border-t border-amber-500/20 pt-3">
-        <p className="text-[11px] text-stone-400 mb-2">Or switch directly to a coastal fishing hub:</p>
+      {/* Quick Coastal Presets */}
+      <div className="border-t border-[var(--border)] pt-4 mt-2">
+        <span className="font-mono-data text-[10px] text-[var(--ink-subtle)] uppercase tracking-wider block mb-2.5">
+          Or switch directly to a major coastal fishing hub:
+        </span>
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {popularCoastalPorts.map((port) => (
+          {POPULAR_COASTAL_PORTS.map((port) => (
             <button
               key={port.name}
+              type="button"
               onClick={() =>
                 setLocation({
                   name: port.name,
@@ -84,7 +102,7 @@ export function LocationUnavailable({
                   source: "search",
                 })
               }
-              className="px-2.5 py-1 text-[11px] rounded-md bg-stone-800/80 border border-stone-700 text-stone-200 hover:border-amber-400 hover:text-amber-200 transition-colors"
+              className="px-3 py-1 text-xs rounded-full bg-[var(--surface-muted)] hover:bg-[var(--foam)] border border-[var(--border)] hover:border-[var(--current)]/40 text-[var(--ink)] transition-all font-mono-data cursor-pointer"
             >
               {port.name}
             </button>
