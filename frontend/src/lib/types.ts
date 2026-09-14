@@ -163,9 +163,91 @@ export type OceanData = {
   source: string;
 };
 
-export type QueryResultPayload = {
-  request_id?: string;
-  conversation_id?: string;
+export interface ChangeItem {
+  factor: string;
+  from: string;
+  to: string;
+}
+
+export interface ChangeSummary {
+  has_changes: boolean;
+  previous_risk: string;
+  current_risk: string;
+  changes: ChangeItem[];
+}
+
+export interface MarineSnapshot {
+  location: {
+    name: string;
+    lat: number;
+    lon: number;
+    coastal: boolean;
+    state?: string | null;
+    district?: string | null;
+  };
+  generated_at: string;
+  weather: {
+    wave_height_m?: number | null;
+    wind_speed_kmh?: number | null;
+    wind_direction_deg?: number | null;
+    sea_state?: string;
+    temperature_c?: number | null;
+    pressure_msl_hpa?: number | null;
+    source?: string;
+    observed_at?: string;
+    data_quality?: string;
+  };
+  ocean: {
+    water_level_m?: number | null;
+    tide_datum?: string;
+    current_phase?: string;
+    tide_station?: string;
+    source?: string;
+    predicted_at?: string;
+    data_quality?: string;
+  };
+  pfz: {
+    nearest_zone_km?: number | null;
+    zone_bearing_deg?: number | null;
+    total_zones?: number;
+    overall_productivity?: string;
+    is_proxy: boolean;
+    proxy_type?: string;
+    source?: string;
+    data_quality?: string;
+  };
+  hazards: {
+    overall_hazard_level?: string;
+    active_warnings?: string[];
+    hazards?: any[];
+    source?: string;
+    checked_at?: string;
+    data_quality?: string;
+  };
+  geofence: {
+    imbl_distance_km?: number | null;
+    boundary_risk?: string;
+    source?: string;
+  };
+  risk: {
+    composite_score?: number | null;
+    risk_label: RiskLabel;
+    final_level?: RiskLabel;
+    components?: any[];
+    recommendation?: string;
+    override_reason?: string | null;
+    top_factor?: string | null;
+  };
+  data_quality: {
+    overall_status: string;
+  };
+  evidence?: EvidenceItem[];
+  change_summary?: ChangeSummary | null;
+}
+
+export type TarangResponse = {
+  request_id: string;
+  conversation_id: string;
   answer_text: string;
   language: string;
   location?: {
@@ -198,7 +280,11 @@ export type QueryResultPayload = {
   changed_fields?: string[];
   selected_location?: SelectedLocation;
   marine_context?: MarineContext;
+  marine_snapshot?: MarineSnapshot | null;
+  change_summary?: ChangeSummary | null;
 };
+
+export type QueryResultPayload = TarangResponse;
 
 export type Message = {
   id: string;
@@ -223,6 +309,8 @@ export type Message = {
   timestamp: string;
   isStreaming?: boolean;
   isError?: boolean;
+  marine_snapshot?: MarineSnapshot | null;
+  change_summary?: ChangeSummary | null;
 };
 
 

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Layers, Fish, AlertTriangle, Maximize2, HelpCircle } from "lucide-react";
 import { ShorelineCompass } from "../illustrations/ShorelineCompass";
-import { MapGeoJSON, RiskLabel } from "@/lib/types";
+import { MapGeoJSON, RiskLabel, MarineSnapshot } from "@/lib/types";
 import { useLocation } from "@/lib/locationContext";
 
 interface Props {
@@ -11,6 +11,8 @@ interface Props {
   riskLabel?: RiskLabel;
   locationName?: string;
   className?: string;
+  snapshot?: MarineSnapshot | null;
+  onWhyThisResult?: () => void;
 }
 
 export const MarineMap: React.FC<Props> = ({
@@ -18,6 +20,8 @@ export const MarineMap: React.FC<Props> = ({
   riskLabel = "LOW",
   locationName = "Coastal Waters",
   className = "w-full h-full min-h-[350px]",
+  snapshot,
+  onWhyThisResult,
 }) => {
   const { selectedLocation, selectCoordinates } = useLocation();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -181,17 +185,41 @@ export const MarineMap: React.FC<Props> = ({
             iconAnchor: [17, 17],
           });
 
-          L.marker([lat, lon], { icon: queryIcon })
+          const whyBtnId = `why-point-btn-${Math.floor(Math.random() * 10000)}`;
+          const waveTxt = snapshot?.weather?.wave_height_m !== undefined && snapshot?.weather?.wave_height_m !== null
+            ? `• Wave: <b>${snapshot.weather.wave_height_m}m</b><br/>` : "";
+          const windTxt = snapshot?.weather?.wind_speed_kmh !== undefined && snapshot?.weather?.wind_speed_kmh !== null
+            ? `• Wind: <b>${snapshot.weather.wind_speed_kmh} km/h</b><br/>` : "";
+
+          const marker = L.marker([lat, lon], { icon: queryIcon })
             .bindPopup(`
-              <div style="font-family: sans-serif; font-size: 12px; color: #16242B; padding: 2px;">
-                <strong style="color: #2E8FA0; font-size: 13px;">📍 ${props.label || locationName}</strong><br/>
-                <span style="color: #6B7280; font-size: 11px;">Lat: ${lat.toFixed(4)}°, Lon: ${lon.toFixed(4)}°</span><br/>
-                <span style="display: inline-block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; background: #F3F4F6; font-size: 10px; font-weight: 600;">
-                  Safety Verdict: ${riskLabel}
-                </span>
+              <div style="font-family: sans-serif; font-size: 12px; color: #16242B; padding: 4px; min-width: 170px;">
+                <strong style="color: #0284c7; font-size: 13px;">📍 ${props.label || locationName}</strong><br/>
+                <span style="color: #6B7280; font-size: 11px;">${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E</span><br/>
+                <div style="margin-top: 4px; line-height: 1.4; color: #374151;">
+                  ${waveTxt}
+                  ${windTxt}
+                  • Verdict: <b style="color: ${riskStroke};">${riskLabel} RISK</b>
+                </div>
+                ${onWhyThisResult ? `
+                  <button id="${whyBtnId}" style="margin-top: 6px; width: 100%; background: #4f46e5; color: white; border: none; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600; cursor: pointer;">
+                    🔍 Why this result?
+                  </button>
+                ` : ""}
               </div>
             `)
             .addTo(group);
+
+          if (onWhyThisResult) {
+            marker.on("popupopen", () => {
+              const btn = document.getElementById(whyBtnId);
+              if (btn) {
+                btn.onclick = () => {
+                  onWhyThisResult();
+                };
+              }
+            });
+          }
         }
 
         // 2. Potential Fishing Zone (PFZ) indicator beacons
@@ -218,14 +246,14 @@ export const MarineMap: React.FC<Props> = ({
           L.marker([lat, lon], { icon: pfzIcon })
             .bindPopup(`
               <div style="font-family: sans-serif; font-size: 12px; color: #16242B;">
-                <strong style="color: #1B8755;">🐟 PFZ Indicator Zone #${pfzCount}</strong><br/>
+                <strong style="color: #1B8755;">🐟 Fishing Indicator Zone #${pfzCount}</strong><br/>
                 <div style="margin-top: 4px; line-height: 1.4; color: #374151;">
-                  • Distance: <b>${dist}</b><br/>
+                  • Distance: <b>${dist} offshore</b><br/>
                   • Chlorophyll-a: <b>${typeof chl === "number" ? chl.toFixed(2) : chl} mg/m³</b><br/>
                   • Bearing: <b>${props.bearing_deg || props.bearing || "E"}°</b>
                 </div>
                 <div style="margin-top: 6px; font-size: 10px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 4px;">
-                  Source: INCOIS Oceansat-2 (satellite chlorophyll proxy)
+                  INCOIS Oceansat-2 satellite proxy indicator (not a catch guarantee)
                 </div>
               </div>
             `)

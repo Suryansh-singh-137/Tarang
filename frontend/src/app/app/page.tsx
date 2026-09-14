@@ -12,6 +12,9 @@ import { TracePanel } from "@/components/trace/TracePanel";
 import { FishingZonesView } from "@/components/pfz/FishingZonesView";
 import { TripPlannerView } from "@/components/trip/TripPlannerView";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
+import { MarineSituationBrief } from "@/components/dashboard/MarineSituationBrief";
+import { WhyThisResultModal } from "@/components/dashboard/WhyThisResultModal";
+import { ChangeSinceLastCheck } from "@/components/dashboard/ChangeSinceLastCheck";
 
 import {
   Message,
@@ -22,6 +25,8 @@ import {
   RiskLabel,
   LiveConditionsSummary,
   LocationStatus,
+  MarineSnapshot,
+  ChangeSummary,
 } from "@/lib/types";
 import { streamQuery } from "@/lib/api";
 import { translations } from "@/lib/i18n";
@@ -81,6 +86,11 @@ function AppWorkspace() {
     distanceKm: number;
     windSpeedKmh: number;
   } | null>(null);
+
+  // PRD §17 & §10: Canonical MarineSnapshot and ChangeSummary state
+  const [marineSnapshot, setMarineSnapshot] = useState<MarineSnapshot | null>(null);
+  const [changeSummary, setChangeSummary] = useState<ChangeSummary | null>(null);
+  const [isWhyModalOpen, setIsWhyModalOpen] = useState(false);
 
   // Pipeline state for Multi-turn memory
   const [pipelineState, setPipelineState] = useState<ChatState>({
@@ -251,11 +261,25 @@ function AppWorkspace() {
                     answer_plan: result.answer_plan,
                     response_mode: result.response_mode,
                     query_signature: result.query_signature,
+                    marine_snapshot: result.marine_snapshot,
+                    change_summary: result.change_summary,
                     isStreaming: false,
                   }
                 : msg
             )
           );
+
+          // Update marine snapshot & change summary (PRD §17, §10)
+          if (result.marine_snapshot) {
+            setMarineSnapshot(result.marine_snapshot);
+            const rLbl = result.marine_snapshot.risk?.final_level || result.marine_snapshot.risk?.risk_label;
+            if (rLbl) {
+              setCurrentRiskLabel(rLbl);
+            }
+          }
+          if (result.change_summary) {
+            setChangeSummary(result.change_summary);
+          }
 
           // Update multi-turn memory
           setPipelineState({
@@ -380,21 +404,21 @@ function AppWorkspace() {
     handleSendMessage(promptText);
   };
 
+  const handleRecheck = () => {
+    handleSendMessage("is it still safe now? check conditions again");
+  };
+
   // Get active query location name for map header
   const activeLocationName =
     messages[messages.length - 1]?.parsed_intent?.location_name ||
+    marineSnapshot?.location?.name ||
     liveConditions?.locationName ||
+    selectedLocation?.name ||
     "Coastal Waters";
 
-  // Current active trace from latest assistant response or live progress steps
   const activeTrace =
     messages.filter((m) => m.role === "assistant" && m.trace && m.trace.length > 0).slice(-1)[0]?.trace ||
-    progressSteps.map((p) => ({
-      agent_name: p.agent_name || p.node,
-      status: (p.status as any) || "success",
-      summary: p.summary,
-      source: p.source,
-    }));
+    [];
 
   const activeEvidence =
     messages.filter((m) => m.role === "assistant" && m.evidence && m.evidence.length > 0).slice(-1)[0]?.evidence ||
@@ -483,6 +507,24 @@ function AppWorkspace() {
           {/* Destination 1: Chat View */}
           {activeTab === "chat" && (
             <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)]">
+              {/* Situation Brief & Change Since Last Check (PRD §8, §10) */}
+              <div className="px-4 pt-3 pb-0 max-w-5xl mx-auto w-full shrink-0">
+                {marineSnapshot && (
+                  <MarineSituationBrief
+                    snapshot={marineSnapshot}
+                    onWhyThisResult={() => setIsWhyModalOpen(true)}
+                    onRecheck={handleRecheck}
+                    isRechecking={isLoading}
+                  />
+                )}
+                {changeSummary?.has_changes && (
+                  <ChangeSinceLastCheck
+                    changeSummary={changeSummary}
+                    onDismiss={() => setChangeSummary(null)}
+                  />
+                )}
+              </div>
+
               {/* Chat message stream */}
               <div className="flex-1 overflow-hidden">
                 <ChatPanel
@@ -611,6 +653,8 @@ function AppWorkspace() {
                 geoJson={mapGeoJson}
                 riskLabel={currentRiskLabel}
                 locationName={activeLocationName}
+                snapshot={marineSnapshot}
+                onWhyThisResult={() => setIsWhyModalOpen(true)}
                 className="w-full h-full rounded-2xl border border-[var(--border)] shadow-2xs overflow-hidden"
               />
             </div>
@@ -624,6 +668,7 @@ function AppWorkspace() {
                 locationName={activeLocationName}
                 locationStatus={locationStatus}
                 onNavigateToMap={() => setActiveTab("map")}
+                onNavigateToChat={() => setActiveTab("chat")}
                 onPfzLoaded={(features) => {
                   setMapGeoJson((prev) => ({
                     type: "FeatureCollection",
@@ -634,6 +679,7 @@ function AppWorkspace() {
                   }));
                 }}
                 language={currentLanguage}
+                marineSnapshot={marineSnapshot}
               />
             </div>
           )}
@@ -647,6 +693,9 @@ function AppWorkspace() {
                 locationStatus={locationStatus}
                 onNavigateToChat={() => setActiveTab("chat")}
                 language={currentLanguage}
+                marineSnapshot={marineSnapshot}
+                onRecheck={handleRecheck}
+                isRechecking={isLoading}
               />
             </div>
           )}
@@ -674,6 +723,13 @@ function AppWorkspace() {
           )}
         </main>
       </div>
+
+      {/* Why This Result Explainability Modal (PRD §9) */}
+      <WhyThisResultModal
+        isOpen={isWhyModalOpen}
+        onClose={() => setIsWhyModalOpen(false)}
+        snapshot={marineSnapshot}
+      />
     </div>
   );
 }

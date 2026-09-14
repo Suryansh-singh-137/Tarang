@@ -280,7 +280,60 @@ def explain_risk(state: ORCAState) -> dict:
     answer_text = "\n\n".join(lines) + details_block
     logger.info("[ExplainRisk] Qualitative explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
 
+    # Compute comparison change summary if previous assessment exists (PRD §10)
+    change_summary = None
+    prev_assessment = state.get("previous_marine_assessment")
+    if prev_assessment:
+        prev_inputs = prev_assessment.get("inputs", {})
+        curr_inputs = d.get("inputs", {})
+        prev_label = prev_assessment.get("risk_label", "UNKNOWN")
+        curr_label = label
+
+        prev_wave = prev_inputs.get("wave_height_m")
+        curr_wave = curr_inputs.get("wave_height_m")
+        prev_wind = prev_inputs.get("wind_speed_kmh")
+        curr_wind = curr_inputs.get("wind_speed_kmh")
+        prev_hazards = prev_inputs.get("active_warnings", [])
+        curr_hazards = curr_inputs.get("active_warnings", [])
+
+        changes = []
+        if prev_hazards != curr_hazards:
+            prev_h_str = ", ".join(prev_hazards) if prev_hazards else "No warning"
+            curr_h_str = ", ".join(curr_hazards) if curr_hazards else "No warning"
+            changes.append({"factor": "Hazard", "from": prev_h_str, "to": curr_h_str})
+        if prev_wave is not None and curr_wave is not None:
+            diff = curr_wave - prev_wave
+            sign = "+" if diff >= 0 else ""
+            changes.append({"factor": "Waves", "from": f"{prev_wave:.2f} m", "to": f"{curr_wave:.2f} m ({sign}{diff:.2f} m)"})
+        if prev_wind is not None and curr_wind is not None:
+            diff = curr_wind - prev_wind
+            sign = "+" if diff >= 0 else ""
+            changes.append({"factor": "Wind", "from": f"{prev_wind:.1f} km/h", "to": f"{curr_wind:.1f} km/h ({sign}{diff:.1f} km/h)"})
+        if prev_label != curr_label:
+            changes.append({"factor": "Risk", "from": prev_label, "to": curr_label})
+
+        change_summary = {
+            "has_changes": len(changes) > 0,
+            "previous_risk": prev_label,
+            "current_risk": curr_label,
+            "changes": changes,
+        }
+
+    subtype = (state.get("parsed_intent") or {}).get("intent_subtype") or "WHY_THIS_RISK"
+    top_name = components[0].get("label", "Wave height") if components else "Wave height"
+    risk_explanation_data = {
+        "risk_label": label,
+        "composite_score": total,
+        "top_factor": top_name,
+        "components": components,
+        "recommendation": recommendation,
+        "subtype": subtype,
+        "explanation_draft": answer_text,
+    }
+
     return {
         "final_answer_text": answer_text,
+        "risk_explanation_data": risk_explanation_data,
+        "change_summary": change_summary,
         "map_geojson": state.get("map_geojson", {"type": "FeatureCollection", "features": []}),
     }

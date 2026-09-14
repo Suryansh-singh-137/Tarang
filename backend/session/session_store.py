@@ -30,6 +30,7 @@ class SessionRecord:
     last_explicit_location: Optional[ResolvedLocation] = None
     last_results: Dict[str, Any] = field(default_factory=dict)
     last_marine_assessment: Optional[Dict[str, Any]] = None
+    last_marine_snapshot: Optional[Dict[str, Any]] = None
     semantic_context: Dict[str, Any] = field(default_factory=dict)
     last_parsed_intent: Optional[Dict[str, Any]] = None
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
@@ -45,6 +46,7 @@ class SessionRecord:
             "last_explicit_location": self.last_explicit_location,
             "last_results": self.last_results,
             "last_marine_assessment": self.last_marine_assessment,
+            "last_marine_snapshot": self.last_marine_snapshot,
             "semantic_context": self.semantic_context,
             "last_parsed_intent": self.last_parsed_intent,
             "conversation_history": self.conversation_history,

@@ -190,6 +190,7 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
         last_parsed_intent=session.last_parsed_intent or body.last_parsed_intent,
         last_results=session.last_results or {k: v for k, v in body.last_results.items()},
         previous_marine_assessment=session.last_marine_assessment,
+        previous_relevant_result=session.last_marine_assessment or (session.last_marine_snapshot.get("risk") if session.last_marine_snapshot else None),
         semantic_context=session.semantic_context,
         changed_fields=[],
         parse_method="rule_based_fallback",
@@ -357,6 +358,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         session.semantic_context["last_risk_label"] = session.last_marine_assessment.get("risk_label")
         session.semantic_context["last_risk_score"] = session.last_marine_assessment.get("composite_score")
         session.semantic_context["last_active_warnings"] = session.last_marine_assessment.get("inputs", {}).get("active_warnings", [])
+    if final_state.get("marine_snapshot"):
+        session.last_marine_snapshot = final_state.get("marine_snapshot")
     save_session(session)
 
     # Debug Logging (PRD Section 46)
@@ -478,6 +481,8 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "last_parsed_intent":   final_state.get("parsed_intent"),
         "last_results":         merged_results,
         "changed_fields":       final_state.get("changed_fields") or [],
+        "marine_snapshot":      final_state.get("marine_snapshot"),
+        "change_summary":       final_state.get("change_summary"),
         "selected_location":    session.selected_location,
         "marine_context":       session.marine_context,
     }
