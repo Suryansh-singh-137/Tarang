@@ -1403,6 +1403,12 @@ def detect_and_parse(state: ORCAState) -> dict:
         "should_show_recommendation": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "MULTI_INTENT"),
         "should_show_warning": intent_name in ("MARINE_SAFETY_QUERY", "TRIP_QUERY", "HAZARD_QUERY", "MULTI_INTENT"),
         "should_offer_followup": True,
+        # PRD §24 additions
+        "evidence_scope": required_caps,
+        "primary_message_style": "simple_practical",
+        "max_primary_sentences": 4,
+        "show_score": False,
+        "safety_action": "check_official_advisory",
     }
     if intent_name == "MULTI_INTENT":
         coastal_plan["intent_groups"] = multi_groups

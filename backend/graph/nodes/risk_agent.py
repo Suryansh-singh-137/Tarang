@@ -86,8 +86,11 @@ def _hazard_score(overall_hazard_level: str, active_warnings: list) -> float:
         "extreme": 100.0,
     }
     score = base.get(overall_hazard_level, 0.0)
-    if "cyclone_warning" in active_warnings:
+    warnings_lower = [str(w).lower() for w in active_warnings]
+    if "cyclone_warning" in warnings_lower:
         score = 100.0  # cyclone overrides everything
+    elif any(w in warnings_lower for w in ["severe_lightning", "gale_warning", "storm_warning", "squall", "severe_hazard"]):
+        score = max(score, 80.0)
     return score
 
 
@@ -206,14 +209,17 @@ def risk_agent(state: ORCAState) -> dict:
 
     if not critical_data_ok:
         logger.warning("[Risk] CRITICAL DATA MISSING/UNAVAILABLE. Failing closed with UNKNOWN.")
-        data = {
+        risk_assessment_payload = {
             "composite_score": None,
             "base_level": "UNKNOWN",
-            "final_level": "UNKNOWN",
             "override_active": False,
             "override_reason": "Missing or unavailable critical marine weather/hazard data",
+            "final_level": "UNKNOWN",
             "critical_hazard": False,
             "data_completeness": 0.0,
+        }
+        data = {
+            **risk_assessment_payload,
             "risk_inputs_evaluated": f"0/{total_signals}",
             "risk_label": "UNKNOWN",
             "component_scores": {},
@@ -222,9 +228,7 @@ def risk_agent(state: ORCAState) -> dict:
             "evidence_coverage": "insufficient",
             "inputs": {},
             "recommendation": (
-                "Tarang does not have enough reliable data to assess the trip safely right now. "
-                "Do NOT go to sea until official live data is available. "
-                "Consult local port authorities immediately."
+                "Tarang does not have enough reliable data to assess the trip safely right now."
             ),
             "data_sources_live": {
                 "weather": weather_ok,
@@ -256,6 +260,7 @@ def risk_agent(state: ORCAState) -> dict:
             "risk_result": result,
             "trace": current_trace + [result],
             "risk_sufficient_data": False,
+            "risk_assessment": risk_assessment_payload,
         }
 
     # ---- Track how many signals are available (for evidence_coverage) ----
@@ -271,10 +276,30 @@ def risk_agent(state: ORCAState) -> dict:
         wave_height_m  = 2.0
         wind_speed_kmh = 30.0
 
-    if hazard and hazard.get("status") == "success":
-        hazard_level    = hazard["data"].get("overall_hazard_level", "none")
-        active_warnings = hazard["data"].get("active_warnings", [])
-        available_signals += 1
+    active_warnings: list[str] = []
+    if hazard and hazard.get("status") in ("success", "partial"):
+        h_data = hazard.get("data")
+        if isinstance(h_data, dict):
+            hazard_level = str(h_data.get("overall_hazard_level") or h_data.get("hazard_level") or "none").lower()
+            raw_act = h_data.get("active_warnings") or h_data.get("hazards") or []
+            if isinstance(raw_act, list):
+                for item in raw_act:
+                    if isinstance(item, str):
+                        active_warnings.append(item)
+                    elif isinstance(item, dict):
+                        for fld in ("type", "title", "severity", "name"):
+                            if item.get(fld):
+                                active_warnings.append(str(item[fld]))
+            elif isinstance(raw_act, str):
+                active_warnings.append(raw_act)
+            if h_data.get("hazard"):
+                active_warnings.append(str(h_data["hazard"]))
+            if h_data.get("severe_active_hazard"):
+                active_warnings.append("severe_hazard")
+            available_signals += 1
+        elif isinstance(h_data, str):
+            active_warnings.append(h_data)
+            available_signals += 1
     else:
         hazard_level    = "none"
         active_warnings = []
@@ -311,26 +336,44 @@ def risk_agent(state: ORCAState) -> dict:
     critical_hazard = False
 
     warnings_lower = [str(w).lower() for w in active_warnings]
-    has_severe_warning = any(
-        w in warnings_lower for w in ["cyclone_warning", "severe_lightning", "gale_warning", "storm_warning", "squall"]
-    ) or any("lightning" in w for w in warnings_lower)
+    is_extreme_hazard = (
+        hazard_level == "extreme"
+        or "cyclone_warning" in warnings_lower
+        or any("cyclone" in w for w in warnings_lower)
+    )
+    is_high_hazard = (
+        hazard_level == "high"
+        or any(w in warnings_lower for w in ["severe_lightning", "gale_warning", "storm_warning", "squall", "severe_hazard"])
+        or any("lightning" in w for w in warnings_lower)
+        or any("gale" in w for w in warnings_lower)
+        or any("storm" in w for w in warnings_lower)
+        or any("squall" in w for w in warnings_lower)
+        or any("severe" in w for w in warnings_lower)
+    )
+    is_moderate_hazard = (hazard_level == "moderate")
 
-    if hazard_level == "extreme" or "cyclone_warning" in warnings_lower:
+    if is_extreme_hazard:
         critical_hazard = True
         override_active = True
-        override_reason = f"Active severe hazard detected ({hazard_level})"
+        override_reason = f"Active extreme hazard detected ({hazard_level})"
         final_level = "EXTREME"
-    elif hazard_level == "high" or has_severe_warning:
+    elif is_high_hazard:
         critical_hazard = True
         if base_level in ("LOW", "MODERATE"):
             override_active = True
-            override_reason = f"High hazard advisory/warning ({hazard_level})"
+            override_reason = f"Active high hazard advisory/warning ({hazard_level if hazard_level != 'none' else 'severe_hazard'})"
             final_level = "HIGH"
-    elif hazard_level == "moderate":
+    elif is_moderate_hazard:
         if base_level == "LOW":
             override_active = True
             override_reason = "Moderate hazard advisory requires at least CAUTION"
             final_level = "MODERATE"
+
+    # PRD §7 Mandatory Invariant: if severe_active_hazard, final_status != LOW
+    if (critical_hazard or is_high_hazard or is_extreme_hazard) and final_level == "LOW":
+        override_active = True
+        override_reason = "Safety invariant: severe active hazard overrides LOW risk"
+        final_level = "HIGH"
 
     label = final_level
     data_completeness = round(available_signals / total_signals, 2)
@@ -452,9 +495,19 @@ def risk_agent(state: ORCAState) -> dict:
 
     current_trace = state.get("trace") or []
     current_evidence = state.get("evidence") or []
+    risk_assessment_payload = {
+        "composite_score": composite,
+        "base_level": base_level,
+        "override_active": override_active,
+        "override_reason": override_reason,
+        "final_level": final_level,
+        "critical_hazard": critical_hazard,
+        "data_completeness": data_completeness,
+    }
     return {
         "risk_result": result,
         "trace": current_trace + [result],
         "evidence": current_evidence + evidence,
         "risk_sufficient_data": True,
+        "risk_assessment": risk_assessment_payload,
     }

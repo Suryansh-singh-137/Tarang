@@ -57,11 +57,12 @@ export const MessageBubble: React.FC<Props> = ({
             label={message.risk_data.risk_label}
             score={message.risk_data.composite_score}
             size="lg"
+            showScore={message.answer_plan?.show_score ?? false}
           />
 
           {message.risk_data.evidence_coverage && (
             <span className="text-xs text-[var(--ink-muted)] font-medium bg-[var(--surface-muted)] px-2.5 py-1 rounded-full border border-[var(--border)]">
-              Signals: {message.risk_data.evidence_coverage}
+              Risk inputs evaluated: {message.risk_data.evidence_coverage}
             </span>
           )}
         </div>
@@ -93,7 +94,7 @@ export const MessageBubble: React.FC<Props> = ({
         <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs">
             <CloudSun className="w-3.5 h-3.5 text-sky-600" />
-            Live Weather Observation
+            Current & Forecast Weather
           </span>
           <span className="text-[11px] text-[var(--ink-muted)]">IMD / Open-Meteo</span>
         </div>
@@ -105,7 +106,7 @@ export const MessageBubble: React.FC<Props> = ({
         <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
             <Waves className="w-3.5 h-3.5 text-blue-600" />
-            Tide & Water Level Station
+            Tide & Water Level Prediction
           </span>
           <span className="text-[11px] text-[var(--ink-muted)]">SOI Harmonic Datum</span>
         </div>
@@ -117,7 +118,7 @@ export const MessageBubble: React.FC<Props> = ({
         <div className="pb-3 border-b border-[var(--border)] flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200 shadow-2xs">
             <Fish className="w-3.5 h-3.5 text-teal-600" />
-            Potential Fishing Zone Advisory
+            Fishing Potential Indicator
           </span>
           <span className="text-[11px] text-[var(--ink-muted)]">INCOIS Satellite</span>
         </div>

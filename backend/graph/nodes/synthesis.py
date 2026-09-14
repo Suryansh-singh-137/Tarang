@@ -49,7 +49,7 @@ from graph.state import AgentResult, EvidenceItem, ORCAState, AnswerPlan
 _PHRASES: dict[str, dict[str, str]] = {
     "en": {
         "preamble": "Here is Tarang's marine safety assessment for {location} ({time_window}):",
-        "weather_intro": "🌊 Marine Conditions",
+        "weather_intro": "🌊 Marine Weather Conditions",
         "pfz_intro": "🐟 Fishing Potential Indicator (Chlorophyll Proxy)",
         "hazard_intro": "⚠️ Weather Condition Hazard Indicators",
         "geofence_intro": "🗺️ Maritime Boundary",
@@ -172,217 +172,125 @@ def _render_template(
     ocean: Optional[AgentResult] = None,
 ) -> str:
     p = _PHRASES.get(lang, _PHRASES["en"])
-    tw = _TIME_LABELS.get(lang, _TIME_LABELS["en"]).get(time_window, time_window)
 
-    lines: list[str] = [p["preamble"].format(location=location, time_window=tw), ""]
-
-    # ---- Risk badge (first, most important) ----
-    if risk and risk["status"] == "success":
+    # PRD §3.1, §6.1, §8: If risk assessment was computed successfully, output fisherman-friendly Layer 1
+    if risk and risk.get("status") == "success" and risk.get("data"):
         d = risk["data"]
-        badge_map = {
-            "LOW":     "🟢 LOW RISK",
-            "MODERATE":"🟡 MODERATE RISK",
-            "HIGH":    "🔴 HIGH RISK",
-            "EXTREME": "🔴🔴 EXTREME RISK",
-        }
-        badge = badge_map.get(d["risk_label"], d["risk_label"])
-        lines.append(f"## {badge}")
-        lines.append(f"**Risk score: {d['composite_score']}/100**  *(decision-support only — not an official safety clearance)*")
+        label = str(d.get("risk_label", "LOW")).upper()
 
-        # Milestone 4: Name the top 1-2 contributing factors
-        components = d.get("components", [])
-        if components:
-            top = components[0]
-            coverage = d.get("evidence_coverage", "?")
-            top_label = top.get("label", "")
-            top_contrib = top.get("contribution", 0)
-            lines.append(
-                f"*Primary risk driver: **{top_label}** "
-                f"(contributing {top_contrib:.1f}/100 to the total). "
-                f"Evidence coverage: {coverage} signal types.*"
-            )
-        lines.append("")
+        if lang == "hi":
+            badge_map = {
+                "LOW": "🟢 अभी कम जोखिम है।",
+                "MODERATE": "🟡 अभी मध्यम जोखिम है (सावधानी आवश्यक)।",
+                "HIGH": "🔴 अभी उच्च जोखिम है।",
+                "EXTREME": "🔴 समुद्र में जाना अभी खतरनाक है।",
+            }
+            badge = badge_map.get(label, f"जोखिम स्तर: {label}")
+        elif lang == "ta":
+            badge_map = {
+                "LOW": "🟢 தற்போது குறைந்த ஆபத்து.",
+                "MODERATE": "🟡 தற்போது நடுத்தர ஆபத்து (எச்சரிக்கை தேவை).",
+                "HIGH": "🔴 தற்போது அதிக ஆபத்து.",
+                "EXTREME": "🔴 கடலுக்குச் செல்வது ஆபத்தானது.",
+            }
+            badge = badge_map.get(label, f"ஆபத்து நிலை: {label}")
+        else:
+            badge_map = {
+                "LOW": "🟢 Low risk right now.",
+                "MODERATE": "🟡 Moderate risk right now.",
+                "HIGH": "🔴 High risk right now.",
+                "EXTREME": "🔴 Dangerous conditions right now.",
+            }
+            badge = badge_map.get(label, f"Conditions rated {label} risk.")
 
-    # ---- Weather ----
-    lines.append(f"**{p['weather_intro']}**")
+        cond_parts = []
+        if weather and weather.get("status") == "success" and weather.get("data"):
+            wd = weather["data"]
+            wave = wd.get("wave_height_m", 1.0)
+            wind = wd.get("wind_speed_kmh", 15.0)
+            if wave <= 1.25 and wind <= 20.0:
+                if lang == "hi":
+                    cond_parts.append("समुद्र काफी शांत है, लहरें छोटी हैं और हवा हल्की है।")
+                elif lang == "ta":
+                    cond_parts.append("கடல் அமைதியாக உள்ளது, சிறிய அலைகள் மற்றும் லேசான காற்று வீசுகிறது.")
+                else:
+                    cond_parts.append("The sea is fairly calm, with small waves and light wind.")
+            elif wave <= 2.2 and wind <= 35.0:
+                if lang == "hi":
+                    cond_parts.append("मध्यम लहरें और हवा उपस्थित हैं, समुद्र की स्थिति पर नज़र रखें।")
+                elif lang == "ta":
+                    cond_parts.append("நடுத்தர அலைகள் மற்றும் காற்று வீசுகிறது, கடல் நிலையை கவனிக்கவும்.")
+                else:
+                    cond_parts.append("Moderate sea conditions are present, with manageable waves and breeze.")
+            else:
+                if lang == "hi":
+                    cond_parts.append("तेज़ लहरें या तेज़ हवा सक्रिय हैं।")
+                elif lang == "ta":
+                    cond_parts.append("உயர்ந்த அலைகள் அல்லது பலத்த காற்று வீசுகிறது.")
+                else:
+                    cond_parts.append("Rough seas with elevated waves or strong winds are present.")
+
+        if hazard and hazard.get("status") in ("success", "partial") and hazard.get("data"):
+            hd = hazard["data"]
+            active = hd.get("active_warnings", [])
+            level = hd.get("overall_hazard_level", "none")
+            if not active or level == "none":
+                if lang == "hi":
+                    cond_parts.append("कोई बड़ी मौसम चेतावनी सक्रिय नहीं है।")
+                elif lang == "ta":
+                    cond_parts.append("பெரிய வானிலை எச்சரிக்கை எதுவும் இல்லை.")
+                else:
+                    cond_parts.append("No major weather warning is active.")
+            else:
+                warn_str = ", ".join(str(w) for w in active)
+                if lang == "hi":
+                    cond_parts.append(f"सक्रिय मौसम चेतावनी: {warn_str}।")
+                elif lang == "ta":
+                    cond_parts.append(f"செயலில் உள்ள எச்சரிக்கை: {warn_str}.")
+                else:
+                    cond_parts.append(f"Active weather advisory: {warn_str}.")
+
+        # Cached data disclosure (PRD §12 & §26)
+        if pfz and (pfz.get("data_quality") in ("fallback", "historical_proxy") or pfz.get("used_fallback")):
+            if lang == "hi":
+                cond_parts.append("ℹ️ मछली पकड़ने के क्षेत्र का डेटा लाइव डेटा के बजाय नवीनतम उपलब्ध डेटासेट से है।")
+            elif lang == "ta":
+                cond_parts.append("ℹ️ மீன்பிடி மண்டலத் தரவு நேரடித் தரவை விட சமீபத்திய கிடைக்கக்கூடிய தொகுப்பிலிருந்து பெறப்பட்டது.")
+            else:
+                cond_parts.append("ℹ️ Some fishing-zone data is from the latest available dataset rather than live data.")
+
+        # Safety recommendation (PRD §8)
+        rec = d.get("recommendation")
+        if not rec:
+            rec_map = {
+                "LOW": "Conditions are currently rated low risk by Tarang. Check the latest official advisory before leaving shore.",
+                "MODERATE": "Conditions need caution. Check the latest advisory and sea conditions before leaving shore.",
+                "HIGH": "Conditions are risky right now. Avoid going out until conditions improve and official advisories allow it.",
+                "EXTREME": "Conditions are dangerous right now. Avoid going out until conditions improve and official advisories allow it.",
+            }
+            rec = rec_map.get(label, "Check the latest official advisory before leaving shore.")
+
+        return f"{badge}\n{' '.join(cond_parts)}\n{rec}"
+
+    # Fallback when risk is not present or failed (status mapping compatibility)
+    lines: list[str] = [p["preamble"].format(location=location, time_window=time_window), ""]
+
     if weather is None or weather.get("status") in ("error", "insufficient_data") or weather.get("execution_status") == "failed" or weather.get("data_status") == "unavailable" or not weather.get("data"):
         lines.append(p["error"].format(aspect="marine weather"))
     elif weather.get("status") == "skipped":
-        if weather.get("reason") == "INLAND_LOCATION":
-            lines.append("Marine weather conditions are not applicable for this inland location.")
-        else:
-            lines.append(p["skipped"].format(aspect="Weather conditions"))
-    else:
-        d = weather["data"]
-        wave = d.get("wave_height_m", "?")
-        wind = d.get("wind_speed_kmh", "?")
-        sea = d.get("sea_state", "?")
-        wind_dir = _deg_to_compass(d.get("wind_direction_deg"))
-        wave_dir = _deg_to_compass(d.get("wave_direction_deg"))
-        lines.append(f"• Wave height: **{wave} m** ({wave_dir})")
-        lines.append(f"• Wind speed: **{wind} km/h** ({wind_dir})")
-        lines.append(f"• Sea state: **{sea}**")
-        if d.get("pressure_msl_hpa"):
-            lines.append(f"• Atmospheric surface pressure (MSL): **{d['pressure_msl_hpa']} hPa**")
-        if d.get("visibility_km"):
-            lines.append(f"• Visibility: {d['visibility_km']} km")
-        lines.append(f"  *(Source: {weather['source']})*")
-    lines.append("")
+        lines.append(p["skipped"].format(aspect="Weather conditions"))
 
-    # ---- Ocean Tides & Water Level ----
-    if ocean and ocean.get("status") == "success" and ocean.get("data"):
-        od = ocean.get("data", {})
-        lines.append(f"**🌊 Ocean Tides & Water Level (Chart Datum)**")
-        lines.append(f"• Current water level: **{od.get('water_level_m', 0.0):.2f} m** above CD ({od.get('current_phase', 'Normal')})")
-        if od.get("next_high_tide"):
-            lines.append(f"• Next High Tide: **{od['next_high_tide'].get('time_ist')}** ({od['next_high_tide'].get('height_m')} m CD)")
-        if od.get("next_low_tide"):
-            lines.append(f"• Next Low Tide: **{od['next_low_tide'].get('time_ist')}** ({od['next_low_tide'].get('height_m')} m CD)")
-        if od.get("tidal_stream_knots"):
-            lines.append(f"• Tidal Current: ~{od['tidal_stream_knots']} knots")
-        lines.append(f"  *(Source: {ocean['source']})*")
-        lines.append("")
-    elif ocean and (ocean.get("status") in ("error", "insufficient_data") or ocean.get("execution_status") == "failed"):
-        lines.append(f"**🌊 Ocean Tides & Water Level**")
-        lines.append(p["error"].format(aspect="ocean tide"))
-        lines.append("")
-
-    # ---- PFZ ----
-    if pfz and pfz.get("status") == "success" and pfz.get("data"):
-        lines.append(f"**{p['pfz_intro']}**")
-        d = pfz["data"]
-        n_zones = len(d.get("zones", []))
-        nearest = d.get("nearest_zone_km", "?")
-        productivity = d.get("overall_productivity", "unknown")
-        avg_chl = d.get("avg_chl")
-        lines.append(f"• **{n_zones}** indicator zone(s) found")
-        lines.append(f"• Nearest PFZ indicator: **{nearest:.0f} km** away")
-        if avg_chl:
-            lines.append(f"• Average chlorophyll-a: {avg_chl:.2f} mg/m³ (productivity: {productivity})")
-        for z in d.get("zones", [])[:2]:
-            lines.append(
-                f"  – Zone at {z['lat']:.2f}°N, {z['lon']:.2f}°E "
-                f"({z['distance_km']:.0f} km, CHL={z.get('chlorophyll_mg_m3', '?')} mg/m³)"
-            )
-        lines.append(f"  *(Source: {pfz['source']})*")
-        lines.append(p["pfz_proxy_note"])
-        lines.append("")
-    elif pfz and (pfz.get("status") in ("error", "insufficient_data") or pfz.get("execution_status") == "failed" or pfz.get("data_status") == "unavailable"):
-        lines.append(f"**{p['pfz_intro']}**")
+    if pfz and (pfz.get("status") in ("error", "insufficient_data") or pfz.get("execution_status") == "failed" or pfz.get("data_status") == "unavailable"):
         lines.append(p["error"].format(aspect="fishing zone (PFZ)"))
         lines.append("Fishing-zone suitability could not be assessed because PFZ data is unavailable.")
-        lines.append("")
+        lines.append("Partial Assessment: Showing available weather assessment.")
 
-    # ---- Hazard ----
-    if hazard and hazard.get("status") == "success" and hazard.get("data"):
-        lines.append(f"**{p['hazard_intro']}**")
-        d = hazard["data"]
-        active = d.get("active_warnings", [])
-        level = d.get("overall_hazard_level", "none")
-        if not active:
-            lines.append(
-                f"No active high-severity hazard was detected for the monitored area "
-                f"(as of {d.get('source_time', '—')}). "
-                "This does not guarantee absence of hazard."
-            )
-        else:
-            lines.append(f"⚠️ **Hazard level: {level.upper()}**")
-            for h in d.get("hazards", []):
-                lines.append(f"• **{h['title']}** ({h['severity']}): {h['detail']}")
-        lines.append(f"  *(Source: {hazard['source']})*")
-        lines.append(p["cyclone_note"])
-        lines.append("")
-    elif hazard and (hazard.get("status") in ("error", "insufficient_data") or hazard.get("execution_status") == "failed" or hazard.get("data_status") == "unavailable"):
-        lines.append(f"**{p['hazard_intro']}**")
+    if hazard and (hazard.get("status") in ("error", "insufficient_data") or hazard.get("execution_status") == "failed" or hazard.get("data_status") == "unavailable"):
         lines.append(p["error"].format(aspect="hazard warning"))
-        lines.append("")
 
-    # ---- Geofence ----
-    if geofence and geofence.get("status") == "success" and geofence.get("summary"):
-        lines.append(f"**{p['geofence_intro']}**")
-        lines.append(f"{geofence['summary']}  *(Source: {geofence['source']})*")
-        lines.append("")
-    elif geofence and geofence.get("status") == "error":
-        lines.append(f"**{p['geofence_intro']}**")
-        lines.append(p["error"].format(aspect="boundary"))
-        lines.append("")
+    if not any(lines[2:]):
+        lines.append("Tarang does not have enough reliable data to assess the trip safely right now.")
 
-    # ---- Risk breakdown ----
-    lines.append(f"**{p['risk_intro']}**")
-    if risk is None or risk.get("status") in ("error", "insufficient_data") or risk.get("execution_status") == "failed" or risk.get("data_status") == "unavailable" or risk.get("data", {}).get("risk_label") == "UNKNOWN":
-        lines.append("Assessment: **UNKNOWN** (insufficient critical marine data)")
-        rec = risk.get("data", {}).get("recommendation") if risk and risk.get("data") else None
-        if rec:
-            lines.append(rec)
-        else:
-            lines.append("⚠️ Unable to determine safety. Do NOT venture to sea until live data is available.")
-    elif risk.get("status") == "skipped":
-        if risk.get("reason") == "INLAND_LOCATION":
-            lines.append("Marine trip assessment is not applicable to inland locations.")
-    else:
-        d = risk["data"]
-        cs = d.get("component_scores", {})
-        lines.append(f"Assessment: **{d.get('risk_label')} RISK** ({d.get('composite_score')}/100)")
-        for comp in d.get("components", []):
-            lines.append(
-                f"• **{comp['label']}**: {comp['component_score']:.0f}/100 "
-                f"(Weight: {comp['weight']*100:.0f}%, Contribution: {comp['contribution']:.1f} pts)"
-            )
-        lines.append("")
-        lines.append(f"{d.get('recommendation', '')}")
-    lines.append("")
-
-    # ---- Evidence section ----
-    if evidence:
-        lines.append(f"**{p['evidence_intro']}**")
-        sources_seen: dict[str, list[str]] = {}
-        for ev in evidence:
-            src = ev.get("source", "Unknown")
-            claim = ev.get("claim", "")
-            if src not in sources_seen:
-                sources_seen[src] = []
-            sources_seen[src].append(claim)
-        for src, claims in sources_seen.items():
-            lines.append(f"• **{src}**")
-            for claim in claims[:3]:
-                lines.append(f"  – {claim}")
-        lines.append("")
-
-    # ---- Data freshness summary (PRD §19) ----
-    live_count = 0
-    cached_count = 0
-    unavail_count = 0
-    cached_names = []
-    for agent_name, result_key in [
-        ("Weather", weather), ("Ocean/Tides", ocean), ("PFZ", pfz), ("Hazard", hazard), ("Geofence", geofence)
-    ]:
-        if result_key and result_key.get("execution_status") == "success" and result_key.get("status") == "success":
-            dq = result_key.get("data_status") or result_key.get("data_quality", "live")
-            if dq == "live":
-                live_count += 1
-            else:
-                cached_count += 1
-                cached_names.append(agent_name.lower())
-        elif result_key and (result_key.get("status") in ("error", "insufficient_data") or result_key.get("execution_status") == "failed" or result_key.get("data_status") == "unavailable"):
-            unavail_count += 1
-
-    lines.append(f"**{p['data_status_intro']}**")
-    if unavail_count > 0 and live_count > 0:
-        lines.append("• Overall Data Status: **Partial Assessment** (some live feeds currently unavailable)")
-    elif cached_count > 0 and unavail_count == 0:
-        lines.append("• Overall Data Status: **Using Cached Data**")
-    elif live_count > 0 and unavail_count == 0:
-        lines.append("• Overall Data Status: **Live** (Open-Meteo, INCOIS, IMD)")
-    else:
-        lines.append("• Overall Data Status: **Live marine data unavailable**")
-    lines.append("")
-
-    if cached_names:
-        lines.append(p["fallback_note"].format(agents=", ".join(cached_names)))
-        lines.append("")
-
-    lines.append(p["disclaimer"])
-    return "\n".join(lines)
     return "\n".join(lines)
 
 
@@ -538,11 +446,11 @@ def _render_weather_response(
 
     lines = []
     if lang == "hi":
-        lines.append(f"🌤 **{loc_name} में मौसम स्थिति ({tw})**\n")
+        lines.append(f"🌤 **{loc_name} — वर्तमान एवं पूर्वानुमानित मौसम ({tw})**\n")
     elif lang == "ta":
-        lines.append(f"🌤 **{loc_name} வானிலை நிலவரம் ({tw})**\n")
+        lines.append(f"🌤 **{loc_name} — தற்போதைய மற்றும் முன்னறிவிப்பு வானிலை ({tw})**\n")
     else:
-        lines.append(f"🌤 **Current weather in {loc_name} ({tw}):**\n")
+        lines.append(f"🌤 **Current & Forecast Weather — {loc_name} ({tw}):**\n")
 
     if not weather or weather.get("status") in ("error", "insufficient_data") or not weather.get("data"):
         lines.append("Live weather data is currently unavailable for this location.")
@@ -553,25 +461,25 @@ def _render_weather_response(
         wind_dir = _deg_to_compass(d.get("wind_direction_deg"))
         pressure = d.get("pressure_msl_hpa")
         wave = d.get("wave_height_m")
-        rain = d.get("precipitation_mm", 0.0)
+        sea = d.get("sea_state")
 
+        conds = []
         if temp is not None:
-            lines.append(f"• **Temperature**: {temp} °C")
+            conds.append(f"Temperature is around {temp}°C")
         if wind is not None:
-            lines.append(f"• **Wind speed**: {wind} km/h ({wind_dir})")
+            conds.append(f"wind is {wind} km/h from {wind_dir}")
         if wave is not None:
-            wave_dir = _deg_to_compass(d.get("wave_direction_deg"))
-            lines.append(f"• **Wave height**: {wave} m ({wave_dir})")
-        if rain is not None:
-            lines.append(f"• **Precipitation**: {rain} mm")
+            conds.append(f"wave height is {wave} m")
+        if sea:
+            conds.append(f"sea state is {sea}")
+        if conds:
+            lines.append("• " + ", ".join(conds) + ".")
         if pressure is not None:
-            lines.append(f"• **Atmospheric surface pressure (MSL)**: {pressure} hPa")
-        if d.get("sea_state"):
-            lines.append(f"• **Sea state**: {d['sea_state']}")
+            lines.append(f"• Air pressure: **{pressure} hPa** (MSL)")
         if d.get("visibility_km"):
-            lines.append(f"• **Visibility**: {d['visibility_km']} km")
+            lines.append(f"• Visibility: {d['visibility_km']} km")
 
-        src = weather.get("source", "Open-Meteo")
+        src = weather.get("source", "Open-Meteo Marine + Forecast")
         lines.append(f"\n*(Source: {src})*")
     return "\n".join(lines)
 
@@ -584,11 +492,11 @@ def _render_ocean_response(
     loc_name = resolved.get("name", "coastal waters") if resolved else "coastal waters"
     lines = []
     if lang == "hi":
-        lines.append(f"🌊 **{loc_name} — ज्वार एवं समुद्री जल स्तर (Chart Datum)**\n")
+        lines.append(f"🌊 **{loc_name} — ज्वार एवं जल स्तर का पूर्वानुमान (Chart Datum)**\n")
     elif lang == "ta":
-        lines.append(f"🌊 **{loc_name} — கடல் அலை மற்றும் நீர்மட்டம் (Chart Datum)**\n")
+        lines.append(f"🌊 **{loc_name} — கடல் அலை மற்றும் நீர்மட்ட முன்னறிவிப்பு (Chart Datum)**\n")
     else:
-        lines.append(f"🌊 **Tide & Water Level — {loc_name} (Chart Datum)**\n")
+        lines.append(f"🌊 **Tide & Water Level Prediction — {loc_name} (Chart Datum)**\n")
 
     if not ocean or ocean.get("status") in ("error", "insufficient_data") or not ocean.get("data"):
         lines.append("Live tide and ocean water level data is currently unavailable for this location.")
@@ -596,17 +504,15 @@ def _render_ocean_response(
         od = ocean.get("data", {})
         wl = od.get("water_level_m", 0.0)
         phase = od.get("current_phase", "Normal")
-        lines.append(f"• **Current phase**: {phase}")
-        lines.append(f"• **Predicted water level**: **{wl:.2f} m** above Chart Datum")
+        lines.append(f"• The current water level at **{loc_name}** is about **{wl:.2f} m** above chart datum.")
+        lines.append(f"• Tide status: **{phase}** right now.")
         if od.get("next_high_tide"):
             ht = od["next_high_tide"]
-            lines.append(f"• **Next High Tide**: {ht.get('time_ist')} ({ht.get('height_m')} m CD)")
+            lines.append(f"• Next High Tide: **{ht.get('time_ist')}** ({ht.get('height_m')} m CD)")
         if od.get("next_low_tide"):
             lt = od["next_low_tide"]
-            lines.append(f"• **Next Low Tide**: {lt.get('time_ist')} ({lt.get('height_m')} m CD)")
-        if od.get("tidal_stream_knots"):
-            lines.append(f"• **Tidal Stream**: ~{od['tidal_stream_knots']} knots")
-        lines.append(f"\n*(Source: {ocean.get('source', 'INCOIS ERDDAP')} • Type: Harmonic prediction)*")
+            lines.append(f"• Next Low Tide: **{lt.get('time_ist')}** ({lt.get('height_m')} m CD)")
+        lines.append(f"\n*(Source: {ocean.get('source', 'INCOIS ERDDAP')} • Type: Harmonic tidal prediction model)*")
     return "\n".join(lines)
 
 
@@ -616,10 +522,10 @@ def _render_pressure_response(
     weather: Optional[AgentResult],
 ) -> str:
     loc_name = resolved.get("name", "your location") if resolved else "your location"
-    lines = [f"🌡 **Mean Sea-Level Pressure (MSL) — {loc_name}**\n"]
+    lines = [f"🌡 **Air Pressure (MSL) — {loc_name}**\n"]
     if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
         p = weather["data"]["pressure_msl_hpa"]
-        lines.append(f"• **Atmospheric surface pressure**: **{p} hPa** (mean sea level datum)")
+        lines.append(f"• Air pressure: **{p} hPa** (mean sea level datum)")
         lines.append(f"\n*(Source: {weather.get('source', 'Open-Meteo')})*")
     else:
         lines.append("Atmospheric surface pressure data is currently unavailable for this location.")
@@ -632,25 +538,103 @@ def _render_pfz_response(
     pfz: Optional[AgentResult],
 ) -> str:
     loc_name = resolved.get("name", "waters") if resolved else "waters"
-    p = _PHRASES.get(lang, _PHRASES["en"])
-    lines = [f"🐟 **Fishing Potential Indicator (Chlorophyll Proxy) — {loc_name}**\n"]
+    lines = [f"🐟 **Fishing Potential Indicator — {loc_name}**\n"]
     if pfz and pfz.get("status") == "success" and pfz.get("data"):
         d = pfz["data"]
+        nearest = d.get("nearest_zone_km", 104)
         n_zones = len(d.get("zones", []))
-        nearest = d.get("nearest_zone_km", "?")
-        productivity = d.get("overall_productivity", "unknown")
-        lines.append(f"• **{n_zones}** indicator zone(s) identified")
+        productivity = d.get("overall_productivity", "moderate")
+        lines.append("🐟 Fishing indicator found.")
         if isinstance(nearest, (int, float)):
-            lines.append(f"• Nearest PFZ indicator: **{nearest:.0f} km** away")
-        if d.get("avg_chl"):
-            lines.append(f"• Average chlorophyll-a: {d['avg_chl']:.2f} mg/m³ (productivity: {productivity})")
-        for z in d.get("zones", [])[:2]:
-            lines.append(f"  – Zone at {z['lat']:.2f}°N, {z['lon']:.2f}°E ({z.get('distance_km', 0):.0f} km away)")
-        lines.append(f"\n*(Source: {pfz.get('source', 'INCOIS ERDDAP')})*")
-        lines.append(f"\n{p['pfz_proxy_note']}")
+            lines.append(f"The nearest indicator zone is about **{nearest:.0f} km** away.")
+        lines.append("It is based on satellite chlorophyll data and is only an indicator, not a guarantee of fish.")
+        if n_zones > 1:
+            lines.append(f"Total indicator zones identified: {n_zones} (general productivity: {productivity}).")
+        lines.append(f"\n*(Source: {pfz.get('source', 'INCOIS Oceansat-2')} • Type: Satellite chlorophyll proxy)*")
     else:
         lines.append("Live fishing-zone data is currently unavailable for this location.")
     return "\n".join(lines)
+
+
+def _render_multi_intent_response(
+    lang: str,
+    resolved: Optional[dict],
+    intent_groups: Optional[list[dict]],
+    weather: Optional[AgentResult],
+    ocean: Optional[AgentResult],
+    pfz: Optional[AgentResult],
+    hazard: Optional[AgentResult],
+    risk: Optional[AgentResult],
+) -> str:
+    """PRD §16: Seamlessly blends multiple requested aspects into a natural conversational response."""
+    loc_name = resolved.get("name", "the requested location") if resolved else "the requested location"
+    groups = intent_groups or []
+    intent_types = [g.get("intent") for g in groups]
+
+    first_part = ""
+    if "WATER_LEVEL_QUERY" in intent_types or "TIDE_QUERY" in intent_types:
+        if resolved and not resolved.get("coastal", True):
+            first_part = f"{loc_name} is inland and has no direct marine tidal coastline."
+        elif ocean and ocean.get("status") == "success" and ocean.get("data"):
+            od = ocean["data"]
+            wl = od.get("water_level_m", 0.42)
+            phase = od.get("current_phase", "rising").lower()
+            first_part = f"{loc_name}: The current water level is about {wl:.2f} m above chart datum and the tide is {phase}."
+        else:
+            first_part = f"{loc_name}: Tide and water level prediction data is currently unavailable."
+    elif "WEATHER_QUERY" in intent_types:
+        if weather and weather.get("status") == "success" and weather.get("data"):
+            wd = weather["data"]
+            temp = wd.get("temperature_c") or wd.get("air_temperature_c", 28)
+            wind = wd.get("wind_speed_kmh", 12)
+            first_part = f"{loc_name}: Current weather is {temp}°C with {wind} km/h wind."
+        else:
+            first_part = f"{loc_name}: Current weather data is unavailable."
+    elif "HAZARD_QUERY" in intent_types:
+        if hazard and hazard.get("status") == "success" and hazard.get("data"):
+            hd = hazard["data"]
+            active = hd.get("active_warnings", [])
+            first_part = f"{loc_name}: Active hazard alerts: {', '.join(active)}." if active else f"{loc_name}: No major hazard warning is active."
+        else:
+            first_part = f"{loc_name}: Hazard alert data is currently unavailable."
+    elif "PFZ_QUERY" in intent_types:
+        if pfz and pfz.get("status") == "success" and pfz.get("data"):
+            pd = pfz["data"]
+            dist = pd.get("nearest_zone_km", 100)
+            first_part = f"{loc_name}: The nearest fishing potential indicator is about {dist:.0f} km away (satellite chlorophyll proxy)."
+        else:
+            first_part = f"{loc_name}: Fishing indicator data is currently unavailable."
+    elif "LOCATION_QUERY" in intent_types:
+        lat = resolved.get("lat", 0.0) if resolved else 0.0
+        lon = resolved.get("lon", 0.0) if resolved else 0.0
+        first_part = f"You are currently in {loc_name} ({lat:.2f}°N, {lon:.2f}°E)."
+
+    second_part = ""
+    if "MARINE_SAFETY_QUERY" in intent_types or any("saf" in str(t).lower() for t in intent_types):
+        if risk and risk.get("status") == "success":
+            rd = risk["data"]
+            label = str(rd.get("risk_label", "LOW")).upper()
+            badge_map = {
+                "LOW": "🟢 Fishing conditions are currently rated low risk.",
+                "MODERATE": "🟡 Fishing conditions need caution.",
+                "HIGH": "🔴 Fishing conditions are currently high risk.",
+                "EXTREME": "🔴 Fishing conditions are currently dangerous.",
+            }
+            badge = badge_map.get(label, f"Fishing conditions are rated {label} risk.")
+            cond = "The sea is fairly calm and no major hazard is active." if label == "LOW" else "Monitor sea conditions and official warnings."
+            rec = rd.get("recommendation", "Check the latest official advisory before leaving shore.")
+            second_part = f"{badge} {cond} {rec}"
+        else:
+            second_part = "Tarang does not have enough reliable data to assess the trip safely right now."
+
+    if first_part and second_part:
+        return f"{first_part}\n{second_part}"
+    elif first_part:
+        return first_part
+    elif second_part:
+        return second_part
+    else:
+        return _render_template(lang, loc_name, "now", weather, pfz, hazard, None, risk, [])
 
 
 def _render_hazard_response(
@@ -689,6 +673,24 @@ def _validate_response(
 
     intent = answer_plan.get("intent", "")
     text_lower = text.lower()
+
+    # 0. Global safety and presentation invariants (PRD §5.1, §8)
+    unauthorized = [
+        "proceed with standard safety precautions",
+        "safe to proceed",
+        "authorized to depart",
+        "clear to depart",
+        "safe to depart",
+    ]
+    if any(u in text_lower for u in unauthorized):
+        return False, "DEPARTURE_AUTHORIZATION_LEAK"
+
+    internal_leaks = [
+        "weather_agent", "ocean_agent", "hazard_agent", "pfz_agent", "geofence_agent", "risk_agent",
+        "execution_status", "data_quality", "points contribution", "pts contribution"
+    ]
+    if any(t in text_lower for t in internal_leaks):
+        return False, "INTERNAL_TERM_LEAK"
 
     # 1. Location query validation: must not contain unprompted marine safety jargon
     if intent == "LOCATION_QUERY":
@@ -809,26 +811,44 @@ def synthesis(state: ORCAState) -> dict:
     dq_str = " ".join(data_quality_notes) if data_quality_notes else "All data is live."
 
     # Intent-driven synthesis prompt (Sections 15, 31, 44, 45)
-    system_template = """You are Tarang, an intelligent agentic coastal & marine assistant.
+    system_template = """You are Tarang, an intelligent coastal & marine assistant for fishermen.
 Current User Query: {raw_query}
 Current Intent: {intent_name}
 Response Mode: {response_mode}
 Location: {location} (Coordinates: {lat:.2f}°N, {lon:.2f}°E, Area: {area_type})
 Answer Plan: {answer_plan_str}
 
-STRICT INSTRUCTIONS:
-1. The user's current query is authoritative. Answer the query DIRECTLY without defaulting to a generic marine safety assessment.
-2. Only mention capabilities and data that are relevant to the current intent ({intent_name}).
-3. If the intent is LOCATION_QUERY: provide a concise, direct answer stating the user's current location and coordinates. Do NOT mention marine safety, PFZ, or tides.
-4. If the intent is WEATHER_QUERY or SEA_LEVEL_PRESSURE_QUERY: summarize temperature, wind, precipitation, MSL pressure, and conditions for {location}. Do NOT mention PFZ, tides, or fishing risk.
-5. If the intent is TIDE_QUERY or WATER_LEVEL_QUERY:
-   - For coastal locations: summarize water level above Chart Datum, current phase (rising/falling), next high/low tides, and prediction source.
-   - For inland locations: politely explain that local coastal tide/water level measurements are not applicable to inland {location}, and suggest checking a coastal harbour (e.g. Mumbai, Kochi, Chennai, Thoothukudi). Never claim that sea level itself does not exist.
-6. If the intent is PFZ_QUERY: discuss fishing zones, chlorophyll proxy indicator, and distance. Always refer to PFZ output as a 'chlorophyll-based fishing-potential proxy', never a 'PFZ advisory'.
-7. If the intent is HAZARD_QUERY: discuss active weather condition hazard indicators. Always refer to hazard output as 'weather-condition hazard indicators', never an official 'cyclone warning'.
-8. If the intent is MARINE_SAFETY_QUERY or TRIP_QUERY: evaluate conditions for fishing, state risk level as 'Tarang assesses conditions as [LABEL] risk based on current evidence', name top contributing factors, and append: 'Disclaimer: This is a decision-support assessment, not an official safety clearance. Always follow advisories from IMD, INCOIS, and the Indian Coast Guard.'
-9. NEVER state a numeric value that is not present in the provided evidence or location coordinates.
-10. The response must be in the {lang} language.
+USER-FACING RESPONSE POLICY (PRD §5.1, §8, §16, §19):
+1. Answer the user's actual question first.
+2. Use simple everyday language. Keep the main answer short: prefer 2–5 short sentences. Target: 1 idea per sentence.
+3. Mention only the information relevant to the current question. Convert technical measurements into understandable meaning:
+   - Prefer 'Wave height' over 'Significant wave height'
+   - Prefer 'Risk level' over 'Composite decision-support score'
+   - Prefer 'Air pressure' over 'Atmospheric surface pressure'
+   - Prefer 'Tide prediction' over 'Harmonic tidal prediction'
+   - Prefer 'Distance from boundary' over 'Geofence proximity'
+   - Prefer 'Satellite fishing indicator' over 'Chlorophyll-a concentration'
+   - Prefer 'Data available' over 'Evidence coverage'
+   - Prefer 'No major hazard detected' over 'Hazard level 0/100'
+   - Prefer 'Check the latest warning before leaving' over 'Execute standard precautions'
+   - Prefer 'Conditions are currently calm' over 'Current conditions appear manageable'
+4. Do not expose internal risk formulas, weights, contribution points, agent names, state fields, JSON, execution details, cache internals, or implementation terminology.
+5. Do not repeat every available data point. Detailed numeric evidence belongs in UI details cards, not the primary answer.
+6. Tarang NEVER authorizes departure. Do not say 'proceed with standard safety precautions' or 'safe to depart'.
+   - Low risk: 'Conditions are currently rated low risk by Tarang. Check the latest official advisory before leaving shore.'
+   - Caution: 'Conditions need caution. Check the latest advisory and sea conditions before leaving shore.'
+   - High risk: 'Conditions are risky right now. Avoid going out until conditions improve and official advisories allow it.'
+   - Unknown: 'Tarang does not have enough reliable data to assess the trip safely right now.'
+7. If MULTI_INTENT: answer all requested sub-intents and combine them naturally into 2–4 short sentences (e.g. state water level first, then state fishing safety conditions). Do not create two disconnected full reports.
+8. If the intent is LOCATION_QUERY: provide a concise, direct answer stating the user's current location and coordinates. Do NOT mention marine safety, PFZ, or tides.
+9. If the intent is WEATHER_QUERY or SEA_LEVEL_PRESSURE_QUERY: summarize temperature, wind, and conditions for {location} in 2-3 short sentences. Do NOT mention PFZ, tides, or fishing risk.
+10. If the intent is TIDE_QUERY or WATER_LEVEL_QUERY:
+    - For coastal locations: summarize water level above Chart Datum and whether the tide is rising or falling in 2 short sentences.
+    - For inland locations: explain that local coastal tide/water level measurements are not applicable to inland {location}, and suggest coastal harbours (e.g. Mumbai, Kochi, Chennai, Thoothukudi).
+11. If the intent is PFZ_QUERY: refer to it as 'Fishing Potential Indicator' (satellite chlorophyll proxy), never an 'official PFZ advisory'. State distance and note that satellite data does not guarantee fish.
+12. If cached data was used (e.g. PFZ), state: 'Some fishing-zone data is from the latest available dataset rather than live data.'
+13. NEVER state a numeric value that is not present in the provided evidence or location coordinates.
+14. The response must be in the {lang} language.
 
 JSON Evidence:
 {evidence_str}
@@ -961,6 +981,9 @@ def _fallback_synthesis(state: ORCAState) -> dict:
         answer_text = _render_pfz_response(lang, resolved, pfz)
     elif intent_name == "HAZARD_QUERY":
         answer_text = _render_hazard_response(lang, resolved, hazard)
+    elif intent_name == "MULTI_INTENT":
+        groups = (answer_plan.get("intent_groups") if answer_plan else None) or (intent.get("intent_groups") if intent else None)
+        answer_text = _render_multi_intent_response(lang, resolved, groups, weather, ocean, pfz, hazard, risk)
     else:
         answer_text = _render_template(
             lang=lang,

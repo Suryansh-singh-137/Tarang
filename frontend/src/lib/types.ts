@@ -74,6 +74,12 @@ export type AnswerPlan = {
   location_scope: string;
   evidence_needed: string[];
   presentation_hint: PresentationHint;
+  show_score?: boolean;
+  primary_message_style?: string;
+  max_primary_sentences?: number;
+  safety_action?: string;
+  intent_groups?: any[];
+  evidence_scope?: string[];
 };
 
 export type LocationStatus = "coastal" | "inland" | "unresolved" | "idle";

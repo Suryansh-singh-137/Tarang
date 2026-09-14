@@ -299,5 +299,6 @@ class ORCAState(TypedDict):
     is_recheck: NotRequired[Optional[bool]]
     is_multi_intent: NotRequired[Optional[bool]]
     intent_groups: NotRequired[Optional[List[Dict[str, Any]]]]
+    risk_assessment: NotRequired[Optional[RiskAssessment]]
 
 

@@ -241,36 +241,44 @@ def explain_risk(state: ORCAState) -> dict:
 
         main_factor = ""
         if components:
-            top_name = components[0].get("label", "Wave Height")
+            top_name = components[0].get("label", "wave height").lower()
             main_factor = f"The main factor affecting the score is {top_name}."
 
-        lines = [intro, cond]
+        lines = [f"{intro} {cond}"]
         if main_factor:
             lines.append(main_factor)
-
-        if components:
-            lines.append("\n**Risk Factor Breakdown:**")
-            for comp in components:
-                lbl = comp.get("label", "")
-                tmpl = _FACTOR_TEMPLATES.get(lang, _FACTOR_TEMPLATES["en"]).get(lbl)
-                if tmpl:
-                    lines.append(tmpl.format(
-                        raw_value=comp.get("raw_value", "?"),
-                        raw_unit=comp.get("raw_unit", ""),
-                        component_score=comp.get("component_score", 0),
-                        weight_pct=comp.get("weight", 0) * 100,
-                        contribution=comp.get("contribution", 0),
-                    ))
-                else:
-                    lines.append(f"• **{lbl}**: {comp.get('component_score', 0):.0f}/100 ({comp.get('contribution', 0):.1f} pts)")
-
         if recommendation:
-            lines.append("\n" + recommendation)
+            lines.append(recommendation)
         else:
-            lines.append("\nCheck the latest official advisory before leaving shore.")
+            lines.append("Check the latest official advisory before leaving shore.")
 
-    answer_text = "\n".join(lines)
-    logger.info("[ExplainRisk] Simple explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
+    details_block = ""
+    if components:
+        summary_title = {
+            "en": "View technical risk breakdown",
+            "hi": "तकनीकी जोखिम विवरण देखें",
+            "ta": "தொழில்நுட்ப ஆபத்து விவரங்களைக் காண்க",
+        }.get(lang, "View technical risk breakdown")
+
+        detail_items = []
+        fact_tmpl = _FACTOR_TEMPLATES.get(lang, _FACTOR_TEMPLATES["en"])
+        for comp in components:
+            lbl = comp.get("label", "")
+            tmpl = fact_tmpl.get(lbl)
+            if tmpl:
+                detail_items.append(tmpl.format(
+                    raw_value=comp.get("raw_value", "?"),
+                    raw_unit=comp.get("raw_unit", ""),
+                    component_score=comp.get("component_score", 0.0),
+                    weight_pct=comp.get("weight", 0.0) * 100,
+                    contribution=comp.get("contribution", 0.0),
+                ))
+        tot_tmpl = _TOTALS.get(lang, _TOTALS["en"])
+        tot_str = tot_tmpl.format(total=total, label=label, recommendation="").strip()
+        details_block = f"\n\n<details>\n<summary>{summary_title}</summary>\n\n" + "\n".join(detail_items) + f"\n\n{tot_str}\n</details>"
+
+    answer_text = "\n\n".join(lines) + details_block
+    logger.info("[ExplainRisk] Qualitative explanation generated for lang=%s, label=%s, total=%.1f", lang, label, total)
 
     return {
         "final_answer_text": answer_text,
