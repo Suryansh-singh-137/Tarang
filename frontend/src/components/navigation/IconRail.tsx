@@ -1,5 +1,5 @@
 import React from "react";
-import { MessageSquare, Map as MapIcon, Fish, Compass, AlertTriangle } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Fish, Compass, AlertTriangle, Layers } from "lucide-react";
 
 export type ActiveTab = "chat" | "map" | "pfz" | "trip" | "alerts" | "trace";
 
@@ -57,6 +57,13 @@ export const IconRail: React.FC<Props> = ({
       icon: AlertTriangle,
       hasIndicator: hasActiveAlert,
       indicatorColor: "bg-[#D97706] animate-pulse",
+    },
+    {
+      id: "trace",
+      label: "Execution Graph & Trace",
+      icon: Layers,
+      hasIndicator: hasTraceData,
+      indicatorColor: "bg-emerald-500",
     },
   ];
 

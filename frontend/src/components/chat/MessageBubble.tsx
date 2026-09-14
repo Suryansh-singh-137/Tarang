@@ -16,6 +16,8 @@ import {
   Compass,
   HelpCircle,
   ShieldCheck,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { RiskBadge } from "./RiskBadge";
 import { Message, LanguageCode } from "@/lib/types";
@@ -36,6 +38,7 @@ export const MessageBubble: React.FC<Props> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
   const t = translations[language] || translations.en;
   const isUser = message.role === "user";
@@ -242,7 +245,49 @@ export const MessageBubble: React.FC<Props> = ({
         {/* Markdown answer content */}
         <div className="prose prose-slate max-w-none text-sm sm:text-base leading-relaxed break-words font-sans selection:bg-[var(--foam)]">
           {message.content ? (
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            (() => {
+              // Check if the backend message includes an unparsed HTML details block
+              const detailsRegex = /<details>[\s\S]*?<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/i;
+              const match = message.content.match(detailsRegex);
+
+              if (match) {
+                const mainContent = message.content.replace(detailsRegex, "").trim();
+                const summaryText = match[1]?.trim() || "View technical risk breakdown";
+                const detailsBody = match[2]?.trim() || "";
+
+                return (
+                  <div className="space-y-4">
+                    <ReactMarkdown>{mainContent}</ReactMarkdown>
+
+                    <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)]/60 overflow-hidden transition-all duration-200">
+                      <button
+                        type="button"
+                        onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+                        className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--current)] hover:text-[var(--ink)] hover:bg-[var(--foam)]/40 transition-colors cursor-pointer text-left select-none"
+                      >
+                        <span className="flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-[var(--current)]" />
+                          {summaryText}
+                        </span>
+                        {showTechnicalDetails ? (
+                          <ChevronUp className="w-4 h-4 text-[var(--ink-muted)]" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-[var(--ink-muted)]" />
+                        )}
+                      </button>
+
+                      {showTechnicalDetails && (
+                        <div className="px-4 py-3 border-t border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--ink-muted)] space-y-2 animate-in fade-in duration-150">
+                          <ReactMarkdown>{detailsBody}</ReactMarkdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              return <ReactMarkdown>{message.content}</ReactMarkdown>;
+            })()
           ) : message.isStreaming ? (
             <div className="flex items-center gap-2 text-[var(--ink-muted)] text-sm py-2">
               <Loader2 className="w-4 h-4 animate-spin text-[var(--current)]" />

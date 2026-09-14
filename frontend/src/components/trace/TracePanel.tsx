@@ -10,9 +10,11 @@ import {
   Database,
   ChevronDown,
   ChevronRight,
+  GitBranch,
 } from "lucide-react";
 import { TraceEntry, EvidenceItem, LanguageCode } from "@/lib/types";
 import { translations } from "@/lib/i18n";
+import { ExecutionDAG } from "./ExecutionDAG";
 
 interface Props {
   trace: TraceEntry[];
@@ -28,7 +30,7 @@ export const TracePanel: React.FC<Props> = ({
   className = "",
 }) => {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"evidence" | "trace" | "provenance">("evidence");
+  const [activeTab, setActiveTab] = useState<"dag" | "evidence" | "trace" | "provenance">("dag");
   const t = translations[language] || translations.en;
 
   const toggleAgent = (name: string) => {
@@ -74,23 +76,36 @@ export const TracePanel: React.FC<Props> = ({
             DECISION SUPPORT & SOURCING
           </div>
           <h1 className="font-serif-display text-2xl sm:text-3xl text-[var(--ink)] font-normal">
-            Evidence & Sources
+            Execution Graph & Evidence
           </h1>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="font-mono-data text-xs text-[var(--ink-muted)] bg-[var(--surface-muted)] px-3 py-1 rounded-full border border-[var(--border)]">
-            {evidence.length} verified data points
+            {evidence.length} verified claims • {trace.length} agent steps
           </span>
         </div>
       </div>
 
       {/* Sub-navigation tabs (PRD §15) */}
-      <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2 overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setActiveTab("dag")}
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer shrink-0 ${
+            activeTab === "dag"
+              ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
+              : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
+          }`}
+        >
+          <GitBranch className="w-3.5 h-3.5" />
+          <span>Execution DAG (Graph)</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("evidence")}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer shrink-0 ${
             activeTab === "evidence"
               ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
               : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
@@ -103,20 +118,20 @@ export const TracePanel: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setActiveTab("trace")}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer shrink-0 ${
             activeTab === "trace"
               ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
               : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>Technical Pipeline ({trace.length})</span>
+          <span>Step Log ({trace.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab("provenance")}
-          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer shrink-0 ${
             activeTab === "provenance"
               ? "bg-[var(--foam)] text-[var(--current)] shadow-2xs"
               : "text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface-muted)]"
@@ -126,6 +141,15 @@ export const TracePanel: React.FC<Props> = ({
           <span>Data Provenance</span>
         </button>
       </div>
+
+      {/* Tab 0: Interactive Execution DAG Graph */}
+      {activeTab === "dag" && (
+        <ExecutionDAG
+          trace={trace}
+          evidence={evidence}
+          language={language}
+        />
+      )}
 
       {/* Tab 1: Agent Pipeline */}
       {activeTab === "trace" && (
