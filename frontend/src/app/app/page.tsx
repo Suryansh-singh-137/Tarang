@@ -12,7 +12,6 @@ import { TracePanel } from "@/components/trace/TracePanel";
 import { FishingZonesView } from "@/components/pfz/FishingZonesView";
 import { TripPlannerView } from "@/components/trip/TripPlannerView";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
-import { MarineSituationBrief } from "@/components/dashboard/MarineSituationBrief";
 import { WhyThisResultModal } from "@/components/dashboard/WhyThisResultModal";
 import { ChangeSinceLastCheck } from "@/components/dashboard/ChangeSinceLastCheck";
 import { BorderBreachAlert } from "@/components/common/BorderBreachAlert";
@@ -582,23 +581,15 @@ function AppWorkspace() {
           {/* Destination 1: Chat View */}
           {activeTab === "chat" && (
             <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)]">
-              {/* Situation Brief & Change Since Last Check (PRD §8, §10) */}
-              <div className="px-4 pt-3 pb-0 max-w-5xl mx-auto w-full shrink-0">
-                {marineSnapshot && (
-                  <MarineSituationBrief
-                    snapshot={marineSnapshot}
-                    onWhyThisResult={() => setIsWhyModalOpen(true)}
-                    onRecheck={handleRecheck}
-                    isRechecking={isLoading}
-                  />
-                )}
-                {changeSummary?.has_changes && (
+              {/* Change Since Last Check (PRD §8, §10) */}
+              {changeSummary?.has_changes && (
+                <div className="px-4 pt-3 pb-0 max-w-5xl mx-auto w-full shrink-0">
                   <ChangeSinceLastCheck
                     changeSummary={changeSummary}
                     onDismiss={() => setChangeSummary(null)}
                   />
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Chat message stream */}
               <div className="flex-1 overflow-hidden">

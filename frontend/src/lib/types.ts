@@ -229,6 +229,14 @@ export interface MarineSnapshot {
     boundary_risk?: string;
     source?: string;
   };
+  sst?: {
+    sst_celsius?: number | null;
+    sst_anomaly_c?: number | null;
+    observation_time?: string | null;
+    source?: string;
+    data_status?: string;
+    disclaimer?: string;
+  } | null;
   risk: {
     composite_score?: number | null;
     risk_label: RiskLabel;
@@ -261,6 +269,7 @@ export type TarangResponse = {
   agents?: {
     weather?: TraceEntry | any;
     pfz?: TraceEntry | any;
+    sst?: TraceEntry | any;
     ocean?: TraceEntry | any;
     hazard?: TraceEntry | any;
     geofence?: TraceEntry | any;

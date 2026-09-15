@@ -198,6 +198,7 @@ class ParsedIntent(TypedDict):
     needs_geofence: bool
     needs_risk: bool
     needs_ocean: NotRequired[bool]
+    needs_sst: NotRequired[bool]
     location_status: NotRequired[Optional[Literal["coastal", "inland", "unresolved"]]]
     distance_to_coast_km: NotRequired[Optional[float]]
     intent: NotRequired[Optional[str]]
@@ -260,6 +261,7 @@ class ORCAState(TypedDict):
     ocean_result: Optional[AgentResult]
     hazard_result: Optional[AgentResult]
     geofence_result: Optional[AgentResult]
+    sst_result: Optional[AgentResult]
     risk_result: Optional[AgentResult]
 
     # V2 Decoupled Statuses

@@ -556,6 +556,64 @@ def _render_pfz_response(
     return "\n".join(lines)
 
 
+def _render_sst_response(
+    lang: str,
+    resolved: Optional[dict],
+    sst: Optional[AgentResult],
+) -> str:
+    loc_name = resolved.get("name", "coastal waters") if resolved else "coastal waters"
+    lines = []
+    if lang == "hi":
+        lines.append(f"🌡 **{loc_name} — समुद्र की सतह का तापमान (SST)**\n")
+    elif lang == "ta":
+        lines.append(f"🌡 **{loc_name} — கடல் மேற்பரப்பு வெப்பநிலை (SST)**\n")
+    else:
+        lines.append(f"🌡 **Sea Surface Temperature (SST) — {loc_name}:**\n")
+
+    if not sst or sst.get("status") in ("error", "insufficient_data") or not sst.get("data") or sst.get("data", {}).get("sst_celsius") is None:
+        if lang == "hi":
+            lines.append(f"इस स्थान ({loc_name}) के लिए INCOIS ERDDAP से लाइव SST डेटा वर्तमान में उपलब्ध नहीं है।")
+            lines.append("\n*नोट: समुद्र की सतह का तापमान केवल तापीय स्थिति दर्शाता है और मछली की उपस्थिति की गारंटी नहीं देता है।*")
+        elif lang == "ta":
+            lines.append(f"இந்த இடத்திற்கான INCOIS ERDDAP நேரடி SST தரவு தற்போது கிடைக்கவில்லை.")
+            lines.append("\n*குறிப்பு: கடல் மேற்பரப்பு வெப்பநிலை வெப்பநிலையை மட்டுமே குறிக்கிறது, மீன் இருப்பதை உறுதிப்படுத்தாது.*")
+        else:
+            lines.append(f"Live SST observation data is currently unavailable from INCOIS ERDDAP for {loc_name}.")
+            lines.append("\n*Note: Sea surface temperature (SST) indicates physical thermal conditions only and does not guarantee fish presence.*")
+    else:
+        sd = sst.get("data", {})
+        temp = sd.get("sst_celsius")
+        anom = sd.get("sst_anomaly_c")
+        obs_time = sd.get("observation_time", "")
+        src = sst.get("source", "INCOIS ERDDAP (NOAA AVHRR/AMSR SST)")
+
+        if lang == "hi":
+            lines.append(f"• समुद्र की सतह का तापमान: **{temp:.2f}°C**")
+            if anom is not None:
+                lines.append(f"• थर्मल विसंगति (Anomaly): **{anom:+.2f}°C**")
+            if obs_time:
+                lines.append(f"• अवलोकन समय: {obs_time}")
+            lines.append("\n*नोट: समुद्र की सतह का तापमान केवल तापीय रुझान दर्शाता है और मछली की उपस्थिति की गारंटी नहीं देता है।*")
+        elif lang == "ta":
+            lines.append(f"• கடல் மேற்பரப்பு வெப்பநிலை: **{temp:.2f}°C**")
+            if anom is not None:
+                lines.append(f"• வெப்ப முரண்பாடு (Anomaly): **{anom:+.2f}°C**")
+            if obs_time:
+                lines.append(f"• கவனிப்பு நேரம்: {obs_time}")
+            lines.append("\n*குறிப்பு: கடல் மேற்பரப்பு வெப்பநிலை வெப்பநிலையை மட்டுமே குறிக்கிறது, மீன் இருப்பதை உறுதிப்படுத்தாது.*")
+        else:
+            lines.append(f"• Sea surface temperature: **{temp:.2f}°C**")
+            if anom is not None:
+                lines.append(f"• Temperature anomaly: **{anom:+.2f}°C** relative to baseline")
+            if obs_time:
+                lines.append(f"• Latest observation time: {obs_time}")
+            lines.append("\n*Note: Sea surface temperature (SST) and thermal anomalies reflect physical oceanographic conditions only and do not guarantee fish presence.*")
+
+        lines.append(f"\n*(Source: {src})*")
+
+    return "\n".join(lines)
+
+
 def _render_multi_intent_response(
     lang: str,
     resolved: Optional[dict],
@@ -726,6 +784,7 @@ def _build_marine_snapshot(
     weather: Optional[AgentResult] = None,
     ocean: Optional[AgentResult] = None,
     pfz: Optional[AgentResult] = None,
+    sst: Optional[AgentResult] = None,
     hazard: Optional[AgentResult] = None,
     geofence: Optional[AgentResult] = None,
     risk: Optional[AgentResult] = None,
@@ -737,6 +796,7 @@ def _build_marine_snapshot(
     w_data = weather.get("data", {}) if weather and weather.get("status") == "success" else {}
     o_data = ocean.get("data", {}) if ocean and ocean.get("status") == "success" else {}
     p_data = pfz.get("data", {}) if pfz and pfz.get("status") == "success" else {}
+    s_data = sst.get("data", {}) if sst and (sst.get("status") in ("success", "ok") or sst.get("execution_status") in ("success", "ok")) else {}
     h_data = hazard.get("data", {}) if hazard and hazard.get("status") == "success" else {}
     g_data = geofence.get("data", {}) if geofence and geofence.get("status") == "success" else {}
     r_data = risk.get("data", {}) if risk and risk.get("status") == "success" else {}
@@ -786,6 +846,14 @@ def _build_marine_snapshot(
             "dataset_date": p_data.get("dataset_date", "2026-09-14"),
             "data_quality": pfz.get("data_quality", "historical_proxy") if pfz else "unavailable",
             "disclaimer": "Proxy indicator based on satellite chlorophyll-a, not an official INCOIS PFZ advisory.",
+        },
+        "sst": {
+            "sst_celsius": s_data.get("sst_celsius"),
+            "sst_anomaly_c": s_data.get("sst_anomaly_c"),
+            "observation_time": s_data.get("observation_time"),
+            "source": sst.get("source", "INCOIS ERDDAP (NOAA AVHRR/AMSR SST)") if sst else "INCOIS ERDDAP",
+            "data_status": sst.get("data_status", sst.get("data_quality", "live")) if sst else "unavailable",
+            "disclaimer": "Sea surface temperature (SST) and thermal anomalies indicate ocean surface temperature trends only and do not guarantee fish presence.",
         },
         "hazards": {
             "overall_hazard_level": h_data.get("overall_hazard_level", "none"),
@@ -942,6 +1010,7 @@ def synthesis(state: ORCAState) -> dict:
 
     weather = state.get("weather_result")
     pfz = state.get("pfz_result")
+    sst = state.get("sst_result")
     ocean = state.get("ocean_result")
     hazard = state.get("hazard_result")
     geofence = state.get("geofence_result")
@@ -967,6 +1036,7 @@ def synthesis(state: ORCAState) -> dict:
         weather=weather,
         ocean=ocean,
         pfz=pfz,
+        sst=sst,
         hazard=hazard,
         geofence=geofence,
         risk=risk,
@@ -1284,6 +1354,7 @@ def _fallback_synthesis(state: ORCAState) -> dict:
     time_window = intent.get("time_window", "next_24h") if intent else "next_24h"
     weather = state.get("weather_result")
     pfz = state.get("pfz_result")
+    sst = state.get("sst_result")
     ocean = state.get("ocean_result")
     hazard = state.get("hazard_result")
     geofence = state.get("geofence_result")
@@ -1296,6 +1367,7 @@ def _fallback_synthesis(state: ORCAState) -> dict:
         weather=weather,
         ocean=ocean,
         pfz=pfz,
+        sst=sst,
         hazard=hazard,
         geofence=geofence,
         risk=risk,
@@ -1322,6 +1394,8 @@ def _fallback_synthesis(state: ORCAState) -> dict:
         answer_text = _render_weather_response(lang, resolved, time_window, weather)
     elif intent_name == "PFZ_QUERY":
         answer_text = _render_pfz_response(lang, resolved, pfz)
+    elif intent_name == "SST_QUERY":
+        answer_text = _render_sst_response(lang, resolved, sst)
     elif intent_name == "HAZARD_QUERY":
         answer_text = _render_hazard_response(lang, resolved, hazard)
     elif intent_name == "RISK_EXPLANATION":

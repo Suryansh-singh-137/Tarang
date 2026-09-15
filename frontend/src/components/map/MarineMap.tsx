@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Layers, Fish, AlertTriangle, Maximize2, HelpCircle } from "lucide-react";
+import { Layers, Fish, AlertTriangle, Maximize2, HelpCircle, Thermometer } from "lucide-react";
 import { ShorelineCompass } from "../illustrations/ShorelineCompass";
 import { MapGeoJSON, RiskLabel, MarineSnapshot } from "@/lib/types";
 import { useLocation } from "@/lib/locationContext";
@@ -190,6 +190,8 @@ export const MarineMap: React.FC<Props> = ({
             ? `• Wave: <b>${snapshot.weather.wave_height_m}m</b><br/>` : "";
           const windTxt = snapshot?.weather?.wind_speed_kmh !== undefined && snapshot?.weather?.wind_speed_kmh !== null
             ? `• Wind: <b>${snapshot.weather.wind_speed_kmh} km/h</b><br/>` : "";
+          const sstTxt = snapshot?.sst?.sst_celsius !== undefined && snapshot?.sst?.sst_celsius !== null
+            ? `• SST: <b>${snapshot.sst.sst_celsius.toFixed(1)}°C</b>${snapshot.sst.sst_anomaly_c != null ? ` (${snapshot.sst.sst_anomaly_c >= 0 ? "+" : ""}${snapshot.sst.sst_anomaly_c.toFixed(1)}°C anom)` : ""}<br/><span style="font-size: 10px; color: #64748B; font-style: italic;">SST reflects temperature only; does not guarantee fish presence.</span><br/>` : "";
 
           const marker = L.marker([lat, lon], { icon: queryIcon })
             .bindPopup(`
@@ -199,6 +201,7 @@ export const MarineMap: React.FC<Props> = ({
                 <div style="margin-top: 4px; line-height: 1.4; color: #374151;">
                   ${waveTxt}
                   ${windTxt}
+                  ${sstTxt}
                   • Verdict: <b style="color: ${riskStroke};">${riskLabel} RISK</b>
                 </div>
                 ${onWhyThisResult ? `
@@ -341,6 +344,17 @@ export const MarineMap: React.FC<Props> = ({
                 <AlertTriangle className="w-3 h-3" /> IMBL Line
               </span>
             )}
+            {snapshot?.sst?.sst_celsius != null && (
+              <span className="flex items-center gap-1 font-medium text-[#0284C7] bg-[#E0F2FE] px-1.5 py-0.5 rounded border border-[#BAE6FD]" title="Sea Surface Temperature (INCOIS ERDDAP). Thermal indicator only; does not guarantee fish.">
+                <Thermometer className="w-3 h-3 text-[#0284C7]" />
+                {snapshot.sst.sst_celsius.toFixed(1)}°C SST
+                {snapshot.sst.sst_anomaly_c != null && (
+                  <span className="text-[10px] opacity-80">
+                    ({snapshot.sst.sst_anomaly_c >= 0 ? "+" : ""}{snapshot.sst.sst_anomaly_c.toFixed(1)}°)
+                  </span>
+                )}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -358,7 +372,6 @@ export const MarineMap: React.FC<Props> = ({
         >
           <HelpCircle className="w-4 h-4 text-[var(--ink-muted)]" />
         </button>
-
         <button
           type="button"
           onClick={handleRecenter}
@@ -393,6 +406,10 @@ export const MarineMap: React.FC<Props> = ({
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-[#1B8755] border border-white" />
             <span>Potential Fishing Zone (PFZ)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#0284C7] border border-white" />
+            <span>SST & Anomaly (INCOIS ERDDAP — temperature only, no catch guarantee)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-5 h-0.5 border-t-2 border-dashed border-[#DC2626]" />

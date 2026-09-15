@@ -178,6 +178,7 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
         location_mode=None,
         weather_result=None,
         pfz_result=None,
+        sst_result=None,
         ocean_result=None,
         hazard_result=None,
         geofence_result=None,
@@ -451,6 +452,7 @@ async def _run_graph_streaming(body: QueryRequest) -> AsyncIterator[dict]:
         "agents": {
             "weather": final_state.get("weather_result"),
             "pfz": final_state.get("pfz_result"),
+            "sst": final_state.get("sst_result"),
             "ocean": final_state.get("ocean_result"),
             "hazard": final_state.get("hazard_result"),
             "geofence": final_state.get("geofence_result"),
@@ -768,7 +770,7 @@ def _extract_last_results(final_state: dict) -> dict[str, dict]:
     """Extract success specialist agent results for client/session reuse."""
     last_results: dict[str, dict] = {}
     for agent_key in [
-        "weather_result", "pfz_result", "hazard_result", "geofence_result", "risk_result"
+        "weather_result", "pfz_result", "sst_result", "hazard_result", "geofence_result", "risk_result"
     ]:
         ar = final_state.get(agent_key)
         if ar and ar.get("status") == "success":
@@ -816,6 +818,7 @@ async def _run_graph_direct(
         location_mode=None,
         weather_result=None,
         pfz_result=None,
+        sst_result=None,
         ocean_result=None,
         hazard_result=None,
         geofence_result=None,

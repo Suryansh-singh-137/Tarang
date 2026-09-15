@@ -12,6 +12,7 @@ import {
   Layers,
   Sparkles,
   ArrowUpRight,
+  Thermometer,
 } from "lucide-react";
 import { MapGeoJSON, LocationStatus, LanguageCode, MarineSnapshot } from "@/lib/types";
 import { useLocation } from "@/lib/locationContext";
@@ -256,7 +257,7 @@ export const FishingZonesView: React.FC<Props> = ({
         /* Case 4: Display Summary Ribbon & Cards Grid */
         <div className="space-y-6">
           {/* Quick Metrics Ribbon */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
             <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3.5 shadow-2xs">
               <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
                 <Compass className="w-3.5 h-3.5 text-[var(--current)]" />
@@ -290,16 +291,49 @@ export const FishingZonesView: React.FC<Props> = ({
               <p className="text-[11px] text-[var(--ink-subtle)]">Active candidate zones</p>
             </div>
 
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3.5 shadow-2xs">
-              <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
-                <Fish className="w-3.5 h-3.5 text-[var(--dawn)]" />
-                <span>Satellite Source</span>
+            {marineSnapshot?.sst?.sst_celsius != null ? (
+              <div className="bg-sky-50/60 border border-sky-200 rounded-xl p-3.5 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-xs text-sky-800 mb-1">
+                  <Thermometer className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Sea Temp (SST)</span>
+                </div>
+                <p className="text-base sm:text-lg font-semibold text-sky-900 font-mono-data">
+                  {marineSnapshot.sst.sst_celsius.toFixed(1)}°C
+                  {marineSnapshot.sst.sst_anomaly_c != null && (
+                    <span className="text-xs ml-1 font-normal text-sky-700">
+                      ({marineSnapshot.sst.sst_anomaly_c >= 0 ? "+" : ""}{marineSnapshot.sst.sst_anomaly_c.toFixed(1)}°)
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-sky-700 truncate" title="INCOIS ERDDAP NOAA AVHRR/AMSR SST">
+                  INCOIS ERDDAP
+                </p>
               </div>
-              <p className="text-xs font-semibold text-[var(--ink)] truncate mt-1">
-                Oceansat-2
-              </p>
-              <p className="text-[11px] text-[var(--ink-subtle)] truncate">INCOIS ERDDAP Proxy</p>
-            </div>
+            ) : (
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3.5 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
+                  <Fish className="w-3.5 h-3.5 text-[var(--dawn)]" />
+                  <span>Satellite Source</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--ink)] truncate mt-1">
+                  Oceansat-2
+                </p>
+                <p className="text-[11px] text-[var(--ink-subtle)] truncate">INCOIS ERDDAP Proxy</p>
+              </div>
+            )}
+
+            {marineSnapshot?.sst?.sst_celsius != null && (
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3.5 shadow-2xs">
+                <div className="flex items-center gap-1.5 text-xs text-[var(--ink-muted)] mb-1">
+                  <Fish className="w-3.5 h-3.5 text-[var(--dawn)]" />
+                  <span>Satellite Source</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--ink)] truncate mt-1">
+                  Oceansat-2 & SST
+                </p>
+                <p className="text-[11px] text-[var(--ink-subtle)] truncate">INCOIS ERDDAP</p>
+              </div>
+            )}
           </div>
 
           {/* PFZ Indicator Cards Grid */}

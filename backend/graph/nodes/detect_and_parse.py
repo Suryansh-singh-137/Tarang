@@ -320,12 +320,17 @@ _FOLLOWUP_PREFIX_PATTERNS: list[re.Pattern] = [
     re.compile(r"^\s*(what\s+about|how\s+about|aur\s+kal|aur\s+aaj|and\s+tomorrow|and\s+today|what\s+for)\b", re.I),
 ]
 
+_SST_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(sst|sea\s+surface\s+temp|sea\s+surface\s+temperature|ocean\s+temp|ocean\s+temperature|water\s+temp|water\s+temperature|sst\s+anomaly|thermal\s+anomaly)\b", re.I),
+    re.compile(r"\b(samundar.*taapman|pani.*taapman|paani.*taapman|kadal.*veppam)\b", re.I),
+]
+
 _RECHECK_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(still\s+safe|safe\s+now|recheck|check\s+again|is\s+it\s+still|kya\s+abhi\s+bhi|update\s+safety|still\s+okay|still\s+good|now\s+safe)\b", re.I),
 ]
 
 
-def _detect_multi_intent(text: str, default_location: Optional[str] = None) -> Optional[list[dict[str, Any]]]:
+def _detect_multi_intent(text: str, default_location: Optional[str] = None) -> Optional[list[dict[str, any]]]:
     """
     Detects supported multi-intent combinations (PRD §16, §17).
     Supported combinations:
@@ -553,8 +558,21 @@ def classify_query_intent(
         return "BOUNDARY_QUERY", "general", {
             "needs_weather": False,
             "needs_pfz": False,
+            "needs_sst": False,
             "needs_hazard": False,
             "needs_geofence": True,
+            "needs_risk": False,
+            "needs_ocean": False,
+        }, "DATA_SUMMARY"
+
+    # 5b. Sea Surface Temperature (SST) & Anomaly query
+    if any(pat.search(text) for pat in _SST_PATTERNS) and not any(kw in text_lower for kw in ["safe", "safety", "jaana", "surakshit"]):
+        return "SST_QUERY", "general", {
+            "needs_weather": False,
+            "needs_pfz": False,
+            "needs_sst": True,
+            "needs_hazard": False,
+            "needs_geofence": False,
             "needs_risk": False,
             "needs_ocean": False,
         }, "DATA_SUMMARY"
@@ -596,6 +614,7 @@ def classify_query_intent(
         return "MARINE_SAFETY_QUERY", "safety_check", {
             "needs_weather": True,
             "needs_pfz": True,
+            "needs_sst": True,
             "needs_hazard": True,
             "needs_geofence": True,
             "needs_risk": True,
@@ -607,6 +626,7 @@ def classify_query_intent(
         return "PFZ_QUERY", "pfz_lookup", {
             "needs_weather": False,
             "needs_pfz": True,
+            "needs_sst": True,
             "needs_hazard": False,
             "needs_geofence": False,
             "needs_risk": False,
@@ -1506,8 +1526,14 @@ def detect_and_parse(state: ORCAState) -> dict:
     elif intent_name == "PFZ_QUERY":
         card_type = "PFZCard"
         pres_hint = "pfz_card"
-        required_caps = ["pfz"]
-        required_agents = ["pfz_agent"]
+        required_caps = ["pfz", "sst"]
+        required_agents = ["pfz_agent", "sst_agent"]
+        resp_mode_str = "specialist_card"
+    elif intent_name == "SST_QUERY":
+        card_type = "SSTCard"
+        pres_hint = "sst_card"
+        required_caps = ["sst"]
+        required_agents = ["sst_agent"]
         resp_mode_str = "specialist_card"
     elif intent_name == "HAZARD_QUERY":
         card_type = "HazardCard"
@@ -1539,8 +1565,8 @@ def detect_and_parse(state: ORCAState) -> dict:
         if has_safe:
             card_type = "SafetyCard"
             pres_hint = "safety_card"
-            required_caps = ["weather", "pfz", "ocean", "hazard", "geofence", "risk"]
-            required_agents = ["weather_agent", "pfz_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
+            required_caps = ["weather", "pfz", "sst", "ocean", "hazard", "geofence", "risk"]
+            required_agents = ["weather_agent", "pfz_agent", "sst_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
             resp_mode_str = "safety_assessment"
         else:
             card_type = "WeatherCard" if has_weather else "PFZCard" if has_pfz else "OceanCard"
@@ -1550,6 +1576,7 @@ def detect_and_parse(state: ORCAState) -> dict:
                 required_caps.append("weather")
             if has_pfz:
                 required_caps.append("pfz")
+                required_caps.append("sst")
             if has_ocean:
                 required_caps.append("ocean")
             required_agents = [f"{c}_agent" for c in required_caps]
@@ -1557,8 +1584,8 @@ def detect_and_parse(state: ORCAState) -> dict:
     else:  # MARINE_SAFETY_QUERY / TRIP_QUERY / general
         card_type = "SafetyCard"
         pres_hint = "safety_card"
-        required_caps = ["weather", "pfz", "ocean", "hazard", "geofence", "risk"]
-        required_agents = ["weather_agent", "pfz_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
+        required_caps = ["weather", "pfz", "sst", "ocean", "hazard", "geofence", "risk"]
+        required_agents = ["weather_agent", "pfz_agent", "sst_agent", "ocean_agent", "hazard_agent", "geofence_agent", "risk_agent"]
         resp_mode_str = "safety_assessment"
 
     coastal_plan: AnswerPlan = {
@@ -1603,6 +1630,7 @@ def detect_and_parse(state: ORCAState) -> dict:
         query_type=query_type,
         needs_weather=needs.get("needs_weather", False),
         needs_pfz=needs.get("needs_pfz", False),
+        needs_sst=needs.get("needs_sst", False),
         needs_hazard=needs.get("needs_hazard", False),
         needs_geofence=needs.get("needs_geofence", False),
         needs_risk=needs.get("needs_risk", False),

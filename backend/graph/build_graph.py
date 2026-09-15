@@ -46,6 +46,7 @@ from graph.nodes.hazard_agent import hazard_agent
 from graph.nodes.ocean_agent import ocean_agent
 from graph.nodes.pfz_agent import pfz_agent
 from graph.nodes.risk_agent import risk_agent
+from graph.nodes.sst_agent import sst_agent
 from graph.nodes.synthesis import synthesis
 from graph.nodes.weather_agent import weather_agent
 from graph.state import AgentResult, ORCAState, ExecutionStatus, DataStatus
@@ -223,6 +224,22 @@ def _pfz_node(state: ORCAState) -> dict:
     return res
 
 
+def _sst_node(state: ORCAState) -> dict:
+    intent = state.get("parsed_intent")
+    lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
+    if not intent or not intent.get("needs_sst"):
+        res = _skip("sst_agent", state)
+        _log_agent_trace("sst_agent", "SKIPPED", lat, lon, res)
+        return res
+    if _can_reuse_cached("sst_agent", state):
+        res = _reuse_cached("sst_agent", state)
+        _log_agent_trace("sst_agent", "REUSED_CACHE", lat, lon, res)
+        return res
+    res = sst_agent(state)
+    _log_agent_trace("sst_agent", "RUN_LIVE", lat, lon, res)
+    return res
+
+
 def _ocean_node(state: ORCAState) -> dict:
     intent = state.get("parsed_intent")
     lat, lon = (intent.get("lat"), intent.get("lon")) if intent else (None, None)
@@ -397,6 +414,7 @@ def build_graph(checkpointer: Optional[Any] = None) -> "CompiledGraph":  # type:
     builder.add_node("detect_and_parse", detect_and_parse)
     builder.add_node("weather_agent", _weather_node)
     builder.add_node("pfz_agent", _pfz_node)
+    builder.add_node("sst_agent", _sst_node)
     builder.add_node("ocean_agent", _ocean_node)
     builder.add_node("hazard_agent", _hazard_node)
     builder.add_node("geofence_agent", _geofence_node)
@@ -412,7 +430,8 @@ def build_graph(checkpointer: Optional[Any] = None) -> "CompiledGraph":  # type:
     # After parsing, always run all specialist wrappers in order.
     builder.add_edge("detect_and_parse", "weather_agent")
     builder.add_edge("weather_agent", "pfz_agent")
-    builder.add_edge("pfz_agent", "ocean_agent")
+    builder.add_edge("pfz_agent", "sst_agent")
+    builder.add_edge("sst_agent", "ocean_agent")
     builder.add_edge("ocean_agent", "hazard_agent")
     builder.add_edge("hazard_agent", "geofence_agent")
     builder.add_edge("geofence_agent", "risk_agent")

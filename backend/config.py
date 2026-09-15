@@ -79,6 +79,7 @@ PFZ_MAX_ZONES: int = int(os.getenv("PFZ_MAX_ZONES", "5"))
 CACHE_TTL_MARINE_S: int = int(os.getenv("CACHE_TTL_MARINE_S", "600"))    # M8: 10 min (was 30 min)
 CACHE_TTL_HAZARD_S: int = int(os.getenv("CACHE_TTL_HAZARD_S", "600"))    # M8: 10 min (was 30 min)
 CACHE_TTL_PFZ_S: int   = int(os.getenv("CACHE_TTL_PFZ_S",    "3600"))    # M8: 60 min (was 4 h)
+CACHE_TTL_SST_S: int   = int(os.getenv("CACHE_TTL_SST_S",    "3600"))    # SST satellite cache: 60 min
 CACHE_TTL_GDACS_S: int = int(os.getenv("CACHE_TTL_GDACS_S",  "600"))     # M8: 10 min
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,7 @@ MAX_CONVERSATION_TURNS: int = int(os.getenv("MAX_CONVERSATION_TURNS", "6"))
 AGENT_DEPENDS_ON: dict[str, list[str]] = {
     "weather_agent":  ["location_name", "lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
     "pfz_agent":      ["location_name", "lat", "lon"],
+    "sst_agent":      ["location_name", "lat", "lon"],
     "hazard_agent":   ["location_name", "lat", "lon", "time_window", "time_start_utc", "time_end_utc"],
     "geofence_agent": ["location_name", "lat", "lon"],
     # risk_agent always recomputes deterministically — no cache bypass for it
