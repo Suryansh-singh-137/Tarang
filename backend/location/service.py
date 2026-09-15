@@ -270,15 +270,22 @@ def search_locations(query: str, limit: int = 6) -> List[Dict[str, Any]]:
     return results
 
 
+_SERVICE_REVERSE_CACHE: Dict[Tuple[float, float], Dict[str, Any]] = {}
+
+
 def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
     """
     Reverse geocode coordinates into a standardized location name and display name.
     Recognizes offshore marine coordinates (PRD §10).
     """
+    cache_key = (round(lat, 3), round(lon, 3))
+    if cache_key in _SERVICE_REVERSE_CACHE:
+        return _SERVICE_REVERSE_CACHE[cache_key]
+
     # 1. Proximity check against local Gazetteer (< 4 km)
     for p_name, (plat, plon) in GAZETTEER.items():
         if haversine_km(lat, lon, plat, plon) < 4.0:
-            return {
+            res = {
                 "name": p_name.title(),
                 "display_name": f"{p_name.title()}, India",
                 "lat": lat,
@@ -286,11 +293,13 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                 "state": "Coastal Region",
                 "country": "India",
             }
+            _SERVICE_REVERSE_CACHE[cache_key] = res
+            return res
 
     # 2. Check if this is an offshore marine water coordinate
     if is_offshore_marine_point(lat, lon):
         coord_name = f"{lat:.2f}°N, {lon:.2f}°E"
-        return {
+        res = {
             "name": coord_name,
             "display_name": f"{coord_name} (Marine Location)",
             "lat": lat,
@@ -298,6 +307,8 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
             "state": "Offshore Waters",
             "country": "India",
         }
+        _SERVICE_REVERSE_CACHE[cache_key] = res
+        return res
 
     # 3. OpenWeather Reverse Geocoding API if key configured
     if config.OPENWEATHER_API_KEY:
@@ -309,7 +320,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                 "limit": 1,
                 "appid": config.OPENWEATHER_API_KEY,
             }
-            with httpx.Client(timeout=4.0) as client:
+            with httpx.Client(timeout=2.0) as client:
                 resp = client.get(url, params=params)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -318,7 +329,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                         name = item.get("name", "").strip() or f"{lat:.2f}°N, {lon:.2f}°E"
                         state = item.get("state", "")
                         d_name = f"{name}, {state}, India" if state else f"{name}, India"
-                        return {
+                        res = {
                             "name": name,
                             "display_name": d_name,
                             "lat": lat,
@@ -326,11 +337,12 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                             "state": state,
                             "country": item.get("country", "India"),
                         }
+                        _SERVICE_REVERSE_CACHE[cache_key] = res
+                        return res
         except Exception as exc:
             logger.warning("[LocationService] OpenWeather reverse geocode error: %s", exc)
 
-    # 4. Nominatim OSM reverse geocode fallback
-    _nominatim_rate_limit()
+    # 4. Nominatim OSM reverse geocode fallback (short timeout to prevent blocking)
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
         params = {
@@ -340,7 +352,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
             "addressdetails": 1,
         }
         headers = {"User-Agent": "Tarang-MarineLocationService/2.0 (contact@tarang.app)"}
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=1.5) as client:
             resp = client.get(url, params=params, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
@@ -357,7 +369,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                 state = addr.get("state", "")
                 country = addr.get("country", "India")
                 d_name = f"{name}, {state}, {country}" if state else f"{name}, {country}"
-                return {
+                res = {
                     "name": name,
                     "display_name": d_name,
                     "lat": lat,
@@ -365,12 +377,14 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
                     "state": state,
                     "country": country,
                 }
+                _SERVICE_REVERSE_CACHE[cache_key] = res
+                return res
     except Exception as exc:
         logger.warning("[LocationService] Nominatim reverse geocode error: %s", exc)
 
     # Fallback to coordinate string
     coord_name = f"{lat:.2f}°N, {lon:.2f}°E"
-    return {
+    res = {
         "name": coord_name,
         "display_name": coord_name,
         "lat": lat,
@@ -378,6 +392,8 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, Any]:
         "state": "",
         "country": "India",
     }
+    _SERVICE_REVERSE_CACHE[cache_key] = res
+    return res
 
 
 def resolve_canonical_location(

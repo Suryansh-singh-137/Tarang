@@ -156,27 +156,35 @@ export function LocationProvider({ children }: { children: ReactNode }) {
 
   const selectCoordinates = useCallback(
     async (lat: number, lon: number, name?: string, source: "gps" | "map" | "search" = "map") => {
+      const initialName = name || `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`;
+      const optimisticLoc: SelectedLocation = {
+        name: initialName,
+        display_name: initialName,
+        lat,
+        lon,
+        source,
+      };
+      
+      // Immediate local state update for zero latency feedback
+      setSelectedLocationState(optimisticLoc);
+      try {
+        localStorage.setItem(STORAGE_KEY_LOCATION, JSON.stringify(optimisticLoc));
+      } catch (e) {}
+      addToRecent(optimisticLoc);
+
       setIsLoading(true);
       try {
         const resolved = await resolveLocationApi(lat, lon, name, source);
         if (resolved) {
           await setLocation(resolved.location, resolved.marine_context);
-        } else {
-          // Fallback if backend resolve fails
-          const fallbackLoc: SelectedLocation = {
-            name: name || `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`,
-            display_name: name || `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`,
-            lat,
-            lon,
-            source,
-          };
-          await setLocation(fallbackLoc);
         }
+      } catch (err) {
+        console.warn("Could not resolve location coordinates:", err);
       } finally {
         setIsLoading(false);
       }
     },
-    [setLocation]
+    [addToRecent, setLocation]
   );
 
   const searchLocations = useCallback(async (query: string): Promise<LocationSearchResult[]> => {

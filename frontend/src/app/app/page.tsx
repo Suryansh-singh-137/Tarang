@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, Suspense } from "react";
+import React, { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -15,6 +15,7 @@ import { LanguageToggle } from "@/components/common/LanguageToggle";
 import { MarineSituationBrief } from "@/components/dashboard/MarineSituationBrief";
 import { WhyThisResultModal } from "@/components/dashboard/WhyThisResultModal";
 import { ChangeSinceLastCheck } from "@/components/dashboard/ChangeSinceLastCheck";
+import { BorderBreachAlert } from "@/components/common/BorderBreachAlert";
 
 import {
   Message,
@@ -28,7 +29,7 @@ import {
   MarineSnapshot,
   ChangeSummary,
 } from "@/lib/types";
-import { streamQuery } from "@/lib/api";
+import { streamQuery, evaluateGeofenceApi, GeofenceEvaluationResult } from "@/lib/api";
 import { translations } from "@/lib/i18n";
 import { useLocation } from "@/lib/locationContext";
 import { LocationSelector } from "@/components/location/LocationSelector";
@@ -92,6 +93,69 @@ function AppWorkspace() {
   const [changeSummary, setChangeSummary] = useState<ChangeSummary | null>(null);
   const [isWhyModalOpen, setIsWhyModalOpen] = useState(false);
 
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
+  const [isManualLanguageOverride, setIsManualLanguageOverride] = useState(false);
+
+  // International Maritime Geofence evaluation state & emergency WhatsApp
+  const [geofenceEvaluation, setGeofenceEvaluation] = useState<GeofenceEvaluationResult | null>(null);
+  const [isBreachDismissed, setIsBreachDismissed] = useState(false);
+  const [userPhone, setUserPhone] = useState<string>("+919236454423");
+
+  // Sync user's emergency WhatsApp phone number from localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedPhone = localStorage.getItem("tarang_user_phone");
+      if (savedPhone) {
+        setUserPhone(savedPhone);
+      } else {
+        localStorage.setItem("tarang_user_phone", "+919236454423");
+      }
+    }
+  }, []);
+
+  // Check geofence whenever user coords or selected location changes
+  const lastGeofenceKey = useRef<string>("");
+  const geofenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runGeofenceCheck = useCallback((lat: number, lon: number, name: string) => {
+    const activePhone = userPhone || "+919236454423";
+    const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    if (key === lastGeofenceKey.current && geofenceEvaluation) return; // Already evaluated these coords
+    lastGeofenceKey.current = key;
+
+    console.log("[Geofence] Calling API for:", { lat, lon, name, phone: activePhone });
+    evaluateGeofenceApi(lat, lon, activePhone, name, true)
+      .then((res) => {
+        console.log("[Geofence] API response:", res);
+        if (res) {
+          setGeofenceEvaluation(res);
+          if (res.is_breached) {
+            setIsBreachDismissed(false);
+            console.log("[Geofence] BREACH DETECTED — banner should appear");
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("[Geofence] evaluation error:", err);
+        lastGeofenceKey.current = ""; // Reset so it retries
+      });
+  }, [userPhone, geofenceEvaluation]);
+
+  useEffect(() => {
+    const targetLat = selectedLocation?.lat ?? userCoords?.lat;
+    const targetLon = selectedLocation?.lon ?? userCoords?.lon;
+    const targetName = selectedLocation?.name ?? "Vessel Position";
+
+    if (targetLat == null || targetLon == null) return;
+
+    // Small delay to let rapid state changes settle, but don't clear on cleanup
+    if (geofenceTimerRef.current) clearTimeout(geofenceTimerRef.current);
+    geofenceTimerRef.current = setTimeout(() => {
+      runGeofenceCheck(targetLat, targetLon, targetName);
+    }, 300);
+  }, [selectedLocation?.lat, selectedLocation?.lon, userCoords?.lat, userCoords?.lon, runGeofenceCheck]);
+
   // Pipeline state for Multi-turn memory
   const [pipelineState, setPipelineState] = useState<ChatState>({
     conversation: [],
@@ -123,10 +187,6 @@ function AppWorkspace() {
       }
     }
   }, [selectedLocation, marineContext]);
-
-  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
-  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
-  const [isManualLanguageOverride, setIsManualLanguageOverride] = useState(false);
 
   const t = translations[currentLanguage] || translations.en;
 
@@ -503,12 +563,22 @@ function AppWorkspace() {
           activeTab={activeTab}
           onSelectTab={(tab) => setActiveTab(tab)}
           hasMapData={Boolean(mapGeoJson?.features?.length)}
-          hasActiveAlert={Boolean(activeCycloneAlert)}
+          hasActiveAlert={Boolean(activeCycloneAlert) || Boolean(geofenceEvaluation?.is_breached)}
           hasTraceData={Boolean(activeTrace && activeTrace.length > 0)}
         />
 
         {/* ── Active View Container ── */}
         <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+          {/* High Priority Geofence Breach Emergency Alert Banner */}
+          {!isBreachDismissed && geofenceEvaluation?.is_breached && (
+            <BorderBreachAlert
+              evaluation={geofenceEvaluation}
+              onDismiss={() => setIsBreachDismissed(true)}
+              userPhone={userPhone}
+              onPhoneChange={setUserPhone}
+            />
+          )}
+
           {/* Destination 1: Chat View */}
           {activeTab === "chat" && (
             <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--neutral)]">
@@ -712,6 +782,7 @@ function AppWorkspace() {
                 language={currentLanguage}
                 onSelectLanguage={handleSelectLanguage}
                 activeCycloneAlert={activeCycloneAlert}
+                activeGeofenceBreach={geofenceEvaluation}
               />
             </div>
           )}

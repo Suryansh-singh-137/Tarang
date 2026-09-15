@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 import groq
-
+import os
 import config
 from tools import sarvam_tts_client
 from tools.whatsapp_session import session_store
@@ -940,4 +940,83 @@ async def whatsapp_webhook(request: Request):
             "An error occurred while processing your request. "
             "Please verify the location and try again in a few moments."
         )
-        return Response(content=str(twiml), media_type="application/xml")
+        return Response(content=str(twiml), media_type="application/xml")
+
+
+# ---------------------------------------------------------------------------
+# Geofence Boundary Breach & Alert Endpoint
+# ---------------------------------------------------------------------------
+
+class GeofenceEvaluateRequest(BaseModel):
+    lat: float
+    lon: float
+    phone: Optional[str] = None
+    name: Optional[str] = None
+    trigger_whatsapp: Optional[bool] = True
+
+
+# Server-side rate limiter for geofence WhatsApp alerts
+_geofence_whatsapp_last_sent: dict[str, float] = {}  # phone -> last_sent_timestamp
+_GEOFENCE_COOLDOWN_S = int(os.environ.get("GEOFENCE_WHATSAPP_COOLDOWN_SECONDS", "300"))
+
+
+@app.post("/geofence/evaluate")
+def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
+    """
+    Evaluate user coordinates against International Maritime Boundary Lines (IMBL).
+    Detects if coordinates cross into foreign waters (e.g. Sri Lanka or Pakistan),
+    computes return bearing to Indian safety, and dispatches a critical WhatsApp alert if breached.
+
+    WhatsApp alerts are rate-limited to one per GEOFENCE_WHATSAPP_COOLDOWN_SECONDS (default 300s = 5 min).
+    If no phone is provided, falls back to TWILIO_RECIPIENT_PHONE from environment.
+    """
+    import time
+    from tools.boundary_geo import evaluate_maritime_geofence
+    from tools.whatsapp_sender import send_geofence_breach_alert
+
+    eval_result = evaluate_maritime_geofence(body.lat, body.lon, location_name=body.name or "")
+
+    # Determine recipient phone: request body > config/env default
+    recipient_phone = (
+        (body.phone or "").strip()
+        or getattr(config, "TWILIO_RECIPIENT_PHONE", "").strip()
+        or os.environ.get("TWILIO_RECIPIENT_PHONE", "+919236454423").strip()
+    )
+
+    whatsapp_status = None
+    whatsapp_rate_limited = False
+
+    if eval_result.get("is_breached") and recipient_phone and body.trigger_whatsapp:
+        now = time.time()
+        last_sent = _geofence_whatsapp_last_sent.get(recipient_phone, 0.0)
+        elapsed = now - last_sent
+
+        if elapsed >= _GEOFENCE_COOLDOWN_S:
+            whatsapp_status = send_geofence_breach_alert(recipient_phone, eval_result)
+            _geofence_whatsapp_last_sent[recipient_phone] = now
+            logger.warning(
+                "[Geofence] Boundary breach alert dispatched to %s for location %s (dist=%.1f km)",
+                recipient_phone, body.name or f"({body.lat}, {body.lon})", eval_result.get("distance_km", 0.0)
+            )
+        else:
+            remaining = int(_GEOFENCE_COOLDOWN_S - elapsed)
+            whatsapp_rate_limited = True
+            whatsapp_status = {
+                "success": False,
+                "rate_limited": True,
+                "cooldown_seconds": _GEOFENCE_COOLDOWN_S,
+                "next_allowed_in_seconds": remaining,
+                "note": f"WhatsApp alert rate-limited. Next alert allowed in {remaining}s.",
+            }
+            logger.info(
+                "[Geofence] WhatsApp alert rate-limited for %s (next in %ds)",
+                recipient_phone, remaining,
+            )
+
+    return {
+        **eval_result,
+        "whatsapp_delivery": whatsapp_status,
+        "whatsapp_result": whatsapp_status,
+        "whatsapp_sent": bool(whatsapp_status and whatsapp_status.get("success") and not whatsapp_rate_limited),
+        "recipient_phone": recipient_phone if eval_result.get("is_breached") else None,
+    }

@@ -213,13 +213,16 @@ export async function searchLocationsApi(query: string, limit: number = 6): Prom
 export async function reverseGeocodeApi(
   lat: number,
   lon: number
-): Promise<{ location: SelectedLocation; marine_context: MarineContext } | null> {
+): Promise<{ name: string; display_name: string; state?: string; country?: string } | null> {
   try {
-    const res = await fetch(`${API_BASE_URL}/location/reverse?lat=${lat}&lon=${lon}`);
+    const res = await fetch(`${API_BASE_URL}/location/reverse?lat=${lat}&lon=${lon}`, {
+      signal: AbortSignal.timeout(3000),
+    });
     if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json();
+    return data.location || null;
   } catch (err) {
-    console.error("Failed to reverse geocode:", err);
+    console.warn("Failed to reverse geocode:", err);
     return null;
   }
 }
@@ -238,11 +241,12 @@ export async function resolveLocationApi(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lat, lon, name, source }),
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
-    console.error("Failed to resolve location:", err);
+    console.warn("Failed to resolve location:", err);
     return null;
   }
 }
@@ -319,5 +323,64 @@ export async function fetchPfzZonesApi(
     return null;
   }
 }
+
+export interface GeofenceEvaluationResult {
+  is_breached: boolean;
+  boundary_name: string;
+  distance_km: number;
+  status: "breach" | "critical_buffer" | "warning_buffer" | "safe";
+  bearing_to_safety: number;
+  bearing_cardinal: string;
+  warning_title: string;
+  warning_message: string;
+  sector: string;
+  coordinates: {
+    lat: number;
+    lon: number;
+  };
+  coastguard_number: string;
+  whatsapp_sent?: boolean;
+  whatsapp_result?: {
+    success: boolean;
+    simulated?: boolean;
+    to?: string;
+    from?: string;
+    sid?: string;
+    error?: string;
+    message_preview?: string;
+    note?: string;
+  };
+}
+
+/**
+ * Evaluate maritime geofence status (IMBL boundary breach) and optionally trigger WhatsApp alert
+ */
+export async function evaluateGeofenceApi(
+  lat: number,
+  lon: number,
+  phone?: string,
+  name?: string,
+  triggerWhatsapp: boolean = true
+): Promise<GeofenceEvaluationResult | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/geofence/evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lat,
+        lon,
+        phone: phone || undefined,
+        name: name || undefined,
+        trigger_whatsapp: triggerWhatsapp,
+      }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn("Failed to evaluate maritime geofence:", err);
+    return null;
+  }
+}
+
 
 

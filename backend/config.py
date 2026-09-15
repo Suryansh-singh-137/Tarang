@@ -20,7 +20,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 
-# Ensure .env is explicitly loaded from backend directory
+# Load .env from workspace root and backend directory
+load_dotenv(BASE_DIR.parent / ".env")
 load_dotenv(BASE_DIR / ".env")
 
 # ---------------------------------------------------------------------------
@@ -151,4 +152,5 @@ INDIA_TZ: str = "Asia/Kolkata"
 TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+TWILIO_RECIPIENT_PHONE: str = os.getenv("TWILIO_RECIPIENT_PHONE", "+919236454423")
 WHATSAPP_SESSION_TTL_SECONDS: int = int(os.getenv("WHATSAPP_SESSION_TTL_SECONDS", "600"))

@@ -1,8 +1,9 @@
 import React from "react";
-import { AlertTriangle, ShieldCheck, PhoneCall, Radio, Wind, Compass, ExternalLink } from "lucide-react";
+import { AlertTriangle, ShieldCheck, PhoneCall, Radio, Wind, Compass, ExternalLink, Navigation } from "lucide-react";
 import { LanguageCode } from "@/lib/types";
 import { translations } from "@/lib/i18n";
 import { LanguageToggle } from "../common/LanguageToggle";
+import { GeofenceEvaluationResult } from "@/lib/api";
 
 interface Props {
   language: LanguageCode;
@@ -13,6 +14,7 @@ interface Props {
     distanceKm: number;
     windSpeedKmh: number;
   } | null;
+  activeGeofenceBreach?: GeofenceEvaluationResult | null;
   className?: string;
 }
 
@@ -20,6 +22,7 @@ export const AlertsView: React.FC<Props> = ({
   language,
   onSelectLanguage,
   activeCycloneAlert,
+  activeGeofenceBreach,
   className = "",
 }) => {
   const t = translations[language] || translations.en;
@@ -43,6 +46,58 @@ export const AlertsView: React.FC<Props> = ({
           <LanguageToggle currentLanguage={language} onSelectLanguage={onSelectLanguage} />
         </div>
       </div>
+
+      {/* Geofence Breach Card (High Priority) */}
+      {activeGeofenceBreach && activeGeofenceBreach.is_breached && (
+        <div className="bg-red-50 border-2 border-red-500 rounded-2xl p-5 sm:p-6 shadow-md space-y-4 animate-pulse">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 text-red-800 font-bold text-sm sm:text-base uppercase tracking-wider">
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+              <span>Critical: International Maritime Boundary Breach</span>
+            </div>
+            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-red-600 text-white uppercase">
+              Foreign Waters
+            </span>
+          </div>
+
+          <div className="space-y-1.5 text-red-950">
+            <h2 className="text-lg sm:text-xl font-bold">
+              Boundary Crossed: {activeGeofenceBreach.boundary_name}
+            </h2>
+            <p className="text-xs sm:text-sm leading-relaxed text-red-800">
+              Vessel coordinates indicate you have crossed the international geofence into foreign territorial waters.
+              Immediate foreign naval apprehension risk is elevated. Heave to or reverse course immediately.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div className="p-3 bg-white/90 rounded-xl border border-red-200">
+              <span className="text-[11px] text-red-700 block mb-0.5">Penetration Distance</span>
+              <span className="text-base font-bold text-red-900 font-mono-data">
+                {activeGeofenceBreach.distance_km.toFixed(1)} km
+              </span>
+            </div>
+
+            <div className="p-3 bg-white/90 rounded-xl border border-red-200">
+              <span className="text-[11px] text-red-700 block mb-0.5">Recommended Escape Course</span>
+              <span className="text-base font-bold text-red-900 font-mono-data flex items-center gap-1">
+                <Navigation className="w-4 h-4 text-red-600 inline" />
+                Steer {activeGeofenceBreach.bearing_cardinal} ({Math.round(activeGeofenceBreach.bearing_to_safety)}°)
+              </span>
+            </div>
+
+            <div className="p-3 bg-white/90 rounded-xl border border-red-200">
+              <span className="text-[11px] text-red-700 block mb-0.5">Emergency S&R Call</span>
+              <a
+                href={`tel:${activeGeofenceBreach.coastguard_number}`}
+                className="text-base font-bold text-red-700 hover:underline font-mono-data"
+              >
+                ICG Toll-Free {activeGeofenceBreach.coastguard_number}
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Primary Alert Section */}
       {activeCycloneAlert ? (

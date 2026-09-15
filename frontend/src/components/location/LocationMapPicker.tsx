@@ -116,8 +116,8 @@ export function LocationMapPicker({ onClose }: LocationMapPickerProps) {
     }
   };
 
-  const handleConfirmLocation = async () => {
-    await selectCoordinates(pin.lat, pin.lon, undefined, "map");
+  const handleConfirmLocation = () => {
+    selectCoordinates(pin.lat, pin.lon, pinName, "map");
     onClose();
   };
 
