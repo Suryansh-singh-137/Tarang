@@ -26,6 +26,9 @@ import groq
 
 import config
 from tools import sarvam_tts_client
+from tools.whatsapp_session import session_store
+from tools.whatsapp_formatter import format_for_whatsapp
+from twilio.twiml.messaging_response import MessagingResponse
 from graph.build_graph import graph
 from graph.state import ORCAState
 from location.models import DeviceLocation, LocationMode, ExecutionStatus, DataStatus
@@ -755,3 +758,186 @@ def location_pfz(lat: float, lon: float, name: Optional[str] = None):
         "summary": pfz_res.get("summary", ""),
         "features": features,
     }
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Integration (Twilio)
+# ---------------------------------------------------------------------------
+
+def _extract_last_results(final_state: dict) -> dict[str, dict]:
+    """Extract success specialist agent results for client/session reuse."""
+    last_results: dict[str, dict] = {}
+    for agent_key in [
+        "weather_result", "pfz_result", "hazard_result", "geofence_result", "risk_result"
+    ]:
+        ar = final_state.get(agent_key)
+        if ar and ar.get("status") == "success":
+            agent_name = ar.get("agent_name", agent_key.replace("_result", "_agent"))
+            last_results[agent_name] = {
+                "agent_name": ar.get("agent_name"),
+                "status": ar.get("status"),
+                "data": ar.get("data", {}),
+                "source": ar.get("source", ""),
+                "summary": ar.get("summary", ""),
+                "used_fallback": ar.get("used_fallback", False),
+                "data_quality": ar.get("data_quality", "live"),
+                "timestamp": ar.get("timestamp", ""),
+                "error": ar.get("error"),
+                "evidence": ar.get("evidence", []),
+            }
+    return last_results
+
+
+async def _run_graph_direct(
+    query: str,
+    conversation: list[dict] | None = None,
+    last_parsed_intent: dict | None = None,
+    last_results: dict[str, dict] | None = None,
+) -> ORCAState:
+    """Run the LangGraph pipeline end-to-end and return the final ORCAState directly."""
+    req_id = str(uuid.uuid4())
+    conv_id = f"conv-wa-{req_id[:8]}"
+    user_loc = None
+    if last_parsed_intent and last_parsed_intent.get("location_name"):
+        user_loc = {
+            "lat": last_parsed_intent.get("lat"),
+            "lon": last_parsed_intent.get("lon"),
+            "name": last_parsed_intent.get("location_name"),
+        }
+    initial_state = ORCAState(
+        request_id=req_id,
+        conversation_id=conv_id,
+        raw_query=query,
+        detected_language="en",
+        parsed_intent=None,
+        device_location=None,
+        query_location=None,
+        resolved_location=None,
+        location_mode=None,
+        weather_result=None,
+        pfz_result=None,
+        ocean_result=None,
+        hazard_result=None,
+        geofence_result=None,
+        risk_result=None,
+        execution_status="success",
+        overall_data_status="live",
+        final_answer_text="",
+        map_geojson={"type": "FeatureCollection", "features": []},
+        evidence=[],
+        trace=[],
+        conversation_history=(conversation or [])[-config.MAX_CONVERSATION_TURNS:],
+        last_parsed_intent=last_parsed_intent,  # type: ignore[arg-type]
+        last_results=last_results or {},  # type: ignore[arg-type]
+        previous_marine_assessment=None,
+        previous_relevant_result=None,
+        semantic_context={},
+        changed_fields=[],
+        parse_method="rule_based_fallback",
+        synthesis_method="template_fallback",
+        data_quality_reports=[],
+        risk_sufficient_data=None,
+        user_location=user_loc,
+        language_override=None,
+    )
+    final_state = await graph.ainvoke(initial_state, config={"configurable": {"thread_id": conv_id}})
+    return final_state
+
+
+@app.post("/whatsapp")
+@app.post("/webhook")
+async def whatsapp_webhook(request: Request):
+    """
+    Twilio WhatsApp Webhook Endpoint.
+
+    Accepts:
+      - Standard Twilio form POST data (From, Body, ProfileName)
+      - Or JSON data {"From": "...", "Body": "..."} for developer/API testing
+
+    Returns:
+      - TwiML XML (<Response><Message>...</Message></Response>)
+    """
+    from_number = ""
+    body_text = ""
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+            from_number = data.get("From") or data.get("from") or "whatsapp:+1000000000"
+            body_text = data.get("Body") or data.get("query") or data.get("text") or ""
+        except Exception:
+            pass
+    else:
+        try:
+            form_data = await request.form()
+            from_number = form_data.get("From", "")
+            body_text = form_data.get("Body", "")
+        except Exception:
+            pass
+
+    from_number = str(from_number).strip()
+    body_text = str(body_text).strip()
+
+    twiml = MessagingResponse()
+
+    if not body_text:
+        twiml.message(
+            "🌊 *Tarang Marine Safety Advisor*\n\n"
+            "Please send a coastal query. For example:\n"
+            "• _kal subah thoothukudi safe hai?_\n"
+            "• _Is it safe to fish near Chennai tomorrow morning?_\n"
+            "• _Where is the nearest PFZ near Kochi?_"
+        )
+        return Response(content=str(twiml), media_type="application/xml")
+
+    session_id = from_number or "default_whatsapp_user"
+    session = session_store.get_session(session_id)
+
+    logger.info(f"Received WhatsApp query from {session_id}: {body_text!r}")
+
+    try:
+        final_state = await _run_graph_direct(
+            query=body_text,
+            conversation=session.get("conversation", []),
+            last_parsed_intent=session.get("last_parsed_intent"),
+            last_results=session.get("last_results", {}),
+        )
+
+        answer_text = final_state.get("final_answer_text", "")
+        risk_data = (
+            final_state.get("risk_result", {}).get("data", {})
+            if final_state.get("risk_result")
+            else {}
+        )
+
+        formatted_reply = format_for_whatsapp(answer_text, risk_data)
+
+        # Update session memory
+        updated_history = list(session.get("conversation", []))
+        updated_history.append({"role": "user", "content": body_text})
+        updated_history.append({"role": "assistant", "content": answer_text[:500]})
+
+        last_results = _extract_last_results(final_state)
+        curr_intent = final_state.get("parsed_intent")
+        if (not curr_intent or not curr_intent.get("location_name")) and session.get("last_parsed_intent"):
+            curr_intent = session.get("last_parsed_intent")
+
+        session_store.update_session(
+            phone=session_id,
+            conversation=updated_history,
+            last_parsed_intent=curr_intent,
+            last_results=last_results,
+        )
+
+        twiml.message(formatted_reply)
+        return Response(content=str(twiml), media_type="application/xml")
+
+    except Exception as exc:
+        logger.exception(f"Error processing WhatsApp query: {exc}")
+        twiml.message(
+            "⚠️ *Tarang Service Notice*\n\n"
+            "An error occurred while processing your request. "
+            "Please verify the location and try again in a few moments."
+        )
+        return Response(content=str(twiml), media_type="application/xml")
