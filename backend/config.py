@@ -144,3 +144,11 @@ RISK_WEIGHTS: dict[str, float] = {
 # ---------------------------------------------------------------------------
 
 INDIA_TZ: str = "Asia/Kolkata"
+
+# ---------------------------------------------------------------------------
+# Twilio WhatsApp Configuration
+# ---------------------------------------------------------------------------
+TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+WHATSAPP_SESSION_TTL_SECONDS: int = int(os.getenv("WHATSAPP_SESSION_TTL_SECONDS", "600"))
