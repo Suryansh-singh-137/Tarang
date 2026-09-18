@@ -849,6 +849,7 @@ async def _run_graph_direct(
 
 @app.post("/whatsapp")
 @app.post("/webhook")
+@app.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
     """
     Twilio WhatsApp Webhook Endpoint.
@@ -1097,6 +1098,7 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
 # ---------------------------------------------------------------------------
 
 @app.post("/sms")
+@app.post("/webhook/sms")
 async def sms_webhook(request: Request):
     """
     Twilio SMS Webhook Endpoint.
