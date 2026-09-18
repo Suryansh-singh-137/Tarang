@@ -130,6 +130,19 @@ _HARDCODED: Dict[str, Tuple[float, float]] = {
     "panaji":            (15.4909, 73.8278),
     "havelock island":   (11.9792, 93.0086),
     "bhubaneswar":       (20.2961, 85.8245),
+    # State-level entries (map to primary coastal city for the state)
+    "west bengal":       (22.5726, 88.3639),   # → Kolkata coast
+    "bengal":            (22.5726, 88.3639),
+    "odisha":            (20.3200, 86.6108),    # → Paradip
+    "orissa":            (20.3200, 86.6108),
+    "andhra pradesh":    (17.6868, 83.2185),    # → Visakhapatnam
+    "andhra":            (17.6868, 83.2185),
+    "tamil nadu":        (13.0827, 80.2707),    # → Chennai
+    "tamilnadu":         (13.0827, 80.2707),
+    "kerala":            (9.9312,  76.2673),    # → Kochi
+    "karnataka":         (12.8706, 74.8422),    # → Mangaluru
+    "maharashtra":       (18.9388, 72.8354),    # → Mumbai
+    "gujarat":           (21.6417, 69.6293),     # → Porbandar
 }
 
 GAZETTEER.update(_HARDCODED)
@@ -453,6 +466,13 @@ def resolve_location(query: str) -> Dict[str, Any]:
         "fine", "high", "low", "moderate", "extreme", "score", "factor", "factors",
         "breakdown", "reason", "because", "explain", "explanation", "kyun", "kyon",
         "samjhao", "iska", "woh", "khatra", "tufan", "bijli",
+        # Hindi transliteration connectors and weather/intent tokens (V2.2.2)
+        "kai", "ke", "ki", "ka", "kaa", "pas", "pass", "paas", "mein", "mei",
+        "toofan", "toofaan", "tufaan", "chances", "hoga", "hogi", "honge",
+        "aayega", "aayegi", "aane", "wala", "wali", "wale", "aur",
+        "bohot", "bahut", "zyada", "kam", "kitna", "kitni", "kitne",
+        "kab", "kaise", "kaisa", "kaisi", "kahan", "kidhar", "udhar",
+        "safe", "unsafe", "danger", "dangerous", "update",
         # Marine activity & fishing intent tokens
         "fishing", "fisherman", "fishermen", "fishers", "catch", "boat", "boats", "trip", "trips",
         "sail", "sailing", "go", "going", "leave", "leaving", "possible", "advisable",

@@ -4,6 +4,8 @@ langgraph
 langchain
 langchain-groq
 langchain-openai
+groq
+twilio
 python-dotenv
 shapely
 geopandas
@@ -11,3 +13,4 @@ httpx
 sse-starlette
 cachetools
 python-multipart
+pydantic

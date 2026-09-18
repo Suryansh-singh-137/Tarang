@@ -853,12 +853,9 @@ async def whatsapp_webhook(request: Request):
     """
     Twilio WhatsApp Webhook Endpoint.
 
-    Accepts:
-      - Standard Twilio form POST data (From, Body, ProfileName)
-      - Or JSON data {"From": "...", "Body": "..."} for developer/API testing
-
-    Returns:
-      - TwiML XML (<Response><Message>...</Message></Response>)
+    Strategy: Return an immediate empty TwiML response to Twilio (within 1-2s)
+    to avoid the 15-second webhook timeout. The actual query is processed in a
+    background asyncio task, and the answer is sent back via Twilio REST API.
     """
     from_number = ""
     body_text = ""
@@ -895,11 +892,29 @@ async def whatsapp_webhook(request: Request):
         return Response(content=str(twiml), media_type="application/xml")
 
     session_id = from_number or "default_whatsapp_user"
-    session = session_store.get_session(session_id)
 
     logger.info(f"Received WhatsApp query from {session_id}: {body_text!r}")
 
+    # Launch background processing task — do NOT await it
+    asyncio.create_task(
+        _process_whatsapp_query_background(session_id, body_text)
+    )
+
+    # Return empty TwiML immediately so Twilio doesn't time out
+    # The actual reply will be sent via Twilio REST API from the background task
+    return Response(content=str(twiml), media_type="application/xml")
+
+
+async def _process_whatsapp_query_background(session_id: str, body_text: str):
+    """
+    Background task: runs the full ORCA pipeline and sends the result
+    back to the user via Twilio REST API (not TwiML).
+    """
+    from tools.whatsapp_sender import send_whatsapp_message
+
     try:
+        session = session_store.get_session(session_id)
+
         final_state = await _run_graph_direct(
             query=body_text,
             conversation=session.get("conversation", []),
@@ -915,6 +930,9 @@ async def whatsapp_webhook(request: Request):
         )
 
         formatted_reply = format_for_whatsapp(answer_text, risk_data)
+
+        logger.info(f"[WhatsApp] answer_text length={len(answer_text)}, formatted_reply length={len(formatted_reply)}")
+        logger.info(f"[WhatsApp] formatted_reply preview: {formatted_reply[:300]!r}")
 
         # Update session memory
         updated_history = list(session.get("conversation", []))
@@ -933,17 +951,26 @@ async def whatsapp_webhook(request: Request):
             last_results=last_results,
         )
 
-        twiml.message(formatted_reply)
-        return Response(content=str(twiml), media_type="application/xml")
+        # Send reply via Twilio REST API (works regardless of webhook timeout)
+        send_result = send_whatsapp_message(session_id, formatted_reply)
+        if send_result.get("success"):
+            logger.info(f"[WhatsApp] Reply sent successfully to {session_id} via REST API (SID={send_result.get('sid', 'simulated')})")
+        else:
+            logger.error(f"[WhatsApp] Failed to send reply to {session_id}: {send_result.get('error')}")
 
     except Exception as exc:
-        logger.exception(f"Error processing WhatsApp query: {exc}")
-        twiml.message(
-            "⚠️ *Tarang Service Notice*\n\n"
-            "An error occurred while processing your request. "
-            "Please verify the location and try again in a few moments."
-        )
-        return Response(content=str(twiml), media_type="application/xml")
+        logger.exception(f"[WhatsApp] Background processing error for {session_id}: {exc}")
+        # Try to send error notification
+        try:
+            from tools.whatsapp_sender import send_whatsapp_message as _send
+            _send(
+                session_id,
+                "⚠️ *Tarang Service Notice*\n\n"
+                "An error occurred while processing your request. "
+                "Please verify the location and try again in a few moments."
+            )
+        except Exception:
+            logger.exception("[WhatsApp] Could not send error notification")
 
 
 # ---------------------------------------------------------------------------

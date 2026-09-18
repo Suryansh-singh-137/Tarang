@@ -983,6 +983,20 @@ def _render_risk_explanation_response(
 
 
 # ---------------------------------------------------------------------------
+# Location clarification fallback for synthesis early-exit
+# ---------------------------------------------------------------------------
+
+def _get_location_clarification_fallback(lang: str) -> str:
+    """Return clarification text when synthesis is reached with no resolved location."""
+    if lang == "hi":
+        return "कृपया बताएं कि आप किस तटीय क्षेत्र या बंदरगाह के पास मछली पकड़ने की योजना बना रहे हैं (जैसे कोच्चि, रामेश्वरम, मुंबई, या विशाखापट्टनम), ताकि मैं सही जानकारी दे सकूँ।"
+    elif lang == "ta":
+        return "நீங்கள் எந்த கடலோரப் பகுதி அல்லது துறைமுகத்தில் மீன்பிடிக்கத் திட்டமிட்டுள்ளீர்கள் என்று குறிப்பிடவும் (எ.கா. கொச்சி, ராமேஸ்வரம், மும்பை)."
+    else:
+        return "Please specify which coastal area or harbour you are asking about (e.g. Kochi, Rameswaram, Mumbai, or Visakhapatnam) so I can provide accurate information."
+
+
+# ---------------------------------------------------------------------------
 # Public node function (LLM Path - Milestone 6 & PRD §3)
 # ---------------------------------------------------------------------------
 
@@ -1002,9 +1016,9 @@ def synthesis(state: ORCAState) -> dict:
     req_id = state.get("request_id", "")
     conv_id = state.get("conversation_id", "")
 
-    location = (resolved.get("name") if resolved else None) or (intent["location_name"] if intent and intent.get("location_name") else "the requested location")
-    lat = resolved["lat"] if resolved else (intent["lat"] if intent and intent.get("lat") else 8.7642)
-    lon = resolved["lon"] if resolved else (intent["lon"] if intent and intent.get("lon") else 78.1348)
+    location = (resolved.get("name") if resolved else None) or (intent.get("location_name") if intent else None) or "the requested location"
+    lat = (resolved["lat"] if resolved else None) or (intent.get("lat") if intent else None) or 8.7642
+    lon = (resolved["lon"] if resolved else None) or (intent.get("lon") if intent else None) or 78.1348
     is_coastal = resolved.get("coastal", True) if resolved else True
     area_type = "coastal" if is_coastal else "inland"
 
@@ -1100,6 +1114,20 @@ def synthesis(state: ORCAState) -> dict:
             "synthesis_method": "direct_fact",
         }
 
+    # 2b. Early-Exit for ClarificationCard / CLARIFICATION mode (unresolved location)
+    _answer_type = answer_plan.get("answer_type") if answer_plan else None
+    _response_mode = state.get("response_mode") or (intent.get("response_mode") if intent else None)
+    if _answer_type == "ClarificationCard" or _response_mode == "CLARIFICATION":
+        clarification_text = state.get("final_answer_text")
+        if not clarification_text:
+            clarification_text = _get_location_clarification_fallback(lang)
+        return {
+            "final_answer_text": clarification_text,
+            "map_geojson": map_geojson,
+            "marine_snapshot": marine_snapshot,
+            "synthesis_method": "direct_fact",
+        }
+
     # 3. Direct Location Queries (PRD §7, §8)
     if intent_name == "LOCATION_QUERY":
         loc_text = state.get("final_answer_text") or _render_location_response(lang, resolved)
@@ -1142,9 +1170,9 @@ def synthesis(state: ORCAState) -> dict:
             "synthesis_method": "llm",
         }
 
-    location = (resolved.get("name") if resolved else None) or (intent["location_name"] if intent else "the requested location")
-    lat = resolved["lat"] if resolved else (intent["lat"] if intent else 8.7642)
-    lon = resolved["lon"] if resolved else (intent["lon"] if intent else 78.1348)
+    location = (resolved.get("name") if resolved else None) or (intent.get("location_name") if intent else "the requested location") or "the requested location"
+    lat = (resolved["lat"] if resolved else None) or (intent.get("lat") if intent else None) or 8.7642
+    lon = (resolved["lon"] if resolved else None) or (intent.get("lon") if intent else None) or 78.1348
     is_coastal = resolved.get("coastal", True) if resolved else True
     area_type = "coastal" if is_coastal else "inland"
 

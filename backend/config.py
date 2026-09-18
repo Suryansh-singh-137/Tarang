@@ -21,9 +21,8 @@ BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 
 # Load .env from workspace root and backend directory
-# override=True ensures updated API keys in .env always take effect
-load_dotenv(BASE_DIR.parent / ".env", override=True)
-load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(BASE_DIR.parent / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 # ---------------------------------------------------------------------------
 # External API base URLs
