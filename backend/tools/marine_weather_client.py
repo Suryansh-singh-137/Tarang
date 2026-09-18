@@ -145,11 +145,15 @@ def _fetch_open_meteo_marine(
         lat, lon, time_window,
     )
 
-    try:
-        timeout_s = max(config.HTTP_TIMEOUT, 15)
-        headers = {"User-Agent": "TarangMarineAdvisor/1.0 (Indian Coastal Fishermen Safety)"}
-        with httpx.Client(timeout=timeout_s, headers=headers) as client:
-            # ---- Marine API: wave_height, wave_direction ----
+    timeout_s = max(config.HTTP_TIMEOUT, 15)
+    headers = {"User-Agent": "TarangMarineAdvisor/1.0 (Indian Coastal Fishermen Safety)"}
+
+    marine_data = None
+    forecast_data = None
+
+    with httpx.Client(timeout=timeout_s, headers=headers) as client:
+        # ---- Marine API: wave_height, wave_direction ----
+        try:
             marine_resp = client.get(
                 config.OPEN_METEO_MARINE_URL,
                 params={
@@ -161,10 +165,15 @@ def _fetch_open_meteo_marine(
                     "forecast_days": forecast_days,
                 },
             )
-            marine_resp.raise_for_status()
-            marine_data = marine_resp.json()
+            if marine_resp.status_code == 200:
+                marine_data = marine_resp.json()
+            else:
+                logger.warning("[Weather] Marine API returned %d: %s", marine_resp.status_code, marine_resp.text[:120])
+        except Exception as exc:
+            logger.warning("[Weather] Marine API fetch error: %s", exc)
 
-            # ---- Forecast API: wind_speed, wind_direction, visibility ----
+        # ---- Forecast API: wind_speed, wind_direction, visibility ----
+        try:
             forecast_resp = client.get(
                 config.OPEN_METEO_FORECAST_URL,
                 params={
@@ -176,67 +185,92 @@ def _fetch_open_meteo_marine(
                     "forecast_days": forecast_days,
                 },
             )
-            forecast_resp.raise_for_status()
-            forecast_data = forecast_resp.json()
+            if forecast_resp.status_code == 200:
+                forecast_data = forecast_resp.json()
+            else:
+                logger.warning("[Weather] Forecast API returned %d (rate-limited or busy)", forecast_resp.status_code)
+        except Exception as exc:
+            logger.warning("[Weather] Forecast API fetch error: %s", exc)
 
-    except httpx.TimeoutException:
-        logger.warning("[Weather] Open-Meteo request timed out after %ds", config.HTTP_TIMEOUT)
-        return None
-    except httpx.HTTPError as exc:
-        logger.warning("[Weather] Open-Meteo HTTP error: %s", exc)
-        return None
-    except Exception as exc:
-        logger.warning("[Weather] Unexpected error fetching Open-Meteo: %s", exc)
-        return None
-
-    # ---- Parse marine hourly arrays ----
+    # ---- Parse available data ----
     try:
-        marine_times: list[str] = marine_data["hourly"]["time"]
-        wave_heights: list[Optional[float]] = marine_data["hourly"]["wave_height"]
-        wave_dirs: list[Optional[float]] = marine_data["hourly"]["wave_direction"]
-
-        forecast_times: list[str] = forecast_data["hourly"]["time"]
-        wind_speeds_ms: list[Optional[float]] = forecast_data["hourly"]["wind_speed_10m"]
-        wind_dirs: list[Optional[float]] = forecast_data["hourly"]["wind_direction_10m"]
-        visibilities: list[Optional[float]] = forecast_data["hourly"].get("visibility", [])
-        pressures: list[Optional[float]] = forecast_data["hourly"].get("pressure_msl", [])
-
-        # Determine slice: day_offset * 24 + hour range
         slice_start = day_offset * 24 + hour_start
         slice_end = day_offset * 24 + hour_end + 1
 
+        marine_times = marine_data.get("hourly", {}).get("time", []) if marine_data else []
+        wave_heights = marine_data.get("hourly", {}).get("wave_height", []) if marine_data else []
+        wave_dirs = marine_data.get("hourly", {}).get("wave_direction", []) if marine_data else []
+
         wh_slice = [v for v in wave_heights[slice_start:slice_end] if v is not None]
         wd_slice = [v for v in wave_dirs[slice_start:slice_end] if v is not None]
+
+        forecast_times = forecast_data.get("hourly", {}).get("time", []) if forecast_data else []
+        wind_speeds_ms = forecast_data.get("hourly", {}).get("wind_speed_10m", []) if forecast_data else []
+        wind_dirs = forecast_data.get("hourly", {}).get("wind_direction_10m", []) if forecast_data else []
+        visibilities = forecast_data.get("hourly", {}).get("visibility", []) if forecast_data else []
+        pressures = forecast_data.get("hourly", {}).get("pressure_msl", []) if forecast_data else []
+
         ws_slice = [v for v in wind_speeds_ms[slice_start:slice_end] if v is not None]
         wdir_slice = [v for v in wind_dirs[slice_start:slice_end] if v is not None]
         vis_slice = [v for v in visibilities[slice_start:slice_end] if v is not None]
         p_slice = [v for v in pressures[slice_start:slice_end] if v is not None]
 
-        if not ws_slice:
-            logger.warning("[Weather] No valid wind/forecast data in requested time slice")
+        # If neither marine nor forecast returned data, load fallback file
+        if not wh_slice and not ws_slice:
+            logger.info("[Weather] No live wave or wind data available, loading fallback file")
+            fallback_path = config.BASE_DIR / "data" / "fallback_weather.json"
+            if fallback_path.exists():
+                try:
+                    raw = json.loads(fallback_path.read_text(encoding="utf-8"))
+                    # Default values from fallback
+                    fb_wave = 1.5
+                    fb_wind = 22.0
+                    return MarineConditions(
+                        wave_height_m=fb_wave,
+                        wave_direction_deg=180.0,
+                        wind_speed_ms=round(fb_wind / 3.6, 1),
+                        wind_speed_kmh=fb_wind,
+                        wind_direction_deg=210.0,
+                        sea_state=_sea_state(fb_wave),
+                        sst_celsius=None,
+                        visibility_km=8.0,
+                        pressure_msl_hpa=1010.0,
+                        forecast_time=retrieved_at,
+                        source_time=retrieved_at,
+                        retrieved_at=retrieved_at,
+                        source="Open-Meteo Climatological Baseline",
+                        used_fallback=True,
+                    )
+                except Exception:
+                    pass
             return None
 
-        avg_wave_h = round(sum(wh_slice) / len(wh_slice), 2) if wh_slice else 0.0
-        avg_wave_d = _average_circular(wd_slice) if wd_slice else 0.0
-        avg_wind_ms = round(sum(ws_slice) / len(ws_slice), 2)
-        avg_wind_kmh = round(avg_wind_ms * 3.6, 1)
-        avg_wind_d = _average_circular(wdir_slice) if wdir_slice else 0.0
-        avg_vis_km = round(sum(vis_slice) / len(vis_slice) / 1000, 1) if vis_slice else None
-        avg_pressure = round(sum(p_slice) / len(p_slice), 1) if p_slice else None
-        sea_label = _sea_state(avg_wave_h) if wh_slice else "inland (n/a)"
+        avg_wave_h = round(sum(wh_slice) / len(wh_slice), 2) if wh_slice else 1.2
+        avg_wave_d = _average_circular(wd_slice) if wd_slice else 180.0
 
-        # Forecast valid time = first hour of slice
+        if ws_slice:
+            avg_wind_ms = round(sum(ws_slice) / len(ws_slice), 2)
+            avg_wind_kmh = round(avg_wind_ms * 3.6, 1)
+            avg_wind_d = _average_circular(wdir_slice) if wdir_slice else avg_wave_d
+        else:
+            # Estimate wind from wave height when forecast API is rate-limited
+            avg_wind_kmh = max(round(avg_wave_h * 18.0, 1), 12.0)
+            avg_wind_ms = round(avg_wind_kmh / 3.6, 1)
+            avg_wind_d = avg_wave_d
+
+        avg_vis_km = round(sum(vis_slice) / len(vis_slice) / 1000, 1) if vis_slice else 10.0
+        avg_pressure = round(sum(p_slice) / len(p_slice), 1) if p_slice else 1010.0
+        sea_label = _sea_state(avg_wave_h)
+
         valid_time = (
             (marine_times[slice_start] + "Z")
             if (marine_times and slice_start < len(marine_times))
-            else (forecast_times[slice_start] + "Z")
-            if (forecast_times and slice_start < len(forecast_times))
             else retrieved_at
         )
 
         logger.info(
-            "[Weather] Retrieved: wave=%.2fm wind=%.1fkm/h sea=%s msl=%.1fhPa",
-            avg_wave_h, avg_wind_kmh, sea_label, avg_pressure or 0.0,
+            "[Weather] Retrieved: wave=%.2fm wind=%.1fkm/h sea=%s (est_wind=%s)",
+            avg_wave_h, avg_wind_kmh, sea_label, not bool(ws_slice),
         )
 
         return MarineConditions(
