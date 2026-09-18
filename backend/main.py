@@ -61,6 +61,32 @@ app.add_middleware(
 )
 
 
+@app.get("/debug/weather")
+def debug_weather(lat: float = 13.0827, lon: float = 80.2707):
+    import traceback
+    import httpx
+    try:
+        with httpx.Client(timeout=12.0, headers={"User-Agent": "TarangMarine/1.0"}) as client:
+            m = client.get(
+                "https://marine-api.open-meteo.com/v1/marine",
+                params={"latitude": lat, "longitude": lon, "hourly": "wave_height", "forecast_days": 2}
+            )
+            f = client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={"latitude": lat, "longitude": lon, "hourly": "wind_speed_10m", "forecast_days": 2}
+            )
+            return {
+                "marine_status": m.status_code,
+                "marine_ok": m.status_code == 200,
+                "forecast_status": f.status_code,
+                "forecast_ok": f.status_code == 200,
+                "marine_sample": m.json().get("hourly", {}).get("wave_height", [])[:3] if m.status_code == 200 else m.text,
+                "forecast_sample": f.json().get("hourly", {}).get("wind_speed_10m", [])[:3] if f.status_code == 200 else f.text,
+            }
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------

@@ -146,7 +146,9 @@ def _fetch_open_meteo_marine(
     )
 
     try:
-        with httpx.Client(timeout=config.HTTP_TIMEOUT) as client:
+        timeout_s = max(config.HTTP_TIMEOUT, 15)
+        headers = {"User-Agent": "TarangMarineAdvisor/1.0 (Indian Coastal Fishermen Safety)"}
+        with httpx.Client(timeout=timeout_s, headers=headers) as client:
             # ---- Marine API: wave_height, wave_direction ----
             marine_resp = client.get(
                 config.OPEN_METEO_MARINE_URL,
