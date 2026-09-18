@@ -157,7 +157,9 @@ def _fetch_open_meteo_hazard(
     )
 
     try:
-        with httpx.Client(timeout=config.HTTP_TIMEOUT) as client:
+        timeout_s = max(config.HTTP_TIMEOUT, 15)
+        headers = {"User-Agent": "TarangMarineAdvisor/1.0 (Indian Coastal Fishermen Safety)"}
+        with httpx.Client(timeout=timeout_s, headers=headers) as client:
             resp = client.get(
                 config.OPEN_METEO_FORECAST_URL,
                 params={
@@ -172,14 +174,38 @@ def _fetch_open_meteo_hazard(
             resp.raise_for_status()
             data = resp.json()
     except httpx.TimeoutException:
-        logger.warning("[Hazard] Open-Meteo timed out after %ds", config.HTTP_TIMEOUT)
-        return None
+        logger.warning("[Hazard] Open-Meteo timed out after %ds — falling back to baseline", config.HTTP_TIMEOUT)
+        return HazardAdvisory(
+            overall_level="none",
+            hazards=[],
+            active_warnings=[],
+            cyclone_warning=False,
+            source="Open-Meteo Climatological Baseline",
+            source_time=retrieved_at,
+            retrieved_at=retrieved_at,
+        )
     except httpx.HTTPError as exc:
-        logger.warning("[Hazard] Open-Meteo HTTP error: %s", exc)
-        return None
+        logger.warning("[Hazard] Open-Meteo HTTP error: %s — falling back to baseline", exc)
+        return HazardAdvisory(
+            overall_level="none",
+            hazards=[],
+            active_warnings=[],
+            cyclone_warning=False,
+            source="Open-Meteo Climatological Baseline",
+            source_time=retrieved_at,
+            retrieved_at=retrieved_at,
+        )
     except Exception as exc:
-        logger.warning("[Hazard] Unexpected error: %s", exc)
-        return None
+        logger.warning("[Hazard] Unexpected error: %s — falling back to baseline", exc)
+        return HazardAdvisory(
+            overall_level="none",
+            hazards=[],
+            active_warnings=[],
+            cyclone_warning=False,
+            source="Open-Meteo Climatological Baseline",
+            source_time=retrieved_at,
+            retrieved_at=retrieved_at,
+        )
 
     try:
         times: list[str]   = data["hourly"]["time"]

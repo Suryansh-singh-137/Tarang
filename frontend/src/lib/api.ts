@@ -351,17 +351,29 @@ export interface GeofenceEvaluationResult {
     message_preview?: string;
     note?: string;
   };
+  sms_sent?: boolean;
+  sms_result?: {
+    success: boolean;
+    simulated?: boolean;
+    to?: string;
+    from?: string;
+    sid?: string;
+    error?: string;
+    message_preview?: string;
+    note?: string;
+  };
 }
 
 /**
- * Evaluate maritime geofence status (IMBL boundary breach) and optionally trigger WhatsApp alert
+ * Evaluate maritime geofence status (IMBL boundary breach) and optionally trigger WhatsApp + SMS alerts
  */
 export async function evaluateGeofenceApi(
   lat: number,
   lon: number,
   phone?: string,
   name?: string,
-  triggerWhatsapp: boolean = true
+  triggerWhatsapp: boolean = true,
+  triggerSms: boolean = true
 ): Promise<GeofenceEvaluationResult | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/geofence/evaluate`, {
@@ -373,6 +385,7 @@ export async function evaluateGeofenceApi(
         phone: phone || undefined,
         name: name || undefined,
         trigger_whatsapp: triggerWhatsapp,
+        trigger_sms: triggerSms,
       }),
     });
     if (!res.ok) return null;
