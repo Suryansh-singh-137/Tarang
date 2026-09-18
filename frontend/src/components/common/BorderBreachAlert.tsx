@@ -20,8 +20,9 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [phone, setPhone] = useState(initialPhone || "+919236454423");
-  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [isSendingAlert, setIsSendingAlert] = useState(false);
   const [whatsAppResult, setWhatsAppResult] = useState<any>(evaluation?.whatsapp_result || null);
+  const [smsResult, setSmsResult] = useState<any>(evaluation?.sms_result || null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
   // Sync phone when initialPhone changes or from localStorage on mount
@@ -40,6 +41,9 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
     if (evaluation?.whatsapp_result) {
       setWhatsAppResult(evaluation.whatsapp_result);
     }
+    if (evaluation?.sms_result) {
+      setSmsResult(evaluation.sms_result);
+    }
   }, [evaluation]);
 
   if (!evaluation || !evaluation.is_breached) {
@@ -55,7 +59,7 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
     }
     onPhoneChange?.(phone.trim());
 
-    setIsSendingWhatsApp(true);
+    setIsSendingAlert(true);
     setFeedbackMsg(null);
 
     try {
@@ -64,26 +68,45 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
         evaluation.coordinates.lon,
         phone.trim(),
         evaluation.boundary_name,
+        true,
         true
       );
+
+      const msgs: string[] = [];
 
       if (res?.whatsapp_result) {
         setWhatsAppResult(res.whatsapp_result);
         if (res.whatsapp_result.success) {
-          setFeedbackMsg(
+          msgs.push(
             res.whatsapp_result.simulated
-              ? "WhatsApp Alert simulated (see terminal/preview)."
-              : "WhatsApp Emergency Alert dispatched successfully!"
+              ? "📱 WhatsApp alert simulated"
+              : "📱 WhatsApp alert dispatched"
           );
         } else {
           const errDetail = res.whatsapp_result.error ? `: ${res.whatsapp_result.error}` : "";
-          setFeedbackMsg(`Notice: WhatsApp delivery unconfirmed${errDetail}. Make sure your phone joined the Twilio Sandbox.`);
+          msgs.push(`📱 WhatsApp unconfirmed${errDetail}`);
         }
       }
+
+      if (res?.sms_result) {
+        setSmsResult(res.sms_result);
+        if (res.sms_result.success) {
+          msgs.push(
+            res.sms_result.simulated
+              ? "💬 SMS alert simulated"
+              : "💬 SMS alert dispatched"
+          );
+        } else {
+          const errDetail = res.sms_result.error ? `: ${res.sms_result.error}` : "";
+          msgs.push(`💬 SMS unconfirmed${errDetail}`);
+        }
+      }
+
+      setFeedbackMsg(msgs.join(" · ") || "Alerts dispatched.");
     } catch (err: any) {
-      setFeedbackMsg("Failed to dispatch WhatsApp alert: " + (err?.message || "network error"));
+      setFeedbackMsg("Failed to dispatch alerts: " + (err?.message || "network error"));
     } finally {
-      setIsSendingWhatsApp(false);
+      setIsSendingAlert(false);
     }
   };
 
@@ -158,7 +181,7 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
         </div>
       </div>
 
-      {/* Expandable Emergency Details & WhatsApp Dispatch */}
+      {/* Expandable Emergency Details & Alert Dispatch */}
       {isExpanded && (
         <div className="bg-red-950/90 backdrop-blur-xs border-t border-red-800/60 px-4 py-3 sm:py-4 text-xs sm:text-sm text-red-50">
           <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
@@ -210,19 +233,29 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
               </ul>
             </div>
 
-            {/* Column 3: WhatsApp SMS / Sandbox Delivery */}
+            {/* Column 3: WhatsApp + SMS Emergency Dispatch */}
             <div className="space-y-2 bg-red-900/50 p-3 rounded-lg border border-red-700/40">
               <div className="font-bold text-yellow-300 flex items-center justify-between text-xs uppercase tracking-wider">
-                <span>📲 WhatsApp Emergency Alert</span>
-                {whatsAppResult && (
-                  <span className="text-[10px] lowercase px-1.5 py-0.5 rounded bg-emerald-800/80 text-emerald-200">
-                    {whatsAppResult.simulated ? "Simulated" : "Sent"}
-                  </span>
-                )}
+                <span>📲 Emergency Alert Dispatch</span>
+                <div className="flex items-center gap-1.5">
+                  {whatsAppResult && (
+                    <span className="text-[10px] lowercase px-1.5 py-0.5 rounded bg-emerald-800/80 text-emerald-200 flex items-center gap-0.5">
+                      <span>📱</span>
+                      {whatsAppResult.simulated ? "WA Sim" : "WA Sent"}
+                    </span>
+                  )}
+                  {smsResult && (
+                    <span className="text-[10px] lowercase px-1.5 py-0.5 rounded bg-blue-800/80 text-blue-200 flex items-center gap-0.5">
+                      <span>💬</span>
+                      {smsResult.simulated ? "SMS Sim" : "SMS Sent"}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <p className="text-[11px] text-red-200 leading-snug">
-                Deliver this coordinate breach warning and return heading directly to your phone or onshore fleet manager.
+                Deliver this breach warning via both <strong className="text-white">WhatsApp</strong> and{" "}
+                <strong className="text-white">SMS</strong> to your phone or onshore fleet manager.
               </p>
 
               <form onSubmit={handlePhoneSubmit} className="flex gap-2 items-center">
@@ -235,10 +268,10 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
                 />
                 <button
                   type="submit"
-                  disabled={isSendingWhatsApp || !phone.trim()}
+                  disabled={isSendingAlert || !phone.trim()}
                   className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded transition-colors cursor-pointer shrink-0"
                 >
-                  {isSendingWhatsApp ? "Sending..." : "Send Alert"}
+                  {isSendingAlert ? "Sending..." : "Send Alert"}
                 </button>
               </form>
 
@@ -246,11 +279,22 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
                 <div className="text-[11px] text-yellow-200 mt-1">{feedbackMsg}</div>
               )}
 
+              {/* WhatsApp preview */}
               {whatsAppResult?.message_preview && (
                 <details className="text-[10px] text-red-300 mt-1 cursor-pointer">
-                  <summary className="hover:text-white">View dispatched WhatsApp text preview</summary>
+                  <summary className="hover:text-white">📱 View dispatched WhatsApp text preview</summary>
                   <pre className="mt-1 p-2 bg-black/40 rounded whitespace-pre-wrap font-mono text-[10px] text-red-100 max-h-24 overflow-y-auto">
                     {whatsAppResult.message_preview}
+                  </pre>
+                </details>
+              )}
+
+              {/* SMS preview */}
+              {smsResult?.message_preview && (
+                <details className="text-[10px] text-blue-300 mt-1 cursor-pointer">
+                  <summary className="hover:text-white">💬 View dispatched SMS text preview</summary>
+                  <pre className="mt-1 p-2 bg-black/40 rounded whitespace-pre-wrap font-mono text-[10px] text-blue-100 max-h-24 overflow-y-auto">
+                    {smsResult.message_preview}
                   </pre>
                 </details>
               )}

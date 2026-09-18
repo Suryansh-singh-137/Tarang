@@ -983,11 +983,14 @@ class GeofenceEvaluateRequest(BaseModel):
     phone: Optional[str] = None
     name: Optional[str] = None
     trigger_whatsapp: Optional[bool] = True
+    trigger_sms: Optional[bool] = True
 
 
-# Server-side rate limiter for geofence WhatsApp alerts
+# Server-side rate limiter for geofence WhatsApp/SMS alerts
 _geofence_whatsapp_last_sent: dict[str, float] = {}  # phone -> last_sent_timestamp
-_GEOFENCE_COOLDOWN_S = int(os.environ.get("GEOFENCE_WHATSAPP_COOLDOWN_SECONDS", "300"))
+_geofence_sms_last_sent: dict[str, float] = {}  # phone -> last_sent_timestamp
+def _get_geofence_cooldown_s() -> int:
+    return int(os.environ.get("GEOFENCE_WHATSAPP_COOLDOWN_SECONDS", "30"))
 
 
 @app.post("/geofence/evaluate")
@@ -995,14 +998,15 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
     """
     Evaluate user coordinates against International Maritime Boundary Lines (IMBL).
     Detects if coordinates cross into foreign waters (e.g. Sri Lanka or Pakistan),
-    computes return bearing to Indian safety, and dispatches a critical WhatsApp alert if breached.
+    computes return bearing to Indian safety, and dispatches critical WhatsApp + SMS alerts if breached.
 
-    WhatsApp alerts are rate-limited to one per GEOFENCE_WHATSAPP_COOLDOWN_SECONDS (default 300s = 5 min).
+    Alerts are rate-limited to one per GEOFENCE_WHATSAPP_COOLDOWN_SECONDS (default 300s = 5 min).
     If no phone is provided, falls back to TWILIO_RECIPIENT_PHONE from environment.
     """
     import time
     from tools.boundary_geo import evaluate_maritime_geofence
     from tools.whatsapp_sender import send_geofence_breach_alert
+    from tools.sms_sender import send_geofence_breach_sms
 
     eval_result = evaluate_maritime_geofence(body.lat, body.lon, location_name=body.name or "")
 
@@ -1015,38 +1019,177 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
 
     whatsapp_status = None
     whatsapp_rate_limited = False
+    sms_status = None
+    sms_rate_limited = False
 
-    if eval_result.get("is_breached") and recipient_phone and body.trigger_whatsapp:
+    if eval_result.get("is_breached") and recipient_phone:
         now = time.time()
-        last_sent = _geofence_whatsapp_last_sent.get(recipient_phone, 0.0)
-        elapsed = now - last_sent
+        cooldown_s = _get_geofence_cooldown_s()
 
-        if elapsed >= _GEOFENCE_COOLDOWN_S:
-            whatsapp_status = send_geofence_breach_alert(recipient_phone, eval_result)
-            _geofence_whatsapp_last_sent[recipient_phone] = now
-            logger.warning(
-                "[Geofence] Boundary breach alert dispatched to %s for location %s (dist=%.1f km)",
-                recipient_phone, body.name or f"({body.lat}, {body.lon})", eval_result.get("distance_km", 0.0)
-            )
-        else:
-            remaining = int(_GEOFENCE_COOLDOWN_S - elapsed)
-            whatsapp_rate_limited = True
-            whatsapp_status = {
-                "success": False,
-                "rate_limited": True,
-                "cooldown_seconds": _GEOFENCE_COOLDOWN_S,
-                "next_allowed_in_seconds": remaining,
-                "note": f"WhatsApp alert rate-limited. Next alert allowed in {remaining}s.",
-            }
-            logger.info(
-                "[Geofence] WhatsApp alert rate-limited for %s (next in %ds)",
-                recipient_phone, remaining,
-            )
+        # --- WhatsApp dispatch ---
+        if body.trigger_whatsapp:
+            last_sent = _geofence_whatsapp_last_sent.get(recipient_phone, 0.0)
+            elapsed = now - last_sent
+
+            if elapsed >= cooldown_s:
+                whatsapp_status = send_geofence_breach_alert(recipient_phone, eval_result)
+                _geofence_whatsapp_last_sent[recipient_phone] = now
+                logger.warning(
+                    "[Geofence] WhatsApp breach alert dispatched to %s for location %s (dist=%.1f km)",
+                    recipient_phone, body.name or f"({body.lat}, {body.lon})", eval_result.get("distance_km", 0.0)
+                )
+            else:
+                remaining = int(cooldown_s - elapsed)
+                whatsapp_rate_limited = True
+                whatsapp_status = {
+                    "success": False,
+                    "rate_limited": True,
+                    "cooldown_seconds": cooldown_s,
+                    "next_allowed_in_seconds": remaining,
+                    "note": f"WhatsApp alert rate-limited. Next alert allowed in {remaining}s.",
+                }
+                logger.info(
+                    "[Geofence] WhatsApp alert rate-limited for %s (next in %ds)",
+                    recipient_phone, remaining,
+                )
+
+        # --- SMS dispatch ---
+        if body.trigger_sms:
+            last_sent_sms = _geofence_sms_last_sent.get(recipient_phone, 0.0)
+            elapsed_sms = now - last_sent_sms
+
+            if elapsed_sms >= cooldown_s:
+                sms_status = send_geofence_breach_sms(recipient_phone, eval_result)
+                _geofence_sms_last_sent[recipient_phone] = now
+                logger.warning(
+                    "[Geofence] SMS breach alert dispatched to %s for location %s (dist=%.1f km)",
+                    recipient_phone, body.name or f"({body.lat}, {body.lon})", eval_result.get("distance_km", 0.0)
+                )
+            else:
+                remaining_sms = int(cooldown_s - elapsed_sms)
+                sms_rate_limited = True
+                sms_status = {
+                    "success": False,
+                    "rate_limited": True,
+                    "cooldown_seconds": cooldown_s,
+                    "next_allowed_in_seconds": remaining_sms,
+                    "note": f"SMS alert rate-limited. Next alert allowed in {remaining_sms}s.",
+                }
+                logger.info(
+                    "[Geofence] SMS alert rate-limited for %s (next in %ds)",
+                    recipient_phone, remaining_sms,
+                )
 
     return {
         **eval_result,
         "whatsapp_delivery": whatsapp_status,
         "whatsapp_result": whatsapp_status,
         "whatsapp_sent": bool(whatsapp_status and whatsapp_status.get("success") and not whatsapp_rate_limited),
+        "sms_delivery": sms_status,
+        "sms_result": sms_status,
+        "sms_sent": bool(sms_status and sms_status.get("success") and not sms_rate_limited),
         "recipient_phone": recipient_phone if eval_result.get("is_breached") else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Incoming SMS Webhook (Twilio)
+# ---------------------------------------------------------------------------
+
+@app.post("/sms")
+async def sms_webhook(request: Request):
+    """
+    Twilio SMS Webhook Endpoint.
+
+    Accepts:
+      - Standard Twilio form POST data (From, Body)
+      - Or JSON data {"From": "...", "Body": "..."} for developer/API testing
+
+    Returns:
+      - TwiML XML (<Response><Message>...</Message></Response>)
+    """
+    from_number = ""
+    body_text = ""
+
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+            from_number = data.get("From") or data.get("from") or "+1000000000"
+            body_text = data.get("Body") or data.get("query") or data.get("text") or ""
+        except Exception:
+            pass
+    else:
+        try:
+            form_data = await request.form()
+            from_number = form_data.get("From", "")
+            body_text = form_data.get("Body", "")
+        except Exception:
+            pass
+
+    from_number = str(from_number).strip()
+    body_text = str(body_text).strip()
+
+    twiml = MessagingResponse()
+
+    if not body_text:
+        twiml.message(
+            "TARANG Marine Safety Advisor\n"
+            "Send a coastal query, e.g.:\n"
+            "- Is it safe to fish near Chennai tomorrow?\n"
+            "- Where is the nearest PFZ near Kochi?"
+        )
+        return Response(content=str(twiml), media_type="application/xml")
+
+    # Use plain phone for SMS sessions (no whatsapp: prefix)
+    session_id = f"sms:{from_number}" if from_number else "default_sms_user"
+    session = session_store.get_session(session_id)
+
+    logger.info(f"Received SMS query from {session_id}: {body_text!r}")
+
+    try:
+        final_state = await _run_graph_direct(
+            query=body_text,
+            conversation=session.get("conversation", []),
+            last_parsed_intent=session.get("last_parsed_intent"),
+            last_results=session.get("last_results", {}),
+        )
+
+        answer_text = final_state.get("final_answer_text", "")
+
+        # For SMS, strip markdown formatting and keep concise
+        import re
+        sms_reply = re.sub(r'\*([^*]+)\*', r'\1', answer_text)  # remove *bold*
+        sms_reply = re.sub(r'_([^_]+)_', r'\1', sms_reply)  # remove _italic_
+        # Truncate to SMS-friendly length (max ~1500 chars for multi-part SMS)
+        if len(sms_reply) > 1500:
+            sms_reply = sms_reply[:1497] + "..."
+
+        # Update session memory
+        updated_history = list(session.get("conversation", []))
+        updated_history.append({"role": "user", "content": body_text})
+        updated_history.append({"role": "assistant", "content": answer_text[:500]})
+
+        last_results = _extract_last_results(final_state)
+        curr_intent = final_state.get("parsed_intent")
+        if (not curr_intent or not curr_intent.get("location_name")) and session.get("last_parsed_intent"):
+            curr_intent = session.get("last_parsed_intent")
+
+        session_store.update_session(
+            phone=session_id,
+            conversation=updated_history,
+            last_parsed_intent=curr_intent,
+            last_results=last_results,
+        )
+
+        twiml.message(sms_reply)
+        return Response(content=str(twiml), media_type="application/xml")
+
+    except Exception as exc:
+        logger.exception(f"Error processing SMS query: {exc}")
+        twiml.message(
+            "TARANG Service Notice:\n"
+            "An error occurred processing your request. "
+            "Please verify the location and try again."
+        )
+        return Response(content=str(twiml), media_type="application/xml")
