@@ -372,3 +372,48 @@ export interface LocationSearchResult {
   country?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Route Planning Types
+// ---------------------------------------------------------------------------
+
+export interface RouteWaypoint {
+  lat: number;
+  lon: number;
+  name?: string;
+  risk_score: number;
+  risk_label: RiskLabel;
+  wave_height_m: number;
+  wind_speed_kmh: number;
+  boundary_dist_km: number;
+  hazard_level: string;
+  pfz_chl?: number;
+}
+
+export interface RouteLeg {
+  from: { lat: number; lon: number };
+  to: { lat: number; lon: number };
+  distance_km: number;
+  risk_score: number;
+  risk_label: RiskLabel;
+  wave_height_m: number;
+  wind_speed_kmh: number;
+  boundary_dist_km: number;
+  hazard_level: string;
+  estimated_time_h: number;
+  arrival_time_utc?: string;
+}
+
+export interface RouteResult {
+  status: "success" | "no_route" | "too_far" | "error";
+  total_distance_km: number;
+  total_duration_h: number;
+  avg_risk_score: number;
+  max_risk_score: number;
+  risk_label: RiskLabel;
+  waypoints: RouteWaypoint[];
+  legs: RouteLeg[];
+  route_geojson: MapGeoJSON;
+  summary: string;
+  warnings: string[];
+  error?: string | null;
+}

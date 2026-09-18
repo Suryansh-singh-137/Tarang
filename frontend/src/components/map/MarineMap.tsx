@@ -263,7 +263,142 @@ export const MarineMap: React.FC<Props> = ({
             .addTo(group);
         }
 
-        // 3. International Maritime Boundary Line (IMBL)
+        // 3. Route segments (per-leg risk-colored lines)
+        else if (props.type === "route_segment") {
+          const latLngs = geom.coordinates.map(([lon, lat]: [number, number]) => {
+            bounds.extend([lat, lon]);
+            return [lat, lon];
+          });
+          const segColor = props.stroke || "#2563eb";
+          L.polyline(latLngs, {
+            color: segColor,
+            weight: 5,
+            opacity: 0.9,
+          })
+            .bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px; color: #16242B;">
+                <strong style="color: ${segColor};">Leg #${(props.segment_index ?? 0) + 1}</strong><br/>
+                <span>Risk Level: <b>${props.risk_label || "LOW"}</b></span><br/>
+                <span style="font-size: 11px; color: #64748B;">Risk Score: ${props.risk_score || 0}/100</span>
+              </div>
+            `)
+            .addTo(group);
+        }
+
+        // 4. Overall Route Line
+        else if (props.type === "route") {
+          const latLngs = geom.coordinates.map(([lon, lat]: [number, number]) => {
+            bounds.extend([lat, lon]);
+            return [lat, lon];
+          });
+          L.polyline(latLngs, {
+            color: props.stroke || "#2563eb",
+            weight: 4,
+            opacity: 0.8,
+          }).addTo(group);
+        }
+
+        // 5. Route Start Marker
+        else if (props.type === "route_start") {
+          const [lon, lat] = geom.coordinates;
+          bounds.extend([lat, lon]);
+          const startHtml = `
+            <div style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background-color: #16a34a; color: white; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.35); font-size: 14px;">
+              ⚓
+            </div>
+          `;
+          const startIcon = L.divIcon({
+            html: startHtml,
+            className: "custom-route-start",
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          });
+          L.marker([lat, lon], { icon: startIcon })
+            .bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px;">
+                <strong style="color: #16a34a;">⚓ Departure: ${props.name || "Start"}</strong><br/>
+                <span style="font-size: 11px; color: #64748B;">${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E</span>
+              </div>
+            `)
+            .addTo(group);
+        }
+
+        // 6. Route Destination Marker
+        else if (props.type === "route_end") {
+          const [lon, lat] = geom.coordinates;
+          bounds.extend([lat, lon]);
+          const endHtml = `
+            <div style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background-color: #ef4444; color: white; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.35); font-size: 14px;">
+              🏁
+            </div>
+          `;
+          const endIcon = L.divIcon({
+            html: endHtml,
+            className: "custom-route-end",
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          });
+          L.marker([lat, lon], { icon: endIcon })
+            .bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px;">
+                <strong style="color: #ef4444;">🏁 Destination: ${props.name || "Destination"}</strong><br/>
+                <span style="font-size: 11px; color: #64748B;">${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E</span>
+              </div>
+            `)
+            .addTo(group);
+        }
+
+        // 7. PFZ Waypoint Near Route
+        else if (props.type === "pfz_near_route") {
+          const [lon, lat] = geom.coordinates;
+          bounds.extend([lat, lon]);
+          const pfzHtml = `
+            <div style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; background-color: #06b6d4; color: white; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.25); font-size: 11px;">
+              🐟
+            </div>
+          `;
+          const pfzIcon = L.divIcon({
+            html: pfzHtml,
+            className: "custom-pfz-near-route",
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
+          });
+          L.marker([lat, lon], { icon: pfzIcon })
+            .bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px;">
+                <strong style="color: #0891b2;">🐟 Fishing Zone Waypoint</strong><br/>
+                <span>Chlorophyll-a: <b>${props.chl_mg_m3 || 0} mg/m³</b></span>
+              </div>
+            `)
+            .addTo(group);
+        }
+
+        // 8. Warning Marker on Route
+        else if (props.type === "route_warning") {
+          const [lon, lat] = geom.coordinates;
+          bounds.extend([lat, lon]);
+          const warnHtml = `
+            <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background-color: #ef4444; color: white; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 12px;">
+              ⚠️
+            </div>
+          `;
+          const warnIcon = L.divIcon({
+            html: warnHtml,
+            className: "custom-route-warning",
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+          L.marker([lat, lon], { icon: warnIcon })
+            .bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px; color: #dc2626;">
+                <strong>⚠️ Severe Condition Warning</strong><br/>
+                <span>Risk Level: <b>${props.risk_label || "HIGH"}</b> (Score: ${props.risk_score || 0})</span>
+              </div>
+            `)
+            .addTo(group);
+        }
+
+        // 9. International Maritime Boundary Line (IMBL)
         else if (featType === "imbl_boundary" || props.type === "boundary" || geom.type === "LineString") {
           hasImbl = true;
           const latLngs = geom.coordinates.map(([lon, lat]: [number, number]) => {

@@ -7,6 +7,7 @@ import {
   SelectedLocation,
   MarineContext,
   LocationSearchResult,
+  RouteResult,
 } from "./types";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -383,4 +384,53 @@ export async function evaluateGeofenceApi(
 }
 
 
+// ---------------------------------------------------------------------------
+// Route Planning API
+// ---------------------------------------------------------------------------
 
+export interface PlanRouteOptions {
+  start_lat: number;
+  start_lon: number;
+  end_lat: number;
+  end_lon: number;
+  start_name?: string;
+  end_name?: string;
+  departure_utc?: string;
+  time_window?: string;
+  include_pfz?: boolean;
+}
+
+/**
+ * Plan a safe marine route between two locations.
+ * Uses deterministic A* optimization with hard safety constraints.
+ */
+export async function planRoute(
+  options: PlanRouteOptions
+): Promise<RouteResult | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_lat: options.start_lat,
+        start_lon: options.start_lon,
+        end_lat: options.end_lat,
+        end_lon: options.end_lon,
+        start_name: options.start_name || "Start",
+        end_name: options.end_name || "Destination",
+        departure_utc: options.departure_utc,
+        time_window: options.time_window || "next_24h",
+        include_pfz: options.include_pfz ?? true,
+      }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.error("Route planning failed:", errData);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to plan route:", err);
+    return null;
+  }
+}

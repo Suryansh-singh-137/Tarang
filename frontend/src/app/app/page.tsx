@@ -11,6 +11,7 @@ import { AlertsView } from "@/components/alerts/AlertsView";
 import { TracePanel } from "@/components/trace/TracePanel";
 import { FishingZonesView } from "@/components/pfz/FishingZonesView";
 import { TripPlannerView } from "@/components/trip/TripPlannerView";
+import { RoutePanel } from "@/components/route/RoutePanel";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 import { WhyThisResultModal } from "@/components/dashboard/WhyThisResultModal";
 import { ChangeSinceLastCheck } from "@/components/dashboard/ChangeSinceLastCheck";
@@ -762,6 +763,18 @@ function AppWorkspace() {
                 marineSnapshot={marineSnapshot}
                 onRecheck={handleRecheck}
                 isRechecking={isLoading}
+              />
+            </div>
+          )}
+
+          {/* Destination: Safe Marine Route Optimizer */}
+          {activeTab === "route" && (
+            <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+              <RoutePanel
+                onRouteResult={(geojson) => {
+                  setMapGeoJson(geojson);
+                }}
+                onNavigateToMap={() => setActiveTab("map")}
               />
             </div>
           )}

@@ -98,6 +98,17 @@ class SessionLocationRequest(BaseModel):
     location: dict
     marine_context: dict | None = None
 
+class RouteRequest(BaseModel):
+    start_lat: float
+    start_lon: float
+    end_lat: float
+    end_lon: float
+    start_name: str = "Start"
+    end_name: str = "Destination"
+    departure_utc: str | None = None
+    time_window: str = "next_24h"
+    include_pfz: bool = True
+
 
 
 # ---------------------------------------------------------------------------
@@ -977,6 +988,18 @@ async def _process_whatsapp_query_background(session_id: str, body_text: str):
 # Geofence Boundary Breach & Alert Endpoint
 # ---------------------------------------------------------------------------
 
+class RouteRequest(BaseModel):
+    start_lat: float
+    start_lon: float
+    end_lat: float
+    end_lon: float
+    start_name: str | None = None
+    end_name: str | None = None
+    departure_utc: str | None = None   # ISO-8601 departure time
+    time_window: str = "next_24h"
+    include_pfz: bool = True
+
+
 class GeofenceEvaluateRequest(BaseModel):
     lat: float
     lon: float
@@ -989,6 +1012,46 @@ class GeofenceEvaluateRequest(BaseModel):
 _geofence_whatsapp_last_sent: dict[str, float] = {}  # phone -> last_sent_timestamp
 _GEOFENCE_COOLDOWN_S = int(os.environ.get("GEOFENCE_WHATSAPP_COOLDOWN_SECONDS", "300"))
 
+
+# ---------------------------------------------------------------------------
+# Route Planning Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/route")
+async def route_endpoint(body: RouteRequest):
+    """
+    Compute a safe, optimized marine route between two locations.
+
+    Tarang doesn't ask an LLM to choose a route. It builds candidate marine
+    paths, removes routes that violate hard safety constraints, evaluates
+    weather, hazards and boundary proximity along the remaining paths, and
+    uses deterministic A* optimization to select the lowest-modeled-risk route.
+
+    Returns route GeoJSON, per-leg risk breakdown, and text summary.
+    """
+    from tools.route_planner import plan_safe_route
+
+    try:
+        result = plan_safe_route(
+            start_lat=body.start_lat,
+            start_lon=body.start_lon,
+            end_lat=body.end_lat,
+            end_lon=body.end_lon,
+            start_name=body.start_name or "Start",
+            end_name=body.end_name or "Destination",
+            departure_utc=body.departure_utc,
+            time_window=body.time_window,
+            include_pfz=body.include_pfz,
+        )
+        return result
+    except Exception as exc:
+        logger.exception("[Route] Unhandled error in /route: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Route planning failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Geofence Evaluation Endpoint
+# ---------------------------------------------------------------------------
 
 @app.post("/geofence/evaluate")
 def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
@@ -1050,3 +1113,25 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
         "whatsapp_sent": bool(whatsapp_status and whatsapp_status.get("success") and not whatsapp_rate_limited),
         "recipient_phone": recipient_phone if eval_result.get("is_breached") else None,
     }
+
+
+@app.post("/route")
+def plan_route_endpoint(body: RouteRequest):
+    """
+    Compute a safe, deterministic marine route between two locations.
+    Evaluates weather, hazards, and boundary constraints along candidate paths.
+    """
+    from tools.route_planner import plan_safe_route
+
+    result = plan_safe_route(
+        start_lat=body.start_lat,
+        start_lon=body.start_lon,
+        end_lat=body.end_lat,
+        end_lon=body.end_lon,
+        start_name=body.start_name,
+        end_name=body.end_name,
+        departure_utc=body.departure_utc,
+        time_window=body.time_window,
+        include_pfz=body.include_pfz,
+    )
+    return result

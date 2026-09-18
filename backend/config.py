@@ -143,6 +143,25 @@ RISK_WEIGHTS: dict[str, float] = {
 }
 
 # ---------------------------------------------------------------------------
+# Route Planner (Safe Marine Route Optimization)
+# ---------------------------------------------------------------------------
+
+# Grid spacing in degrees for the A* routing grid (~0.2° ≈ 22 km)
+ROUTE_GRID_SPACING_DEG: float = float(os.getenv("ROUTE_GRID_SPACING_DEG", "0.2"))
+
+# Maximum direct distance (km) between start and end for route planning
+ROUTE_MAX_DISTANCE_KM: float = float(os.getenv("ROUTE_MAX_DISTANCE_KM", "500"))
+
+# Risk penalty weight in A* cost function (higher = more safety-averse)
+ROUTE_RISK_WEIGHT: float = float(os.getenv("ROUTE_RISK_WEIGHT", "2.0"))
+
+# PFZ attraction bonus (higher = routes prefer passing near fishing zones)
+ROUTE_PFZ_BONUS: float = float(os.getenv("ROUTE_PFZ_BONUS", "0.3"))
+
+# Assumed vessel speed in km/h for ETA calculations
+ROUTE_ASSUMED_SPEED_KMH: float = float(os.getenv("ROUTE_ASSUMED_SPEED_KMH", "20.0"))
+
+# ---------------------------------------------------------------------------
 # Timezone
 # ---------------------------------------------------------------------------
 
