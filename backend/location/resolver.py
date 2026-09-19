@@ -111,6 +111,32 @@ class LocationResolver:
                 is_coast, place_name, metadata = location_is_coastal(d_lat, d_lon)
                 dist_km = metadata.get("distance_to_coast_km") if metadata else distance_to_nearest_coast_km(d_lat, d_lon)
 
+                if not is_coast and session and session.selected_location:
+                    s_loc = session.selected_location
+                    if s_loc.get("lat") is not None and s_loc.get("lon") is not None:
+                        s_lat = float(s_loc["lat"])
+                        s_lon = float(s_loc["lon"])
+                        s_coast, s_name, s_meta = location_is_coastal(s_lat, s_lon, name=s_loc.get("name"))
+                        if s_coast:
+                            logger.info(
+                                "[Resolver] Device location is inland (%s), falling back to user's active coastal selection: %s",
+                                place_name, s_name or s_loc.get("name")
+                            )
+                            s_dist = s_meta.get("distance_to_coast_km") if s_meta else distance_to_nearest_coast_km(s_lat, s_lon)
+                            resolved_selected: ResolvedLocation = {
+                                "lat": s_lat,
+                                "lon": s_lon,
+                                "name": s_name or s_loc.get("name") or f"{s_lat:.2f}°N, {s_lon:.2f}°E",
+                                "source": "selected_location_fallback",
+                                "confidence": 0.9,
+                                "coastal": True,
+                                "nearest_coast_km": s_dist,
+                                "state": s_meta.get("state") if s_meta else s_loc.get("state"),
+                                "district": s_meta.get("district") if s_meta else None,
+                            }
+                            session.last_query_location = resolved_selected
+                            return "INHERITED", {"name": resolved_selected["name"], "lat": s_lat, "lon": s_lon, "source": "selected_fallback"}, resolved_selected
+
                 resolved: ResolvedLocation = {
                     "lat": d_lat,
                     "lon": d_lon,
