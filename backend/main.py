@@ -90,13 +90,13 @@ def debug_weather(lat: float = 13.0827, lon: float = 80.2707):
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
+SUPPORTED_LANGUAGES = ("en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od", "or")
 
 class QueryRequest(BaseModel):
     query: str
     request_id: str | None = None
     conversation_id: str | None = None
-    device_location: dict | None = None       # {"lat": float, "lon": float, "accuracy": float|None, "permission_status": str}
-    # Milestone 5: Multi-turn conversational memory (client-provided fallback)
+    device_location: dict | None = None
     conversation: list[dict] = []             # [{"role": "user"|"assistant", "content": "..."}]
     last_parsed_intent: dict | None = None    # ParsedIntent from previous turn
     last_results: dict[str, dict] = {}       # {agent_name: AgentResult} from previous turn
@@ -104,7 +104,7 @@ class QueryRequest(BaseModel):
     user_lat: float | None = None             # Browser geolocation latitude
     user_lon: float | None = None             # Browser geolocation longitude
     user_location_name: str | None = None     # Optional reverse geocoded name
-    language: str | None = None               # Manual language override ("en", "hi", "ta")
+    language: str | None = None               # Manual language override ("en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od")
     # Universal Dynamic Location System (PRD §11, §20, §21)
     selected_location: dict | None = None
     marine_context: dict | None = None
@@ -186,7 +186,7 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
             except Exception as _e:
                 pass
 
-    initial_lang = body.language if body.language in ("en", "hi", "ta") else "en"
+    initial_lang = body.language if body.language in SUPPORTED_LANGUAGES else "en"
 
     user_loc = None
     if device_loc:
@@ -239,7 +239,7 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
         data_quality_reports=[],
         risk_sufficient_data=None,
         user_location=user_loc,
-        language_override=body.language if body.language in ("en", "hi", "ta") else None,
+        language_override=body.language if body.language in SUPPORTED_LANGUAGES else None,
     )
 
 

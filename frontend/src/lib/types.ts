@@ -1,6 +1,6 @@
 // TypeScript schema definitions for Tarang Coastal Dawn frontend
 
-export type LanguageCode = "en" | "hi" | "ta";
+export type LanguageCode = "en" | "hi" | "ta" | "gu" | "bn" | "te" | "ml" | "mr" | "od";
 
 export type RiskLabel = "LOW" | "MODERATE" | "HIGH" | "EXTREME" | "UNKNOWN";
 

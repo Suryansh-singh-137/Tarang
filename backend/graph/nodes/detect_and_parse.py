@@ -111,7 +111,15 @@ def _resolve_time_range(time_window: str) -> tuple[str, str]:
 # Language detection: keyword / script fingerprint heuristic
 # ---------------------------------------------------------------------------
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+_BENGALI_RE = re.compile(r"[\u0980-\u09FF]")
+_GUJARATI_RE = re.compile(r"[\u0A80-\u0AFF]")
+_ORIYA_RE = re.compile(r"[\u0B00-\u0B7F]")
 _TAMIL_RE = re.compile(r"[\u0B80-\u0BFF]")
+_TELUGU_RE = re.compile(r"[\u0C00-\u0C7F]")
+_MALAYALAM_RE = re.compile(r"[\u0D00-\u0D7F]")
+
+# Marathi script distinctive keywords (differentiating from Hindi in Devanagari)
+_MARATHI_SCRIPT_WORDS = {"आहे", "नाही", "कसे", "काय", "उद्या", "मासे", "हवामान", "लाटा", "वारा", "धोका", "सागरी"}
 
 # Hindi keywords (romanised)
 _HINDI_ROMANISED = {
@@ -127,8 +135,38 @@ _TAMIL_ROMANISED = {
     "mazhai", "paadhukaappu", "meen", "pidi", "yen", "vitham",
 }
 
+# Coastal languages keywords (romanised)
+_GUJARATI_ROMANISED = {
+    "kem", "chhe", "chho", "tamne", "machhli", "dariya", "daryo", "toofan",
+    "havaman", "kalke", "aaje", "surakshit", "pavan", "moja", "nathi",
+}
 
-# Common English stop words that imply English — if these dominate, don't classify as Hindi
+_BENGALI_ROMANISED = {
+    "kemon", "achhe", "machh", "samudra", "doriya", "tufan", "jhor",
+    "abhawa", "sokal", "shondha", "nirapod", "batash", "dheu", "nei",
+}
+
+_TELUGU_ROMANISED = {
+    "ela", "undi", "chepalu", "samudram", "tufanu", "vatavaranam",
+    "repu", "uroju", "ee roju", "bhadrata", "surakshitam", "gaali", "alagalu",
+}
+
+_MALAYALAM_ROMANISED = {
+    "engane", "undu", "meen", "kadal", "mazha", "kaattu", "kaalavastha",
+    "naale", "innum", "surakshitham", "pokaamo", "thira",
+}
+
+_MARATHI_ROMANISED = {
+    "kase", "aahe", "mase", "darya", "vavadal", "havaman", "udya",
+    "surakshit", "vara", "lata", "naahi",
+}
+
+_ODIA_ROMANISED = {
+    "kemiti", "achhi", "machha", "samudra", "banya", "panipaga",
+    "kali", "aaji", "surakhyita", "pabana", "dheu",
+}
+
+# Common English stop words that imply English — if these dominate, don't classify as other
 _ENGLISH_STOP_WORDS = {
     "is", "it", "to", "go", "the", "are", "there", "any", "near", "for",
     "safe", "safety", "fishing", "weather", "sea", "ocean", "conditions",
@@ -137,26 +175,46 @@ _ENGLISH_STOP_WORDS = {
     "why", "explain", "because", "reason", "score", "risk",
 }
 
-
 def _detect_language(text: str) -> str:
     """Return BCP-47 language tag based on script/keyword heuristics."""
-    if _DEVANAGARI_RE.search(text):
-        return "hi"
+    if _GUJARATI_RE.search(text):
+        return "gu"
+    if _BENGALI_RE.search(text):
+        return "bn"
+    if _TELUGU_RE.search(text):
+        return "te"
+    if _MALAYALAM_RE.search(text):
+        return "ml"
+    if _ORIYA_RE.search(text):
+        return "od"
     if _TAMIL_RE.search(text):
         return "ta"
+    if _DEVANAGARI_RE.search(text):
+        if any(w in text for w in _MARATHI_SCRIPT_WORDS):
+            return "mr"
+        return "hi"
 
     words = set(text.lower().split())
-    hindi_overlap = words & _HINDI_ROMANISED
-    tamil_overlap = words & _TAMIL_ROMANISED
     english_overlap = words & _ENGLISH_STOP_WORDS
 
-    # If English stop words dominate, it's English
-    if len(english_overlap) >= len(hindi_overlap) and len(english_overlap) > 0:
-        return "en"
-    if hindi_overlap and len(hindi_overlap) > len(tamil_overlap):
-        return "hi"
-    if tamil_overlap:
-        return "ta"
+    # Score romanised overlaps
+    scores = {
+        "gu": len(words & _GUJARATI_ROMANISED),
+        "bn": len(words & _BENGALI_ROMANISED),
+        "te": len(words & _TELUGU_ROMANISED),
+        "ml": len(words & _MALAYALAM_ROMANISED),
+        "mr": len(words & _MARATHI_ROMANISED),
+        "od": len(words & _ODIA_ROMANISED),
+        "ta": len(words & _TAMIL_ROMANISED),
+        "hi": len(words & _HINDI_ROMANISED),
+    }
+
+    best_lang = max(scores, key=lambda k: scores[k])
+    if scores[best_lang] > 0:
+        if len(english_overlap) >= scores[best_lang]:
+            return "en"
+        return best_lang
+
     return "en"
 
 
@@ -710,8 +768,10 @@ def _compute_changed_fields(
 # Pydantic schema for Groq structured output (Milestone 6)
 # ---------------------------------------------------------------------------
 
+SUPPORTED_LANGUAGES = ("en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od", "or")
+
 class ParsedIntentSchema(BaseModel):
-    detected_language: Literal["en", "hi", "ta"] = Field(description="BCP-47 language code: 'en' for English, 'hi' for Hindi (including romanised), 'ta' for Tamil (including romanised)")
+    detected_language: Literal["en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od"] = Field(description="BCP-47 language code: 'en' for English, 'hi' for Hindi, 'ta' for Tamil, 'gu' for Gujarati, 'bn' for Bengali, 'te' for Telugu, 'ml' for Malayalam, 'mr' for Marathi, 'od' for Odia")
     location_name: Optional[str] = Field(description="Recognized location name exactly matching a gazetteer entry, or raw text if unknown. Null if missing.")
     lat: Optional[float] = Field(description="Latitude of the location from the gazetteer. Null if unknown.")
     lon: Optional[float] = Field(description="Longitude of the location from the gazetteer. Null if unknown.")
@@ -734,6 +794,18 @@ def _get_location_clarification_text(lang: str) -> str:
         return "நீங்கள் எந்த கடலோரப் பகுதி அல்லது துறைமுகத்தில் மீன்பிடிக்க திட்டமிட்டுள்ளீர்கள் என்று குறிப்பிடவும் (எ.கா. கொச்சி, ராமேஸ்வரம், மும்பை, அல்லது விசாகப்பட்டினம்), அல்லது உங்கள் பகுதி தகவல்களை அறிய இருப்பிட அனுமதியை இயக்கவும்."
     elif lang == "hi":
         return "कृपया बताएं कि आप किस तटीय क्षेत्र या बंदरगाह के पास मछली पकड़ने की योजना बना रहे हैं (जैसे कोच्चि, रामेश्वरम, मुंबई, या विशाखापट्टनम), अथवा अपना स्थान साझा करें ताकि मैं स्थानीय समुद्री सुरक्षा की जानकारी दे सकूँ।"
+    elif lang == "gu":
+        return "કૃપા કરીને સ્પષ્ટ કરો કે તમે કયા તટીય વિસ્તાર અથવા બંદર નજીક માછીમારી કરવાની યોજના બનાવી રહ્યા છો (દા.ત. વેરાવળ, પોરબંદર, ઓખા, અથવા માંડવી), અથવા સ્થાનિક દરિયાઈ સુરક્ષા જાણવા ઉપકરણ સ્થાનની પરવાનગી આપો."
+    elif lang == "bn":
+        return "দয়া করে উল্লেখ করুন আপনি কোন উপকূলীয় অঞ্চল বা বন্দরের কাছে মাছ ধরার পরিকল্পনা করছেন (যেমন দীঘা, কাকদ্বীপ, হলদিয়া, বা পারাদ্বীপ), অথবা আপনার এলাকার সামুদ্রিক অবস্থা জানতে লোকেশন অনুমতি দিন।"
+    elif lang == "te":
+        return "దయచేసి మీరు ఏ తీర ప్రాంతం లేదా ఓడరేవు వద్ద చేపల వేటకు వెళ్లాలనుకుంటున్నారో తెలపండి (ఉదా. విశାఖపట్నం, కాకినాడ, మచిలీపట్నం), లేదా స్థానిక సముద్ర సమాచారం కోసం పరికర లొకేషన్ అనుమతించండి."
+    elif lang == "ml":
+        return "നിങ്ങൾ ഏത് തീരപ്രദേശത്തോ തുറമുഖത്തോ ആണ് മത്സ്യബന്ധനം നടത്താൻ ഉദ്ദേശിക്കുന്നതെന്ന് വ്യക്തമാക്കുക (ഉദാ. കൊച്ചി, കോഴിക്കോട്, കൊല്ലം, വിഴിഞ്ഞം), അല്ലെങ്കിൽ നിങ്ങളുടെ പ്രാദേശിക വിവരങ്ങൾ അറിയാൻ ലൊക്കേഷൻ അനുവദിക്കുക."
+    elif lang == "mr":
+        return "कृपया आपण कोणत्या सागरी क्षेत्र किंवा बंदरा जवळ मासेमारी करण्याचे ठरवत आहात ते सांगा (उदा. मुंबई, रत्नागिरी, मालवण, अलिबाग), किंवा सागरी सुरक्षेची माहिती मिळवण्यासाठी लोकेशन परवानगी द्या."
+    elif lang in ("od", "or"):
+        return "ଦୟାକରି ଆପଣ କେଉଁ ଉପକୂଳ ଅଞ୍ଚଳ ବା ବନ୍ଦର ନିକଟରେ ମାଛ ଧରିବାକୁ ଚାହୁଁଛନ୍ତି ତାହା ଉଲ୍ଲେଖ କରନ୍ତୁ (ଯଥା: ପାରାଦୀପ, ଗୋପାଳପୁର, ଚାନ୍ଦିପୁର, ଧାମରା), କିମ୍ବା ଲୋକେସନ ଅନୁମତି ଦିଅନ୍ତୁ।"
     else:
         return "I could not determine your coastal location. Please specify which harbour or coastal area you are planning to fish near (e.g., Kochi, Rameswaram, Mumbai, or Visakhapatnam), or enable device location access so I can assess conditions in your local waters."
 
@@ -744,6 +816,18 @@ def _get_relative_missing_clarification_text(lang: str) -> str:
         return "आपकी क्वेरी में 'यहाँ' / 'मेरे पास' की स्थिति पूछी गई है, लेकिन डिवाइस स्थान की अनुमति उपलब्ध नहीं है। कृपया ब्राउज़र में स्थान अनुमति सक्षम करें अथवा अपने तटीय शहर (जैसे कोच्चि, मुंबई, चेन्नई) का नाम बताएं।"
     elif lang == "ta":
         return "உங்கள் வினவல் 'இங்கே' / 'அருகில்' உள்ள நிலவரத்தைக் கேட்கிறது, ஆனால் சாதன இருப்பிட அனுமதி கிடைக்கவில்லை. தயவுசெய்து சாதன இருப்பிட அனுமதியை வழங்கவும் அல்லது உங்கள் கடலோர நகரத்தைக் குறிப்பிடவும் (எ.கா. கொச்சி, மும்பை, சென்னை)."
+    elif lang == "gu":
+        return "તમારા પ્રશ્નમાં 'અહીં' / 'મારી નજીક' ની સ્થિતિ પૂછવામાં આવી છે, પરંતુ ડિવાઇસ સ્થાન ઉપલબ્ધ નથી. કૃપા કરીને બ્રાઉઝરમાં સ્થાન પરવાનગી આપો અથવા તમારા તટીય શહેરનું નામ જણાવો (દા.ત. વેરાવળ, પોરબંદર, સુરત)."
+    elif lang == "bn":
+        return "আপনার প্রশ্নে 'এখানে' / 'আমার কাছে' জানতে চাওয়া হয়েছে, কিন্তু ডিভাইসের লোকেশন অনুমতি নেই। অনুগ্রহ করে ব্রাউজারে লোকেশন অনুমতি চালু করুন অথবা উপকূলীয় শহরের নাম বলুন (যেমন দীঘা, কাকদ্বীপ, হলদিয়া)।"
+    elif lang == "te":
+        return "మీరు 'ఇక్కడ' / 'నా దగ్గర' వివరాలు అడిగారు, కానీ పరికర లొకేషన్ అందుబాటులో లేదు. దయచేసి బ్రౌజర్‌లో లొకేషన్ అనుమతించండి లేదా మీ తీర పట్టణం పేరు తెలపండి (ఉదా. విశాఖపట్నం, కాకినాడ)."
+    elif lang == "ml":
+        return "നിങ്ങൾ 'ഇവിടെ' / 'എന്റെ അടുത്ത്' ഉള്ള വിവരങ്ങളാണ് ചോദിച്ചത്, എന്നാൽ ഉപകരണ ലൊക്കേഷൻ ലഭ്യമല്ല. ദയവായി ലൊക്കേഷൻ അനുമതി നൽകുക അല്ലെങ്കിൽ നിങ്ങളുടെ തീരദേശ നഗരത്തിന്റെ പേര് പറയുക (ഉദാ. കൊച്ചി, കോഴിക്കോട്)."
+    elif lang == "mr":
+        return "तुम्ही 'येथे' / 'माझ्या जवळ' ची माहिती विचारली आहे, परंतु डिव्हाइस लोकेशन उपलब्ध नाही. कृपया ब्राऊझरमध्ये लोकेशन परवानगी द्या किंवा आपल्या सागरी शहराचे नाव सांगा (उदा. मुंबई, रत्नागिरी)."
+    elif lang in ("od", "or"):
+        return "ଆପଣ 'ଏଠାରେ' / 'ମୋ ପାଖରେ' ବିଷୟରେ ପଚାରିଛନ୍ତି, କିନ୍ତୁ ଡିଭାଇସ ଲୋକେସନ ଉପଲବ୍ଧ ନାହିଁ। ଦୟାକରି ଲୋକେସନ ଅନୁମତି ଦିଅନ୍ତୁ କିମ୍ବା ଆପଣଙ୍କ ଉପକୂଳ ସହରର ନାମ କୁହନ୍ତୁ (ଯଥା: ପାରାଦୀପ, ପୁରୀ)।"
     else:
         return "You asked for conditions 'here', but device location access is not available. Please allow location access in your browser or specify your coastal town (e.g. Kochi, Mumbai, Chennai)."
 
@@ -783,6 +867,66 @@ def _get_inland_clarification_text(
             f"• **மீன்பிடி மண்டலங்கள்**: இந்த இடத்தில் பொருந்தாது\n"
             f"• **கடல் அலைகள் (Tides)**: இந்த இடத்தில் பொருந்தாது\n\n"
             f"மீன்பிடி நிலைமைகளை சரிபார்க்க ஒரு கடலோர இடத்தை (எ.கா. கொச்சி, சென்னை, ராமேஸ்வரம்) தேர்வு செய்யவும்."
+        )
+    elif lang == "gu":
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### માછીમારી આકલન (Fishing Assessment)\n\n"
+            f"તમારું વર્તમાન સ્થળ જમીની વિસ્તાર છે, તેથી અહીં દરિયાઈ માછીમારી ઝોન અને ભરતી-ઓટ લાગુ પડતી નથી.\n\n"
+            f"• **નજીકનો દરિયાકિનારો**: {dist_str} કિમી\n"
+            f"• **માછીમારી ઝોન (PFZ)**: આ સ્થળે લાગુ નથી\n"
+            f"• **ભરતી-ઓટ (Tides)**: આ સ્થળે લાગુ નથી\n\n"
+            f"દરિયાઈ સ્થિતિ તપાસવા માટે તટીય બંદર (જેમ કે વેરાવળ, પોરબંદર, ઓખા, દીવ) પસંદ કરો."
+        )
+    elif lang == "bn":
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### মৎস্য মূল্যায়ন (Fishing Assessment)\n\n"
+            f"আপনার বর্তমান অবস্থানটি সমুদ্র উপকূলবর্তী নয়, তাই এখানে সামুদ্রিক মৎস্য অঞ্চল বা জোয়ার-ভাটার তথ্য প্রযোজ্য নয়।\n\n"
+            f"• **নিকটতম সমুদ্র উপকূল**: {dist_str} কিমি\n"
+            f"• **মৎস্য অঞ্চল (PFZ)**: এই স্থানে প্রযোজ্য নয়\n"
+            f"• **জোয়ার-ভাটা (Tides)**: এই স্থানে প্রযোজ্য নয়\n\n"
+            f"সমুদ্রের অবস্থা জানতে কোনো উপকূলীয় স্থান (যেমন দীঘা, কাকদ্বীপ, পারাদ্বীপ, বিশাখাপত্তনম) নির্বাচন করুন।"
+        )
+    elif lang == "te":
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### చేపల వేట అంచనా (Fishing Assessment)\n\n"
+            f"మీ ప్రస్తుత స్థానం తీరప్రాంతం కాదు, కాబట్టి సముద్ర చేపల మండలాలు మరియు అలల వివరాలు ఇక్కడ వర్తించవు.\n\n"
+            f"• **సమీప తీరం**: {dist_str} కి.மீ\n"
+            f"• **చేపల మండలాలు (PFZ)**: ఈ ప్రదేశంలో వర్తించదు\n"
+            f"• **అలలు (Tides)**: ఈ ప్రదేశంలో వర్తించదు\n\n"
+            f"సముద్ర పరిస్థితులను తనిఖీ చేయడానికి ఏదైనా తీరప్రాంతాన్ని (ఉదా. విశାଖపట్నం, కాకినాడ, మచిలీపట్నం) ఎంచుకోండి."
+        )
+    elif lang == "ml":
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### മത്സ്യബന്ധന വിലയിരുത്തൽ (Fishing Assessment)\n\n"
+            f"നിങ്ങളുടെ നിലവിലെ സ്ഥലം തീരദേശമല്ല, അതിനാൽ സമുദ്ര മത്സ്യബന്ധന മേഖലകളും വേലിയേറ്റ വിവരങ്ങളും ഇവിടെ ബാധകമല്ല.\n\n"
+            f"• **ഏറ്റവും അടുത്തുള്ള തീരം**: {dist_str} കി.മീ\n"
+            f"• **മത്സ്യബന്ധന മേഖല (PFZ)**: ഇവിടെ ബാധകമല്ല\n"
+            f"• **വേലിയേറ്റം (Tides)**: ഇവിടെ ബാധകമല്ല\n\n"
+            f"കടൽ അവസ്ഥ പരിശോധിക്കാൻ ഏതെങ്കിലും തീരദേശ തുറമുഖം (ഉദാ. കൊച്ചി, കോഴിക്കോട്, കൊല്ലം) തിരഞ്ഞെടുക്കുക."
+        )
+    elif lang == "mr":
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### मासेमारी मूल्यांकन (Fishing Assessment)\n\n"
+            f"आपले सध्याचे स्थान सागरी किनारपट्टीवर नाही, त्यामुळे येथे सागरी मासेमारी क्षेत्र व भरती-ओहोटी लागू होत नाही.\n\n"
+            f"• **जवळचा समुद्रकिनारा**: {dist_str} किमी\n"
+            f"• **मासेमारी क्षेत्र (PFZ)**: या ठिकाणी लागू नाही\n"
+            f"• **भरती-ओहोटी (Tides)**: या ठिकाणी लागू नाही\n\n"
+            f"सागरी स्थिती तपासण्यासाठी किनारपट्टीवरील ठिकाण (उदा. मुंबई, रत्नागिरी, मालवण) निवडा."
+        )
+    elif lang in ("od", "or"):
+        return (
+            f"📍 **{display_name}**\n\n"
+            f"### ମତ୍ସ୍ୟ ମୂଲ୍ୟାଙ୍କନ (Fishing Assessment)\n\n"
+            f"ଆପଣଙ୍କର ବର୍ତ୍ତମାନର ସ୍ଥାନ ଉପକୂଳବର୍ତ୍ତୀ ନୁହେଁ, ତେଣୁ ସାମୁଦ୍ରିକ ମତ୍ସ୍ୟ କ୍ଷେତ୍ର ଓ ଜୁଆର-ଭଟ୍ଟା ଏଠାରେ ପ୍ରଯୁଜ୍ୟ ନୁହେଁ।\n\n"
+            f"• **ନିକଟତମ ସମୁଦ୍ରତଟ**: {dist_str} କିମି\n"
+            f"• **ମତ୍ସ୍ୟ କ୍ଷେତ୍ର (PFZ)**: ଏହି ସ୍ଥାନରେ ପ୍ରଯୁଜ୍ୟ ନୁହେଁ\n"
+            f"• **ଜୁଆର-ଭଟ୍ଟା (Tides)**: ଏହି ସ୍ଥାନରେ ପ୍ରଯୁଜ୍ୟ ନୁହେଁ\n\n"
+            f"ସାମୁଦ୍ରିକ ସ୍ଥିତି ଯାଞ୍ଚ କରିବା ପାଇଁ ଉପକୂଳବର୍ତ୍ତୀ ସ୍ଥାନ (ଯଥା: ପାରାଦୀପ, ପୁରୀ, ଗୋପାଳପୁର) ଚୟନ କରନ୍ତୁ।"
         )
     else:
         return (
@@ -882,7 +1026,7 @@ def detect_and_parse(state: ORCAState) -> dict:
     mode, q_loc, resolved = LocationResolver.resolve(raw, device_loc, session)
 
     # 4. Language Detection
-    detected_lang = language_override if language_override in ("en", "hi", "ta") else _detect_language(raw)
+    detected_lang = language_override if language_override in SUPPORTED_LANGUAGES else _detect_language(raw)
 
     # 4b. Message Quality Gate (PRD §5.1)
     mq = classify_message_quality(raw)
@@ -897,6 +1041,36 @@ def detect_and_parse(state: ORCAState) -> dict:
                 guidance_text = "சரி! வானிலை, கடல் அலைகள், மீன்பிடி மண்டலங்கள் அல்லது பாதுகாப்பு விவரங்களை அறிய எப்போது வேண்டுமானாலும் கேளுங்கள்."
             else:
                 guidance_text = "நீங்கள் என்ன தெரிந்து கொள்ள விரும்புகிறீர்கள்? வானிலை, கடல் நிலை, மீன்பிடி மண்டலங்கள், அலைகள், ஆபத்துகள் அல்லது பயணப் பாதுகாப்பு பற்றி கேட்கலாம்."
+        elif detected_lang == "gu":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "બરાબર! જ્યારે પણ તમે હવામાન, મોજાં, માછીમારી ઝોન કે દરિયાઈ સુરક્ષા વિશે જાણવા માંગતા હોવ, મને પૂછો."
+            else:
+                guidance_text = "તમે શું જાણવા માંગો છો? તમે દરિયાઈ હવામાન, માછીમારીના સંભવિત વિસ્તારો, ભરતી-ઓટ, વાવાઝોડા કે સુરક્ષા વિશે પૂછી શકો છો."
+        elif detected_lang == "bn":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "ঠিক আছে! আবহাওয়া, জোয়ার-ভাটা, মাছ ধরার অঞ্চল বা সামুদ্রিক নিরাপত্তা জানতে চাইলে আমাকে জানান।"
+            else:
+                guidance_text = "আপনি কি জানতে চান? আপনি আবহাওয়া, সমুদ্র পরিস্থিতি, মৎস্য অঞ্চল, জোয়ার-ভাটা, সতর্কতা বা সুরক্ষা সম্পর্কে জিজ্ঞাসা করতে পারেন।"
+        elif detected_lang == "te":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "సరే! వాతావరణం, అలలు, చేపల వేట ప్రాంతాలు లేదా సముద్ర భద్రత గురించి తెలుసుకోవాలనుకున్నప్పుడు నన్ను అడగండి."
+            else:
+                guidance_text = "మీరు ఏమి తెలుసుకోవాలనుకుంటున్నారు? వాతావరణం, సముద్ర స్థితి, చేపల వేట ప్రాంతాలు, అలలు లేదా ప్రయాణ భద్రత గురించి అడగవచ్చు."
+        elif detected_lang == "ml":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "ശരി! കാലാവസ്ഥ, വേലിയേറ്റം, മത്സ്യബന്ധന മേഖലകൾ അല്ലെങ്കിൽ സമുദ്ര സുരക്ഷ എന്നിവ അറിയാൻ എപ്പോൾ വേണമെങ്കിലും ചോദിക്കാം."
+            else:
+                guidance_text = "നിങ്ങൾക്ക് എന്താണ് അറിയേണ്ടത്? കാലാവസ്ഥ, കടൽ അവസ്ഥ, മത്സ്യബന്ധന മേഖലകൾ, വേലിയേറ്റം, സുരക്ഷ എന്നിവയെക്കുറിച്ച് ചോദിക്കാം."
+        elif detected_lang == "mr":
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "ठीक आहे! जेव्हाही आपल्याला हवामान, भरती-ओहोटी, मासेमारी क्षेत्र किंवा सागरी सुरक्षेची माहिती हवी असेल, मला विचारा."
+            else:
+                guidance_text = "आपणास काय जाणून घ्यायचे आहे? आपण हवामान, समुद्राची स्थिती, मासेमारी क्षेत्र, भरती-ओहोटी किंवा प्रवासाच्या सुरक्षेबद्दल विचारू शकता."
+        elif detected_lang in ("od", "or"):
+            if mq == "ACKNOWLEDGEMENT":
+                guidance_text = "ଠିକ୍ ଅଛି! ଯେତେବେଳେ ବି ଆପଣ ପାଣିପାଗ, ଜୁଆର-ଭଟ୍ଟା, ମତ୍ସ୍ୟ କ୍ଷେତ୍ର ବା ସାମୁଦ୍ରିକ ସୁରକ୍ଷା ଜାଣିବାକୁ ଚାହାଁନ୍ତି, ମୋତେ ପଚାରନ୍ତୁ।"
+            else:
+                guidance_text = "ଆପଣ କ'ଣ ଜାଣିବାକୁ ଚାହୁଁଛନ୍ତି? ଆପଣ ପାଣିପାଗ, ସମୁଦ୍ର ସ୍ଥିତି, ମତ୍ସ୍ୟ କ୍ଷେତ୍ର, ଜୁଆର-ଭଟ୍ଟା କିମ୍ବା ଯାତ୍ରା ସୁରକ୍ଷା ବିଷୟରେ ପଚାରିପାରିବେ।"
         else:
             if mq == "ACKNOWLEDGEMENT":
                 guidance_text = "Understood! Feel free to ask whenever you'd like to check weather, sea conditions, fishing indicators, tides, or trip safety."

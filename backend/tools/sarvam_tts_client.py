@@ -81,6 +81,13 @@ def synthesize_speech(text: str, language: str) -> Optional[bytes]:
         "en": ("en-IN", "simran"),
         "hi": ("hi-IN", "aditya"),
         "ta": ("ta-IN", "gokul"),
+        "gu": ("gu-IN", "aditya"),
+        "bn": ("bn-IN", "aditya"),
+        "te": ("te-IN", "aditya"),
+        "ml": ("ml-IN", "aditya"),
+        "mr": ("mr-IN", "aditya"),
+        "od": ("od-IN", "aditya"),
+        "or": ("od-IN", "aditya"),
     }
     target_lang, speaker = lang_map.get(language, ("hi-IN", "aditya"))
 
