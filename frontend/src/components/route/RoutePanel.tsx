@@ -17,8 +17,12 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronUp,
+  Zap,
+  Fuel,
+  Sparkles,
+  CheckCircle2,
 } from "lucide-react";
-import { RouteResult, RouteLeg, RiskLabel, MapGeoJSON } from "@/lib/types";
+import { RouteResult, RouteLeg, RiskLabel, MapGeoJSON, RouteMode, RouteProfileData } from "@/lib/types";
 import { planRoute, PlanRouteOptions } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/api";
 
@@ -52,6 +56,7 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
 
   // Result state
   const [result, setResult] = useState<RouteResult | null>(null);
+  const [selectedMode, setSelectedMode] = useState<RouteMode>("safest");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedLeg, setExpandedLeg] = useState<number | null>(null);
@@ -131,8 +136,11 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
       const routeResult = await planRoute(options);
       if (routeResult) {
         setResult(routeResult);
-        if (routeResult.route_geojson && onRouteResult) {
-          onRouteResult(routeResult.route_geojson);
+        const mode = (routeResult.selected_mode as RouteMode) || "safest";
+        setSelectedMode(mode);
+        const activeGeoJson = routeResult.routes?.[mode]?.route_geojson || routeResult.route_geojson;
+        if (activeGeoJson && onRouteResult) {
+          onRouteResult(activeGeoJson);
         }
         if (routeResult.error) {
           setError(routeResult.error);
@@ -147,6 +155,17 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
     }
   }, [startLocation, endLocation, departureTime, includePfz, onRouteResult]);
 
+  const handleSelectMode = useCallback((mode: RouteMode) => {
+    setSelectedMode(mode);
+    setExpandedLeg(null);
+    if (result) {
+      const activeGeoJson = result.routes?.[mode]?.route_geojson || result.route_geojson;
+      if (activeGeoJson && onRouteResult) {
+        onRouteResult(activeGeoJson);
+      }
+    }
+  }, [result, onRouteResult]);
+
   const handleReset = () => {
     setStartQuery("");
     setEndQuery("");
@@ -154,6 +173,7 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
     setEndLocation(null);
     setDepartureTime("");
     setResult(null);
+    setSelectedMode("safest");
     setError(null);
     setExpandedLeg(null);
   };
@@ -341,154 +361,256 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
       )}
 
       {/* Results */}
-      {result && result.status === "success" && (
-        <div className="space-y-3">
-          {/* Summary Card */}
-          <div className={`rounded-2xl border p-4 space-y-3 ${getRiskColor(result.risk_label).bg} ${getRiskColor(result.risk_label).border}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${getRiskColor(result.risk_label).dot}`} />
-                <span className={`text-sm font-bold ${getRiskColor(result.risk_label).text}`}>
-                  {result.risk_label} RISK
-                </span>
-              </div>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${getRiskColor(result.risk_label).bg} ${getRiskColor(result.risk_label).text} border ${getRiskColor(result.risk_label).border}`}>
-                Score: {result.avg_risk_score}/100
-              </span>
-            </div>
+      {result && result.status === "success" && (() => {
+        const activeRoute = (result.routes && result.routes[selectedMode])
+          ? result.routes[selectedMode]
+          : result;
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <p className="text-xs text-[var(--ink-muted)]">Distance</p>
-                <p className="text-lg font-bold text-[var(--ink)]">{result.total_distance_km}<span className="text-xs font-normal ml-0.5">km</span></p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-[var(--ink-muted)]">Duration</p>
-                <p className="text-lg font-bold text-[var(--ink)]">{result.total_duration_h}<span className="text-xs font-normal ml-0.5">hrs</span></p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-[var(--ink-muted)]">Legs</p>
-                <p className="text-lg font-bold text-[var(--ink)]">{result.legs.length}</p>
-              </div>
-            </div>
+        const routesList: { key: RouteMode; label: string; icon: any; colorCls: string; activeBorder: string; activeBg: string }[] = [
+          {
+            key: "safest",
+            label: "Safest",
+            icon: ShieldCheck,
+            colorCls: "text-emerald-600",
+            activeBorder: "border-emerald-500",
+            activeBg: "bg-emerald-50/80 dark:bg-emerald-950/20",
+          },
+          {
+            key: "direct",
+            label: "Direct",
+            icon: Zap,
+            colorCls: "text-blue-600",
+            activeBorder: "border-blue-500",
+            activeBg: "bg-blue-50/80 dark:bg-blue-950/20",
+          },
+          {
+            key: "pfz_maximizer",
+            label: "PFZ Max",
+            icon: Fish,
+            colorCls: "text-cyan-600",
+            activeBorder: "border-cyan-500",
+            activeBg: "bg-cyan-50/80 dark:bg-cyan-950/20",
+          },
+        ];
 
-            {result.warnings.length > 0 && (
-              <div className="space-y-1 pt-1 border-t border-[var(--border)]">
-                {result.warnings.map((w, i) => (
-                  <div key={i} className="flex items-start gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
-                    <span className="text-xs text-amber-800">{w}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+        return (
+          <div className="space-y-3">
+            {/* Multi-Route Profile Selector Cards */}
+            {result.routes && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#0C6E8C]" />
+                    Select Route Profile
+                  </span>
+                  <span className="text-[10px] text-[var(--ink-muted)]">3 options calculated</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {routesList.map((item) => {
+                    const profile = result.routes?.[item.key];
+                    if (!profile) return null;
+                    const isSelected = selectedMode === item.key;
+                    const IconComponent = item.icon;
 
-            {onNavigateToMap && (
-              <button
-                onClick={onNavigateToMap}
-                className="w-full py-2 rounded-xl text-sm font-medium text-[#0C6E8C] bg-white/70 border border-[#0C6E8C]/20 hover:bg-white transition-colors flex items-center justify-center gap-2"
-              >
-                <MapPin className="w-4 h-4" />
-                View Route on Map
-              </button>
-            )}
-          </div>
-
-          {/* Leg-by-Leg Breakdown */}
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-[var(--border)]">
-              <h3 className="text-sm font-semibold text-[var(--ink)]">Route Breakdown</h3>
-            </div>
-            <div className="divide-y divide-[var(--border)]">
-              {result.legs.map((leg, i) => {
-                const colors = getRiskColor(leg.risk_label);
-                const isExpanded = expandedLeg === i;
-
-                return (
-                  <div key={i} className="group">
-                    <button
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--surface-muted)] transition-colors"
-                      onClick={() => setExpandedLeg(isExpanded ? null : i)}
-                    >
-                      <div className={`w-7 h-7 rounded-lg ${colors.bg} border ${colors.border} flex items-center justify-center text-xs font-bold ${colors.text} shrink-0`}>
-                        {i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 text-sm">
-                          <span className="text-[var(--ink)] font-medium">{leg.distance_km} km</span>
-                          <span className="text-[var(--ink-muted)]">·</span>
-                          <span className={`text-xs font-semibold ${colors.text}`}>{leg.risk_label}</span>
-                          <span className="text-[var(--ink-muted)]">·</span>
-                          <span className="text-xs text-[var(--ink-muted)]">~{(leg.estimated_time_h * 60).toFixed(0)} min</span>
-                        </div>
-                      </div>
-                      {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-[var(--ink-muted)]" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-[var(--ink-muted)]" />
-                      )}
-                    </button>
-
-                    {isExpanded && (
-                      <div className="px-4 pb-3 grid grid-cols-2 gap-2">
-                        <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
-                          <Waves className="w-3.5 h-3.5 text-blue-500" />
-                          <div>
-                            <p className="text-[10px] text-[var(--ink-muted)]">Waves</p>
-                            <p className="text-sm font-medium text-[var(--ink)]">{leg.wave_height_m}m</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
-                          <Wind className="w-3.5 h-3.5 text-teal-500" />
-                          <div>
-                            <p className="text-[10px] text-[var(--ink-muted)]">Wind</p>
-                            <p className="text-sm font-medium text-[var(--ink)]">{leg.wind_speed_kmh} km/h</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
-                          <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
-                          <div>
-                            <p className="text-[10px] text-[var(--ink-muted)]">Border Dist.</p>
-                            <p className="text-sm font-medium text-[var(--ink)]">{leg.boundary_dist_km} km</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
-                          <AlertTriangle className="w-3.5 h-3.5 text-orange-500" />
-                          <div>
-                            <p className="text-[10px] text-[var(--ink-muted)]">Hazard</p>
-                            <p className="text-sm font-medium text-[var(--ink)] capitalize">{leg.hazard_level}</p>
-                          </div>
-                        </div>
-                        {leg.arrival_time_utc && (
-                          <div className="col-span-2 flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
-                            <Clock className="w-3.5 h-3.5 text-gray-500" />
-                            <div>
-                              <p className="text-[10px] text-[var(--ink-muted)]">ETA at waypoint</p>
-                              <p className="text-sm font-medium text-[var(--ink)]">
-                                {new Date(leg.arrival_time_utc).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}
-                              </p>
+                    return (
+                      <button
+                        key={item.key}
+                        onClick={() => handleSelectMode(item.key)}
+                        className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                          isSelected
+                            ? `${item.activeBorder} ${item.activeBg} shadow-sm ring-1 ring-emerald-500/30`
+                            : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <div className="flex items-center gap-1">
+                              <IconComponent className={`w-3.5 h-3.5 ${item.colorCls} shrink-0`} />
+                              <span className="text-xs font-bold text-[var(--ink)] truncate">{item.label}</span>
                             </div>
+                            {isSelected && (
+                              <CheckCircle2 className={`w-3 h-3 ${item.colorCls} shrink-0`} />
+                            )}
                           </div>
-                        )}
-                      </div>
+                          <p className="text-[10px] text-[var(--ink-muted)] line-clamp-1">
+                            {profile.badge}
+                          </p>
+                        </div>
+                        <div className="mt-2 pt-1 border-t border-[var(--border)]/50 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-[var(--ink)]">{profile.total_distance_km} km</span>
+                          <span className={`text-[9px] font-medium px-1.5 py-0.2 rounded-full border ${getRiskColor(profile.risk_label).bg} ${getRiskColor(profile.risk_label).text} ${getRiskColor(profile.risk_label).border}`}>
+                            {profile.risk_label}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Active Route Summary Card */}
+            <div className={`rounded-2xl border p-4 space-y-3 ${getRiskColor(activeRoute.risk_label).bg} ${getRiskColor(activeRoute.risk_label).border}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${getRiskColor(activeRoute.risk_label).dot}`} />
+                  <div>
+                    <span className={`text-sm font-bold ${getRiskColor(activeRoute.risk_label).text}`}>
+                      {("title" in activeRoute && activeRoute.title) || `${activeRoute.risk_label} RISK ROUTE`}
+                    </span>
+                    {("description" in activeRoute && activeRoute.description) && (
+                      <p className="text-[11px] text-[var(--ink-muted)] mt-0.5">{activeRoute.description}</p>
                     )}
                   </div>
-                );
-              })}
+                </div>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${getRiskColor(activeRoute.risk_label).bg} ${getRiskColor(activeRoute.risk_label).text} border ${getRiskColor(activeRoute.risk_label).border} shrink-0`}>
+                  Score: {activeRoute.avg_risk_score}/100
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2 pt-2 border-t border-[var(--border)]/60">
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--ink-muted)]">Distance</p>
+                  <p className="text-base font-bold text-[var(--ink)]">{activeRoute.total_distance_km}<span className="text-[10px] font-normal ml-0.5">km</span></p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--ink-muted)]">Duration</p>
+                  <p className="text-base font-bold text-[var(--ink)]">{activeRoute.total_duration_h}<span className="text-[10px] font-normal ml-0.5">hrs</span></p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--ink-muted)] flex items-center justify-center gap-0.5">
+                    <Fuel className="w-2.5 h-2.5" />
+                    Est. Diesel
+                  </p>
+                  <p className="text-base font-bold text-[var(--ink)]">{activeRoute.fuel_liters_est || Math.round(activeRoute.total_distance_km * 1.3)}<span className="text-[10px] font-normal ml-0.5">L</span></p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--ink-muted)]">Legs / PFZ</p>
+                  <p className="text-base font-bold text-[var(--ink)]">{activeRoute.legs.length}<span className="text-[10px] font-normal text-cyan-600 ml-1">{"pfz_count" in activeRoute && activeRoute.pfz_count ? `(${activeRoute.pfz_count} 🐟)` : ""}</span></p>
+                </div>
+              </div>
+
+              {activeRoute.warnings && activeRoute.warnings.length > 0 && (
+                <div className="space-y-1 pt-2 border-t border-[var(--border)]/60">
+                  {activeRoute.warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                      <span className="text-xs text-amber-800">{w}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {onNavigateToMap && (
+                <button
+                  onClick={onNavigateToMap}
+                  className="w-full py-2 rounded-xl text-sm font-medium text-[#0C6E8C] bg-white/80 dark:bg-black/20 border border-[#0C6E8C]/20 hover:bg-white transition-colors flex items-center justify-center gap-2 shadow-xs"
+                >
+                  <MapPin className="w-4 h-4" />
+                  View Selected Route on Map
+                </button>
+              )}
+            </div>
+
+            {/* Leg-by-Leg Breakdown for activeRoute */}
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[var(--ink)]">
+                  {("title" in activeRoute && activeRoute.title) || "Route"} Breakdown
+                </h3>
+                <span className="text-xs text-[var(--ink-muted)]">{activeRoute.legs.length} waypoint leg(s)</span>
+              </div>
+              <div className="divide-y divide-[var(--border)]">
+                {activeRoute.legs.map((leg, i) => {
+                  const colors = getRiskColor(leg.risk_label);
+                  const isExpanded = expandedLeg === i;
+
+                  return (
+                    <div key={i} className="group">
+                      <button
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--surface-muted)] transition-colors"
+                        onClick={() => setExpandedLeg(isExpanded ? null : i)}
+                      >
+                        <div className={`w-7 h-7 rounded-lg ${colors.bg} border ${colors.border} flex items-center justify-center text-xs font-bold ${colors.text} shrink-0`}>
+                          {i + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 text-sm">
+                            <span className="text-[var(--ink)] font-medium">{leg.distance_km} km</span>
+                            <span className="text-[var(--ink-muted)]">·</span>
+                            <span className={`text-xs font-semibold ${colors.text}`}>{leg.risk_label}</span>
+                            <span className="text-[var(--ink-muted)]">·</span>
+                            <span className="text-xs text-[var(--ink-muted)]">~{(leg.estimated_time_h * 60).toFixed(0)} min</span>
+                          </div>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-[var(--ink-muted)]" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-[var(--ink-muted)]" />
+                        )}
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-4 pb-3 grid grid-cols-2 gap-2">
+                          <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
+                            <Waves className="w-3.5 h-3.5 text-blue-500" />
+                            <div>
+                              <p className="text-[10px] text-[var(--ink-muted)]">Waves</p>
+                              <p className="text-sm font-medium text-[var(--ink)]">{leg.wave_height_m}m</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
+                            <Wind className="w-3.5 h-3.5 text-teal-500" />
+                            <div>
+                              <p className="text-[10px] text-[var(--ink-muted)]">Wind</p>
+                              <p className="text-sm font-medium text-[var(--ink)]">{leg.wind_speed_kmh} km/h</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
+                            <ShieldCheck className="w-3.5 h-3.5 text-purple-500" />
+                            <div>
+                              <p className="text-[10px] text-[var(--ink-muted)]">Border Dist.</p>
+                              <p className="text-sm font-medium text-[var(--ink)]">{leg.boundary_dist_km} km</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
+                            <AlertTriangle className="w-3.5 h-3.5 text-orange-500" />
+                            <div>
+                              <p className="text-[10px] text-[var(--ink-muted)]">Hazard</p>
+                              <p className="text-sm font-medium text-[var(--ink)] capitalize">{leg.hazard_level}</p>
+                            </div>
+                          </div>
+                          {leg.arrival_time_utc && (
+                            <div className="col-span-2 flex items-center gap-2 bg-[var(--surface-muted)] rounded-lg px-3 py-2">
+                              <Clock className="w-3.5 h-3.5 text-gray-500" />
+                              <div>
+                                <p className="text-[10px] text-[var(--ink-muted)]">ETA at waypoint</p>
+                                <p className="text-sm font-medium text-[var(--ink)]">
+                                  {new Date(leg.arrival_time_utc).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Methodology Note */}
+            <div className="bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl px-4 py-3">
+              <p className="text-[10px] text-[var(--ink-muted)] leading-relaxed">
+                <strong>How multi-route optimization works:</strong> Tarang computes three deterministic A* marine routes 
+                (Safest, Direct/Fastest, and PFZ Maximizer) over a passable navigational grid, enforces hard constraints (land mask, 
+                severe weather ≥4m waves / ≥90 km/h wind, and international maritime borders), and applies line-of-sight path smoothing. 
+                No LLM was involved in navigation decisions.
+              </p>
             </div>
           </div>
-
-          {/* Methodology Note */}
-          <div className="bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl px-4 py-3">
-            <p className="text-[10px] text-[var(--ink-muted)] leading-relaxed">
-              <strong>How this route was computed:</strong> Tarang builds candidate marine paths over a navigable grid, 
-              removes paths violating hard safety constraints (land, severe weather ≥4m waves / ≥90 km/h wind, 
-              boundary violations), then uses deterministic A* optimization to select the lowest-risk route. 
-              No LLM was involved in route selection. Weather data from Open-Meteo; boundary data from INCOIS geofence.
-            </p>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* No route found */}
       {result && result.status === "no_route" && (
