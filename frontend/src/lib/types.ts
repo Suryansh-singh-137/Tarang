@@ -403,13 +403,38 @@ export interface RouteLeg {
   arrival_time_utc?: string;
 }
 
+export type RouteMode = "safest" | "direct" | "pfz_maximizer";
+
+export interface RouteProfileData {
+  mode: RouteMode;
+  title: string;
+  badge: string;
+  description: string;
+  color: string;
+  total_distance_km: number;
+  total_duration_h: number;
+  fuel_liters_est: number;
+  avg_risk_score: number;
+  max_risk_score: number;
+  risk_label: RiskLabel;
+  pfz_count: number;
+  waypoints: RouteWaypoint[];
+  legs: RouteLeg[];
+  route_geojson: MapGeoJSON;
+  summary: string;
+  warnings: string[];
+}
+
 export interface RouteResult {
   status: "success" | "no_route" | "too_far" | "error";
   total_distance_km: number;
   total_duration_h: number;
+  fuel_liters_est?: number;
   avg_risk_score: number;
   max_risk_score: number;
   risk_label: RiskLabel;
+  selected_mode?: RouteMode;
+  routes?: Record<RouteMode, RouteProfileData>;
   waypoints: RouteWaypoint[];
   legs: RouteLeg[];
   route_geojson: MapGeoJSON;

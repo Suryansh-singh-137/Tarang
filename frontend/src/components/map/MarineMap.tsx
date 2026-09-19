@@ -293,8 +293,9 @@ export const MarineMap: React.FC<Props> = ({
           });
           L.polyline(latLngs, {
             color: props.stroke || "#2563eb",
-            weight: 4,
-            opacity: 0.8,
+            weight: props["stroke-width"] || (props.is_active_profile === false ? 3 : 4),
+            opacity: props.opacity !== undefined ? props.opacity : 0.85,
+            dashArray: props.dashArray || undefined,
           }).addTo(group);
         }
 

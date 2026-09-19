@@ -411,11 +411,12 @@ export interface PlanRouteOptions {
   departure_utc?: string;
   time_window?: string;
   include_pfz?: boolean;
+  mode?: string;
 }
 
 /**
  * Plan a safe marine route between two locations.
- * Uses deterministic A* optimization with hard safety constraints.
+ * Uses deterministic A* optimization with multi-objective profiles.
  */
 export async function planRoute(
   options: PlanRouteOptions
@@ -434,6 +435,7 @@ export async function planRoute(
         departure_utc: options.departure_utc,
         time_window: options.time_window || "next_24h",
         include_pfz: options.include_pfz ?? true,
+        mode: options.mode || "all",
       }),
     });
     if (!res.ok) {

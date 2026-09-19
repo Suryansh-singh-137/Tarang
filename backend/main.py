@@ -134,6 +134,7 @@ class RouteRequest(BaseModel):
     departure_utc: str | None = None
     time_window: str = "next_24h"
     include_pfz: bool = True
+    mode: str = "all"
 
 
 
@@ -1025,6 +1026,7 @@ class RouteRequest(BaseModel):
     departure_utc: str | None = None   # ISO-8601 departure time
     time_window: str = "next_24h"
     include_pfz: bool = True
+    mode: str = "all"
 
 
 class GeofenceEvaluateRequest(BaseModel):
@@ -1050,14 +1052,13 @@ def _get_geofence_cooldown_s() -> int:
 @app.post("/route")
 async def route_endpoint(body: RouteRequest):
     """
-    Compute a safe, optimized marine route between two locations.
+    Compute safe, optimized marine routes between two locations.
 
-    Tarang doesn't ask an LLM to choose a route. It builds candidate marine
-    paths, removes routes that violate hard safety constraints, evaluates
-    weather, hazards and boundary proximity along the remaining paths, and
-    uses deterministic A* optimization to select the lowest-modeled-risk route.
-
-    Returns route GeoJSON, per-leg risk breakdown, and text summary.
+    Supports multi-objective profiles:
+      - 'safest': minimizes risk, rough swell, and IMBL boundary proximity
+      - 'direct': minimizes nautical distance and transit time
+      - 'pfz_maximizer': detours through high-chlorophyll potential fishing zones
+      - 'all': computes and returns all 3 candidate profiles
     """
     from tools.route_planner import plan_safe_route
 
@@ -1072,6 +1073,7 @@ async def route_endpoint(body: RouteRequest):
             departure_utc=body.departure_utc,
             time_window=body.time_window,
             include_pfz=body.include_pfz,
+            mode=body.mode,
         )
         return result
     except Exception as exc:
