@@ -19,7 +19,7 @@ interface StatDef {
   source: string;
 }
 
-const STATS_DATA: Record<LanguageCode, StatDef[]> = {
+const STATS_DATA: Partial<Record<LanguageCode, StatDef[]>> = {
   en: [
     {
       target: 7516,
@@ -201,7 +201,7 @@ export const WhyThisMattersSection: React.FC<Props> = ({
     return () => observer.disconnect();
   }, []);
 
-  const stats = STATS_DATA[language] || STATS_DATA.en;
+  const stats = STATS_DATA[language] || STATS_DATA.en!;
 
   return (
     <section

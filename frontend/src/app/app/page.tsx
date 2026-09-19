@@ -364,7 +364,8 @@ function AppWorkspace() {
           }
 
           // Only auto-update language chrome if user has not set a manual override
-          if (!isManualLanguageOverride && result.language && (result.language === "hi" || result.language === "ta" || result.language === "en")) {
+          const validLangs: string[] = ["en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od"];
+          if (!isManualLanguageOverride && result.language && validLangs.includes(result.language)) {
             setDetectedLanguage(result.language);
             setCurrentLanguage(result.language as LanguageCode);
           }
@@ -383,7 +384,13 @@ function AppWorkspace() {
             (!isCoas && (
               result.answer_text?.toLowerCase().includes("inland") ||
               result.answer_text?.includes("अंतर्देशीय") ||
-              result.answer_text?.includes("உள்நாட்டு")
+              result.answer_text?.includes("உள்நாட்டு") ||
+              result.answer_text?.includes("જમીની") ||
+              result.answer_text?.includes("উপকূলবর্তী নয়") ||
+              result.answer_text?.includes("లోతట్టు") ||
+              result.answer_text?.includes("തീരദേശമല്ല") ||
+              result.answer_text?.includes("किनारपट्टीवर नाही") ||
+              result.answer_text?.includes("ଉପକୂଳ ନୁହେଁ")
             ));
 
           if (isCoas && resolvedLoc) {

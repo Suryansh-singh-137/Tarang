@@ -246,7 +246,7 @@ class ORCAState(TypedDict):
     conversation_id: str
 
     raw_query: str
-    detected_language: str              # BCP-47 tag: "hi", "ta", "en"
+    detected_language: str              # BCP-47 tag: "en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od"
     parsed_intent: Optional[ParsedIntent]
 
     # V2 Location Entities (governed by LocationResolver)
@@ -290,7 +290,7 @@ class ORCAState(TypedDict):
 
     # Browser geolocation & Language Override (for backward compatibility)
     user_location: Optional[Dict[str, Any]]        # {"lat": float, "lon": float, "name": Optional[str]}
-    language_override: Optional[str]               # BCP-47 tag from UI toggle: "en", "hi", "ta"
+    language_override: Optional[str]               # BCP-47 tag from UI toggle: "en", "hi", "ta", "gu", "bn", "te", "ml", "mr", "od"
 
     # V2.2-F: Conversational Intelligence & Answer Planning
     intent: NotRequired[Optional[str]]

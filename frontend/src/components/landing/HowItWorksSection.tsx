@@ -16,7 +16,7 @@ interface StepItem {
   detail: string;
 }
 
-const STEPS: Record<LanguageCode, StepItem[]> = {
+const STEPS: Partial<Record<LanguageCode, StepItem[]>> = {
   en: [
     {
       num: "01",
@@ -115,7 +115,7 @@ export const HowItWorksSection: React.FC<Props> = ({
     return () => observer.disconnect();
   }, []);
 
-  const steps = STEPS[language] || STEPS.en;
+  const steps = STEPS[language] || STEPS.en!;
 
   return (
     <section
