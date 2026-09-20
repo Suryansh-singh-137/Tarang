@@ -416,11 +416,10 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
                       <button
                         key={item.key}
                         onClick={() => handleSelectMode(item.key)}
-                        className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
-                          isSelected
+                        className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${isSelected
                             ? `${item.activeBorder} ${item.activeBg} shadow-sm ring-1 ring-emerald-500/30`
                             : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]"
-                        }`}
+                          }`}
                       >
                         <div>
                           <div className="flex items-center justify-between gap-1 mb-1">
@@ -602,9 +601,9 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
             {/* Methodology Note */}
             <div className="bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl px-4 py-3">
               <p className="text-[10px] text-[var(--ink-muted)] leading-relaxed">
-                <strong>How multi-route optimization works:</strong> Tarang computes three deterministic A* marine routes 
-                (Safest, Direct/Fastest, and PFZ Maximizer) over a passable navigational grid, enforces hard constraints (land mask, 
-                severe weather ≥4m waves / ≥90 km/h wind, and international maritime borders), and applies line-of-sight path smoothing. 
+                <strong>How multi-route optimization works:</strong> Tarang computes three deterministic A* marine routes
+                (Safest, Direct/Fastest, and PFZ Maximizer) over a passable navigational grid, enforces hard constraints (land mask,
+                severe weather ≥4m waves / ≥90 km/h wind, and international maritime borders), and applies line-of-sight path smoothing.
                 No LLM was involved in navigation decisions.
               </p>
             </div>
@@ -641,7 +640,7 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
           <div>
             <p className="text-sm font-medium text-[var(--ink)]">Plan a Safe Marine Route</p>
             <p className="text-xs text-[var(--ink-muted)] mt-1 max-w-[280px]">
-              Enter your departure and destination ports. Tarang will compute the safest route 
+              Enter your departure and destination ports. Tarang will compute the safest route
               considering real-time weather, hazards, and maritime boundaries.
             </p>
           </div>
