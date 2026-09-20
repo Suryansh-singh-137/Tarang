@@ -839,10 +839,60 @@ async def _run_graph_direct(
     conversation: list[dict] | None = None,
     last_parsed_intent: dict | None = None,
     last_results: dict[str, dict] | None = None,
+    wa_session_id: str | None = None,
 ) -> ORCAState:
-    """Run the LangGraph pipeline end-to-end and return the final ORCAState directly."""
+    """
+    Run the LangGraph pipeline end-to-end and return the final ORCAState directly.
+
+    For WhatsApp turns, pass `wa_session_id` (the phone number string) so that:
+      1. A *stable* conv_id is derived from it (same session across turns).
+      2. The server-side SessionRecord is pre-seeded with the last known location
+         from `last_parsed_intent`, enabling LocationResolver Priority-5C inheritance
+         for location-less follow-up queries (e.g. "Is it safe to fish tomorrow?").
+    """
     req_id = str(uuid.uuid4())
-    conv_id = f"conv-wa-{req_id[:8]}"
+
+    # Use a stable conv_id per WhatsApp phone so the SessionRecord persists across turns.
+    # Without this, every call creates a brand-new empty SessionRecord and the resolver
+    # always returns NONE mode, skipping all agents.
+    if wa_session_id:
+        # Derive a deterministic ID from the phone number (safe for dict keys)
+        stable_key = wa_session_id.replace("whatsapp:", "").replace("+", "").replace(" ", "")
+        conv_id = f"conv-wa-{stable_key}"
+    else:
+        conv_id = f"conv-wa-{req_id[:8]}"
+
+    # Pre-seed the server-side SessionRecord with last known location so that
+    # LocationResolver can inherit it (Priority 5C) for location-less follow-up queries.
+    if last_parsed_intent:
+        from session.session_store import get_or_create_session as _get_session, save_session as _save_session
+        _wa_session = _get_session(conv_id)
+        loc_name = last_parsed_intent.get("location_name")
+        loc_lat = last_parsed_intent.get("lat")
+        loc_lon = last_parsed_intent.get("lon")
+        if loc_name and loc_lat is not None and loc_lon is not None:
+            if not _wa_session.last_query_location:
+                _wa_session.last_query_location = {
+                    "lat": float(loc_lat),
+                    "lon": float(loc_lon),
+                    "name": loc_name,
+                    "source": "previous_query",
+                    "confidence": 0.85,
+                    "coastal": True,
+                }
+            if not _wa_session.selected_location:
+                _wa_session.selected_location = {
+                    "lat": float(loc_lat),
+                    "lon": float(loc_lon),
+                    "name": loc_name,
+                    "source": "conversation",
+                }
+            _save_session(_wa_session)
+            logger.info(
+                "[WhatsApp] Pre-seeded SessionRecord '%s' with last location: %s (%.4f, %.4f)",
+                conv_id, loc_name, float(loc_lat), float(loc_lon),
+            )
+
     user_loc = None
     if last_parsed_intent and last_parsed_intent.get("location_name"):
         user_loc = {
@@ -965,6 +1015,7 @@ async def _process_whatsapp_query_background(session_id: str, body_text: str):
             conversation=session.get("conversation", []),
             last_parsed_intent=session.get("last_parsed_intent"),
             last_results=session.get("last_results", {}),
+            wa_session_id=session_id,
         )
 
         answer_text = final_state.get("final_answer_text", "")
@@ -988,6 +1039,18 @@ async def _process_whatsapp_query_background(session_id: str, body_text: str):
         curr_intent = final_state.get("parsed_intent")
         if (not curr_intent or not curr_intent.get("location_name")) and session.get("last_parsed_intent"):
             curr_intent = session.get("last_parsed_intent")
+
+        # Enrich curr_intent with resolved lat/lon so the next WhatsApp turn can
+        # pre-seed the SessionRecord for location inheritance (LocationResolver Priority 5C).
+        # The LLM parsed_intent only carries location_name, not coordinates.
+        resolved_loc = final_state.get("resolved_location")
+        if curr_intent and resolved_loc:
+            if not curr_intent.get("lat") and resolved_loc.get("lat") is not None:
+                curr_intent = dict(curr_intent)  # don't mutate original
+                curr_intent["lat"] = resolved_loc["lat"]
+                curr_intent["lon"] = resolved_loc["lon"]
+                if not curr_intent.get("location_name") and resolved_loc.get("name"):
+                    curr_intent["location_name"] = resolved_loc["name"]
 
         session_store.update_session(
             phone=session_id,
