@@ -8,6 +8,8 @@ import {
   MarineContext,
   LocationSearchResult,
   RouteResult,
+  EcosystemProductivityResponse,
+  ProductivityDiagnosisResponse,
 } from "./types";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -447,5 +449,75 @@ export async function planRoute(
   } catch (err) {
     console.error("Failed to plan route:", err);
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ecosystem Productivity & Researcher Suite APIs
+// ---------------------------------------------------------------------------
+
+export async function fetchProductivityAnalyticsApi(
+  region: string,
+  startYear: number = 2018,
+  endYear: number = 2024
+): Promise<EcosystemProductivityResponse | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/analytics/productivity?region=${encodeURIComponent(region)}&start_year=${startYear}&end_year=${endYear}`
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to fetch productivity analytics:", err);
+    return null;
+  }
+}
+
+export async function diagnoseProductivityApi(
+  region: string,
+  startYear: number = 2018,
+  endYear: number = 2024
+): Promise<ProductivityDiagnosisResponse | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analytics/productivity/diagnose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        region,
+        start_year: startYear,
+        end_year: endYear,
+      }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to diagnose productivity decline:", err);
+    return null;
+  }
+}
+
+export async function chatResearcherEcosystemApi(
+  region: string,
+  message: string,
+  history: Array<{ role: string; content: string }> = []
+): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analytics/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        region,
+        message,
+        history,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`Chat request failed with HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.reply || "";
+  } catch (err: any) {
+    console.error("Failed in researcher ecosystem chat:", err);
+    throw err;
   }
 }
