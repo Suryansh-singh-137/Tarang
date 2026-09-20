@@ -5,14 +5,14 @@
 ![Tarang Banner](https://img.shields.io/badge/Tarang-Marine%20Intelligence-0ea5e9?style=for-the-badge&logo=compass&logoColor=white)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-orange?style=flat-square)](https://langchain-ai.github.io/langgraph/)
-[![Next.js](https://img.shields.io/badge/Next.js-14.2%20(App%20Router)-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-15%20%2F%2016%20(App%20Router)-black?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Leaflet](https://img.shields.io/badge/Leaflet-Interactive%20Maps-199900?style=flat-square&logo=leaflet&logoColor=white)](https://leafletjs.com/)
 
-**AI-powered, deterministic coastal decision-support and fisheries navigation platform for India's 7,516 km coastline.**
+**AI-powered, deterministic coastal decision-support, fisheries navigation, and marine ecosystem analytics platform for India's 7,516 km coastline.**
 
-*Empowering artisanal and small-scale fishermen with real-time marine weather, satellite fishing zones (PFZ), tidal forecasts, maritime border breach alerts (IMBL), deterministic safe route planning, and multilingual voice assistance across 9 Indian coastal languages.*
+*Empowering artisanal fishermen and marine scientists alike with real-time marine weather, satellite fishing zones (PFZ), tidal predictions, maritime border breach alerts (IMBL), deterministic safe route planning, multilingual voice assistance across 9 Indian coastal languages, and longitudinal bio-oceanographic fisheries productivity analytics.*
 
 </div>
 
@@ -22,6 +22,7 @@
 
 - [Overview & The Problem We Solve](#-overview--the-problem-we-solve)
 - [Key Features & Capabilities](#-key-features--capabilities)
+- [Ecosystem Productivity & Researcher Suite](#-ecosystem-productivity--researcher-suite)
 - [System Architecture & Agent Topology](#-system-architecture--agent-topology)
 - [Specialist Agents & Nodes](#-specialist-agents--nodes)
 - [Safe Marine Route Optimization Engine](#-safe-marine-route-optimization-engine)
@@ -41,16 +42,17 @@
 
 ## 🎯 Overview & The Problem We Solve
 
-Over **4 million artisanal and small-scale fishermen** across India's coastline venture into the sea daily in non-motorized and motorized craft under 20 meters. They face four life-threatening and livelihood-critical challenges:
+Over **4 million artisanal and small-scale fishermen** across India's coastline venture into the sea daily in non-motorized and motorized craft under 20 meters. At the same time, marine researchers and policymakers struggle to synthesize fragmented oceanographic data to explain climate-induced fish stock declines. They face five life-threatening and livelihood-critical challenges:
 
 1. **Complex, Inaccessible Weather Warnings**: Bulletins from INCOIS, IMD, and international agencies are dense, PDF-bound, English-heavy, and full of oceanographic jargon unintelligible to traditional fishermen.
-2. **Accidental Maritime Border Crossing (IMBL)**: In narrow channels like the Palk Strait and Gulf of Mannar, small fishing boats inadvertently drift across the International Maritime Boundary Line (IMBL), leading to boat seizures, prolonged detentions, and diplomatic conflict.
+2. **Accidental Maritime Border Crossing (IMBL)**: In narrow channels like the Palk Strait and Gulf of Mannar, small fishing boats inadvertently drift across the International Maritime Boundary Line (IMBL), leading to boat seizures, prolonged detentions, and diplomatic friction.
 3. **Wasted Fuel Searching for Fish**: Traditional fishers rely on generational intuition to locate fishing grounds. Without spatial guidance for Potential Fishing Zones (PFZ), boats consume scarce kerosene and diesel fruitlessly.
 4. **Dangerous Marine Navigation**: Existing navigation tools are designed for cars or commercial container ships. Small craft lack marine route planning that accounts for departure times, wave heights, weather corridors, shallow bathymetry, and land avoidance.
+5. **Ecosystem & Catch Collapse Disconnect**: Fishery scientists lack unified analytical tools to cross-correlate satellite primary production (Chlorophyll-a), Marine Heatwaves (SST anomalies), and CMFRI fish landing drops to diagnose why fish productivity has declined in key regional fisheries.
 
 ### The Tarang Solution
 
-Tarang bridges this gap by combining **real-time satellite observation**, **oceanographic forecasting**, **geospatial polygon constraint engines**, and **multi-agent LangGraph orchestration**. It reasons deterministically over physical conditions and delivers concise, life-saving answers in **9 Indian coastal languages** through Web, WhatsApp, SMS, and Voice.
+Tarang bridges this gap by combining **real-time satellite observation**, **oceanographic forecasting**, **geospatial polygon constraint engines**, **multi-agent LangGraph orchestration**, and **longitudinal bio-oceanographic analytics**. It reasons deterministically over physical conditions and delivers life-saving answers in **9 Indian coastal languages** through Web, WhatsApp, SMS, and Voice, while providing researchers with an empirical climate-fisheries diagnostic suite.
 
 ---
 
@@ -63,13 +65,19 @@ Tarang bridges this gap by combining **real-time satellite observation**, **ocea
 - **Hard Safety Exclusion**: Strictly prunes candidate nodes on land, within 5 km of the IMBL, in severe seas ($\ge 4.0\text{ m}$), high winds ($\ge 90\text{ km/h}$), or active storm advisory zones.
 - **PFZ Attraction Bonus**: Incorporates high-chlorophyll fishing zones as positive cost modifiers, steering fishermen toward productive waters safely.
 
-### 🧠 2. Compound Multi-Intent Supervisor
+### 🔬 2. Marine Ecosystem Productivity & Researcher Suite (New)
+- **84-Month Empirical Longitudinal Analysis (2018–2024)**: Correlates satellite Chlorophyll-a, Sea Surface Temperature (SST) & thermal anomalies, and ICAR-CMFRI commercial marine fish landings across 5 major coastal bio-zones.
+- **Automated Causal Attribution**: Classifies primary root drivers of fishery declines into Marine Heatwaves (MHWs), Phytoplankton/Trophic Deficits, and Recruitment Overfishing.
+- **Bio-Oceanographic AI Research Fellow**: Specialized conversational agent grounded in ocean color, OISST, and CMFRI stock benchmarks, capable of rendering rich Markdown reports, data tables, and management recommendations.
+- **Multi-Axis Interactive Time-Series**: Custom SVG visualization displaying chlorophyll area dynamics, sea surface temperature anomaly ribbons, commercial catch volumes, and historical ecological collapse markers.
+
+### 🧠 3. Compound Multi-Intent Supervisor
 - **Structured LLM Intent Parser**: Uses Groq (`openai/gpt-oss-20b` in JSON mode) to parse complex, multi-faceted queries (e.g. *"What is the sea level near me, where is the nearest fishing zone, any hazard, and what is the wind speed?"*).
 - **Non-Exclusive Agent Routing**: Dynamically dispatches queries to all required agents (`weather_agent`, `ocean_agent`, `pfz_agent`, `hazard_agent`, `risk_agent`) without mutually exclusive drop-offs.
 - **Multi-Section Dynamic Synthesis**: Synthesizes clean, comprehensive multi-section responses covering each asked topic with direct factual groundings and disclaimers.
 - **Inland-to-Coastal Fallback**: Automatically redirects relative queries ("near me") tested from inland developer machines to the active coastal harbour selected on the map or session.
 
-### 🛡️ 3. IMBL Geofencing & Real-Time Border Breach Alerts
+### 🛡️ 4. IMBL Geofencing & Real-Time Border Breach Alerts
 - **Real-Time Distance & Bearing Math**: Computes great-circle distance (Haversine formula) to UNCLOS treaty boundary polylines (India–Sri Lanka, India–Pakistan, India–Bangladesh).
 - **Multi-Tier Boundary Zones**:
   - `SAFE` ($> 15\text{ km}$ from border)
@@ -77,7 +85,7 @@ Tarang bridges this gap by combining **real-time satellite observation**, **ocea
   - `CRITICAL BREACH IMMINENT` ($< 5\text{ km}$ from border)
 - **Automated Proactive Alerts**: Dispatches immediate WhatsApp and SMS alerts with emergency heading guidance (`safe_bearing_deg`) to steer back to Indian waters.
 
-### 🗣️ 4. 9 Indian Coastal Languages & Voice Interface
+### 🗣️ 5. 9 Indian Coastal Languages & Voice Interface
 - **Complete Coastal Language Coverage**:
   - English (`en`)
   - Hindi (`hi` — हिन्दी)
@@ -92,17 +100,35 @@ Tarang bridges this gap by combining **real-time satellite observation**, **ocea
 - **Sarvam AI Voice Synthesis**: Natural text-to-speech rendering of marine advisories in authentic regional accents.
 - **Whisper Voice Transcription**: Speak queries directly in native language via browser microphone.
 
-### 📊 5. Deterministic Risk Assessment (ORCA Engine)
+### 📊 6. Deterministic Risk Assessment (ORCA Engine)
 - **Mathematical Safety Scoring**: No LLM hallucination for safety clearance. Calculates an objective composite risk score ($0\text{--}100$) based on weighted physical metrics:
   $$\text{Score} = 0.30 \times \text{Wave} + 0.20 \times \text{Wind} + 0.30 \times \text{Hazard} + 0.20 \times \text{Boundary}$$
 - **Automatic Hazard Overrides**: Active tropical cyclones, severe weather warnings, or proximity within 5 km of international borders automatically force risk to `HIGH` or `EXTREME`.
 - **Explainable "Why this risk?" Engine**: Transparent factor contribution breakdown detailing exactly which physical variable drove the safety rating.
 - **Fail-Closed Architecture**: If critical data streams (weather or hazard) are offline, Tarang marks risk as `UNKNOWN` and refuses to authorize departure.
 
-### 📱 6. Multi-Channel Accessibility
-- **Modern Web Application**: Next.js 14 App Router, Leaflet interactive map, dynamic risk dial, real-time agent execution drawer, and marine details cards.
-- **WhatsApp Bot**: Conversational querying via Twilio WhatsApp API with emoji badges and rich Markdown formatting.
-- **SMS Alerts & Webhooks**: Offline cellular delivery (`/sms` and `/webhook/sms`) for low-bandwidth mobile handsets at sea.
+---
+
+## 🐟 Ecosystem Productivity & Researcher Suite
+
+The **Researcher Suite** (`/analytics`) bridges ocean observation with fisheries biology, allowing marine ecologists and policymakers to analyze why fish productivity drops in Indian coastal ecosystems.
+
+### The 5 Initial Bio-Oceanographic Zones
+
+| Region | Primary Species | Key Environmental Driver | Historical Stress Episodes |
+| :--- | :--- | :--- | :--- |
+| **🌴 Malabar Coast** (Kerala) | Oil Sardine, Indian Mackerel, Anchovies | Southwest monsoon upwelling timing & post-monsoon SST warming | 2019–2020 Sardine collapse; 2023–2024 El Niño heating |
+| **🌊 Gulf of Mannar** (Tamil Nadu) | Blue Swimming Crab, Squid, Seerfish | High shallow SST anomalies, coral bleaching & thermal stratification | 2020 & 2024 Marine Heatwaves (MHWs) |
+| **⚓ Saurashtra Coast** (Gujarat) | Ribbonfish, Bombay Duck, Croaker, Pomfret | Winter cooling shifts, continental shelf trawl intensity | 2021 Cyclone Tauktae disruption; 2023 warming |
+| **🚢 Konkan Coast** (Maharashtra/Goa) | Mackerel, Penaeid Prawns, Kingfish | Central Arabian Sea upwelling pulses & juvenile harvest pressure | 2019 monsoon delay; 2023 cyclonic disruption |
+| **🌀 Coromandel Coast** (TN / AP) | Pelagic Tunas, Anchovies, Silverbellies | Western Bay of Bengal cyclonic storms & Northeast monsoon eddies | 2020 Cyclone Nivar; 2023 post-monsoon deficit |
+
+### Statistical & Oceanographic Mechanics
+1. **Trophic Coupling Correlation ($r_{\text{chl, catch}}$)**: Measures the Pearson correlation between monthly satellite Chlorophyll-a (mg/m³) and CMFRI reported landing volumes (tonnes). Values $r > 0.40$ ($p < 0.001$) confirm strong bottom-up primary production dependency.
+2. **Thermal Stress Impact ($r_{\text{sst\_anom, catch}}$)**: Quantifies the displacement of pelagic shoals into deeper cooler strata during positive sea surface temperature anomalies.
+3. **Marine Heatwave (MHW) Identification**: Tracks months where SST exceeds $+1.5^\circ\text{C}$ above 30-year climatological baselines.
+4. **Primary Productivity Deficit**: Identifies months where Chlorophyll-a anomalies fall below $Z \le -1.5$.
+5. **Research Methodology Documentation**: Detailed methodology documentation is compiled in [`Tarang_Researcher_Data_Extraction_Methodology.pdf`](Tarang_Researcher_Data_Extraction_Methodology.pdf).
 
 ---
 
@@ -154,6 +180,7 @@ flowchart TD
 | **`explain_risk`** | [`explain_risk.py`](backend/graph/nodes/explain_risk.py) | Detailed factor contribution points, percentage weights, and natural language explanation | Risk agent state | `query_type == "risk_explanation"` |
 | **`status_validator`**| [`build_graph.py`](backend/graph/build_graph.py) | Evaluates execution status (`success`, `partial`, `failed`) and data freshness (`live`, `fallback`, `unavailable`) | All agent traces | Always |
 | **`synthesis`** | [`synthesis.py`](backend/graph/nodes/synthesis.py) | Two-layer output generation: Layer 1 (conversational natural text) and Layer 2 (structured evidence cards & GeoJSON) | Groq `gpt-oss-120b` + Intent Template Fallback | Always (Terminal Gate) |
+| **`ecosystem_analytics`** | [`ecosystem_analytics.py`](backend/tools/ecosystem_analytics.py) | Longitudinal time series synthesis, trophic correlation, MHW scoring, and researcher LLM chat | MODIS-Aqua, NOAA OISST, ICAR-CMFRI | On `/analytics/*` requests |
 
 ---
 
@@ -263,6 +290,7 @@ User Audio / Text Query ──┼──► Bengali (bn - বাংলা)
 | **Tides & Water Levels** | INCOIS / SOI | Harmonic Tidal Constituents (Chart Datum) | 60 minutes | Harmonic model fallback |
 | **Tropical Cyclones** | GDACS | Global Disaster Alert & Coordination System | 10 minutes | `data/fallback_hazards.json` |
 | **SST & Anomaly** | INCOIS ERDDAP | NOAA AVHRR / AMSR Satellite SST | 24 hours | Offline notice |
+| **Fisheries Time-Series** | ICAR-CMFRI / NASA / NOAA | 84-month Chlorophyll, SST anomaly, & Catch (2018–2024) | Static / Longitudinal | `data/fisheries_productivity_timeseries.json` |
 | **Coastal Places** | Indian Gazetteers | 116+ coastal harbours, jetties, and landing centers | Static | `data/coastal_places.json` |
 | **IMBL Boundaries** | UNCLOS Treaties | High-resolution treaty polylines | Static | `data/imbl_boundary.geojson` |
 | **Coastline Mask** | Natural Earth / GADM | Simplified Indian subcontinent & island polygons | Static | `data/india_landmass.geojson` |
@@ -289,24 +317,6 @@ Streams agent execution statuses, followed by the complete response payload.
 }
 ```
 
-**SSE Events:**
-- `event: status` — Emits `{"agent": "weather_agent", "status": "running"}` in real-time.
-- `event: result` — Returns the final response JSON:
-  ```json
-  {
-    "answer_text": "Here is the assessment for Mumbai...",
-    "risk_data": {
-      "composite_score": 18.5,
-      "risk_label": "LOW",
-      "recommendation": "Conditions are rated low risk by Tarang.",
-      "components": [...]
-    },
-    "evidence": [...],
-    "map_geojson": { "type": "FeatureCollection", "features": [...] },
-    "trace": [...]
-  }
-  ```
-
 ---
 
 ### 2. `POST /route` (Safe Marine Route Planner)
@@ -326,35 +336,89 @@ Calculates an A* optimized marine route avoiding land, severe weather, and marit
 }
 ```
 
+---
+
+### 3. `GET /analytics/regions` (Researcher Suite Regions Catalog)
+Returns list of available coastal regions, dominant species, coordinates, and research citations.
+
 **Response:**
 ```json
 {
-  "status": "success",
-  "total_distance_km": 54.2,
-  "estimated_duration_hours": 3.6,
-  "route_risk_label": "LOW",
-  "departure_time_utc": "2026-09-20T04:00:00Z",
-  "waypoints": [
+  "regions": [
     {
-      "lat": 13.0827,
-      "lon": 80.2707,
-      "name": "Chennai Harbour",
-      "distance_from_start_km": 0.0,
-      "estimated_arrival_utc": "2026-09-20T04:00:00Z",
-      "risk_label": "LOW",
-      "wave_height_m": 0.8,
-      "wind_speed_kmh": 14.2
-    },
-    ...
-  ],
-  "legs": [...],
-  "geojson": { "type": "FeatureCollection", "features": [...] }
+      "id": "malabar",
+      "name": "Malabar Coast",
+      "state": "Kerala",
+      "lat": 10.5,
+      "lon": 75.8,
+      "dominant_species": ["Oil Sardine", "Indian Mackerel", "Anchovies"],
+      "data_range": "2018 - 2024"
+    }
+  ]
 }
 ```
 
 ---
 
-### 3. `POST /geofence/evaluate` (Real-Time IMBL Monitor)
+### 4. `GET /analytics/productivity` (Ecosystem Time-Series Data)
+Retrieves 84-point monthly time-series, Pearson correlation statistics, and MHW anomaly counts.
+
+**Query Parameters:**
+- `region`: `malabar` | `gulf_of_mannar` | `saurashtra` | `konkan` | `coromandel`
+- `start_year`: `2018`
+- `end_year`: `2024`
+
+---
+
+### 5. `POST /analytics/productivity/diagnose` (Automated Causal Diagnosis)
+Synthesizes empirical satellite metrics and stock benchmarks to diagnose root causes of catch decline.
+
+**Request Body:**
+```json
+{
+  "region": "malabar",
+  "start_year": 2018,
+  "end_year": 2024
+}
+```
+
+**Response:**
+```json
+{
+  "region_id": "malabar",
+  "region_name": "Malabar Coast",
+  "dominant_species": "Oil Sardine, Indian Mackerel, Anchovies, Ribbonfish",
+  "ecological_status": "Severe Ecological Disruption",
+  "stress_index": 75.0,
+  "primary_causes": [
+    {
+      "driver": "Marine Heatwaves & Thermal Stratification",
+      "mechanism": "Sustained sea surface temperature anomalies (> +1.5°C) inhibit coastal upwelling...",
+      "severity": "HIGH",
+      "empirical_metric": "6 months with SST anomaly >= +1.5°C"
+    }
+  ],
+  "management_recommendations": [...]
+}
+```
+
+---
+
+### 6. `POST /analytics/chat` (Bio-Oceanographic AI Research Fellow)
+Interactive reasoning endpoint for marine researchers. Grounded in time-series metrics, CMFRI research, and oceanographic mechanics.
+
+**Request Body:**
+```json
+{
+  "region": "malabar",
+  "message": "Why has fish productivity declined in this coastal region? Analyze the empirical drivers.",
+  "history": []
+}
+```
+
+---
+
+### 7. `POST /geofence/evaluate` (Real-Time IMBL Monitor)
 Evaluates vessel coordinates against international maritime borders.
 
 **Request Body:**
@@ -366,25 +430,9 @@ Evaluates vessel coordinates against international maritime borders.
 }
 ```
 
-**Response:**
-```json
-{
-  "inside_boundary": true,
-  "distance_to_boundary_km": 8.4,
-  "boundary_risk": "warning",
-  "safe_bearing_deg": 265.0,
-  "alert_sent": true
-}
-```
-
 ---
 
-### 4. `POST /sms` & `POST /webhook/sms` (Cellular SMS Channel)
-Dispatches or receives SMS queries for low-bandwidth cellular devices at sea.
-
----
-
-### 5. `POST /speak` & `POST /transcribe` (Audio I/O)
+### 8. `POST /speak` & `POST /transcribe` (Audio I/O)
 - `/transcribe`: Accepts `multipart/form-data` audio blob, returns transcribed query string via Groq Whisper.
 - `/speak`: Accepts `{"text": "...", "language": "ta"}` and streams high-fidelity WAV speech via Sarvam AI.
 
@@ -395,62 +443,72 @@ Dispatches or receives SMS queries for low-bandwidth cellular devices at sea.
 ```
 tarang/
 ├── backend/
-│   ├── main.py                        # FastAPI entry point & API route declarations
-│   ├── config.py                      # Central settings, environment variables, TTLs, weights
-│   ├── requirements.txt               # Python package dependencies
+│   ├── main.py                                  # FastAPI entry point & API routes (including /analytics)
+│   ├── config.py                                # Central settings, environment variables, TTLs, weights
+│   ├── requirements.txt                         # Python package dependencies
+│   ├── generate_researcher_data_pdf.py          # PDF documentation generator for researcher methodology
 │   ├── graph/
-│   │   ├── state.py                   # TypedDict state contracts (ORCAState, AgentResult)
-│   │   ├── build_graph.py             # Compiled LangGraph StateGraph & checkpoint wrappers
+│   │   ├── state.py                             # TypedDict state contracts (ORCAState, AgentResult)
+│   │   ├── build_graph.py                       # Compiled LangGraph StateGraph & checkpoint wrappers
 │   │   └── nodes/
-│   │       ├── detect_and_parse.py    # Intent parsing, LLM Groq extraction, gazetteer
-│   │       ├── weather_agent.py       # Open-Meteo marine weather client
-│   │       ├── pfz_agent.py           # INCOIS satellite chlorophyll PFZ finder
-│   │       ├── ocean_agent.py         # Harmonic tidal water-level calculator
-│   │       ├── hazard_agent.py        # GDACS tropical cyclones & weather advisories
-│   │       ├── geofence_agent.py      # IMBL boundary proximity monitoring
-│   │       ├── sst_agent.py           # Sea Surface Temperature observation client
-│   │       ├── risk_agent.py          # Deterministic multi-factor safety scoring
-│   │       ├── explain_risk.py        # Factor contribution point calculator
-│   │       └── synthesis.py           # Multi-section Layer 1 & Layer 2 response synthesizer
+│   │       ├── detect_and_parse.py              # Intent parsing, LLM Groq extraction, gazetteer
+│   │       ├── weather_agent.py                 # Open-Meteo marine weather client
+│   │       ├── pfz_agent.py                     # INCOIS satellite chlorophyll PFZ finder
+│   │       ├── ocean_agent.py                   # Harmonic tidal water-level calculator
+│   │       ├── hazard_agent.py                  # GDACS tropical cyclones & weather advisories
+│   │       ├── geofence_agent.py                # IMBL boundary proximity monitoring
+│   │       ├── sst_agent.py                     # Sea Surface Temperature observation client
+│   │       ├── risk_agent.py                    # Deterministic multi-factor safety scoring
+│   │       ├── explain_risk.py                  # Factor contribution point calculator
+│   │       └── synthesis.py                     # Multi-section Layer 1 & Layer 2 response synthesizer
 │   ├── tools/
-│   │   ├── route_planner.py           # Deterministic A* marine route optimization
-│   │   ├── land_mask.py               # Shapely prepared polygon land-masking
-│   │   ├── boundary_geo.py            # Geodesic distance & IMBL geometry math
-│   │   ├── incois_client.py           # INCOIS ERDDAP client
-│   │   ├── marine_weather_client.py   # Open-Meteo marine client
-│   │   ├── hazard_client.py           # GDACS & IMD alert client
-│   │   ├── sms_sender.py              # Twilio cellular SMS dispatch
-│   │   ├── sarvam_tts_client.py       # Sarvam AI multilingual TTS client
-│   │   └── location_resolver.py       # Gazetteers & OSM Nominatim fallback
+│   │   ├── ecosystem_analytics.py               # Time-series analytics, correlation engine, researcher AI
+│   │   ├── route_planner.py                     # Deterministic A* marine route optimization
+│   │   ├── land_mask.py                         # Shapely prepared polygon land-masking
+│   │   ├── boundary_geo.py                      # Geodesic distance & IMBL geometry math
+│   │   ├── incois_client.py                     # INCOIS ERDDAP client
+│   │   ├── marine_weather_client.py             # Open-Meteo marine client
+│   │   ├── hazard_client.py                     # GDACS & IMD alert client
+│   │   ├── sms_sender.py                        # Twilio cellular SMS dispatch
+│   │   ├── sarvam_tts_client.py                 # Sarvam AI multilingual TTS client
+│   │   └── location_resolver.py                 # Gazetteers & OSM Nominatim fallback
 │   ├── location/
-│   │   ├── models.py                  # Location Pydantic schemas
-│   │   └── resolver.py                # 3-tier canonical location resolver
+│   │   ├── models.py                            # Location Pydantic schemas
+│   │   └── service.py                           # 3-tier canonical location resolver & marine context
 │   ├── session/
-│   │   └── session_store.py           # Authoritative server-side session memory
+│   │   └── session_store.py                     # Authoritative server-side session memory
 │   └── data/
-│       ├── coastal_places.json        # 116+ coastal fishing harbours
-│       ├── india_landmass.geojson     # Subcontinent coastline polygons
-│       ├── imbl_boundary.geojson      # International maritime boundary polylines
-│       ├── fallback_weather.json      # Offline weather fallback
-│       ├── fallback_pfz.json          # Offline PFZ fallback
-│       └── fallback_hazards.json      # Offline hazards fallback
+│       ├── fisheries_productivity_timeseries.json # 84-month empirical dataset (Chl-a, SST, CMFRI Catch)
+│       ├── coastal_places.json                  # 116+ coastal fishing harbours
+│       ├── india_landmass.geojson               # Subcontinent coastline polygons
+│       ├── imbl_boundary.geojson                # International maritime boundary polylines
+│       ├── fallback_weather.json                # Offline weather fallback
+│       ├── fallback_pfz.json                    # Offline PFZ fallback
+│       └── fallback_hazards.json                # Offline hazards fallback
 │
-└── frontend/
-    ├── src/
-    │   ├── app/                       # Next.js 14 App Router
-    │   │   ├── page.tsx               # Landing & mission page
-    │   │   └── app/page.tsx           # Main Tarang application dashboard
-    │   ├── components/
-    │   │   ├── chat/                  # Query input, audio controls, message bubbles
-    │   │   ├── route/                 # RoutePanel.tsx route optimization UI
-    │   │   ├── map/                   # MarineMap.tsx Leaflet geospatial view
-    │   │   ├── trace/                 # Real-time agent execution inspection drawer
-    │   │   └── common/                # LanguageToggle.tsx, BorderBreachAlert.tsx
-    │   └── lib/
-    │       ├── api.ts                 # SSE client & backend REST integrations
-    │       ├── i18n.ts                # 9-language translation dictionaries
-    │       └── types.ts               # TypeScript data models
-    └── tailwind.config.ts             # "Coastal Dawn" custom design system
+├── frontend/
+│   ├── src/
+│   │   ├── app/                                 # Next.js App Router
+│   │   │   ├── page.tsx                         # Landing & mission page
+│   │   │   └── app/page.tsx                     # Main Tarang application dashboard
+│   │   ├── components/
+│   │   │   ├── research/                        # Researcher Suite Components (New)
+│   │   │   │   ├── EcosystemAnalyticsView.tsx   # Interactive SVG time-series & causal diagnosis
+│   │   │   │   └── ResearcherChatbot.tsx        # Bio-Oceanographic AI Research Fellow
+│   │   │   ├── navigation/
+│   │   │   │   └── IconRail.tsx                 # Left navigation rail with Research tab
+│   │   │   ├── chat/                            # Query input, audio controls, message bubbles
+│   │   │   ├── route/                           # RoutePanel.tsx route optimization UI
+│   │   │   ├── map/                             # MarineMap.tsx Leaflet geospatial view
+│   │   │   ├── trace/                           # Real-time agent execution inspection drawer
+│   │   │   └── common/                          # LanguageToggle.tsx, BorderBreachAlert.tsx
+│   │   └── lib/
+│   │       ├── api.ts                           # API client (including ecosystem analytics endpoints)
+│   │       ├── i18n.ts                          # 9-language translation dictionaries
+│   │       └── types.ts                         # TypeScript data models
+│   └── public/
+│       └── Tarang_Researcher_Data_Extraction_Methodology.pdf
+└── Tarang_Researcher_Data_Extraction_Methodology.pdf
 ```
 
 ---
@@ -459,7 +517,7 @@ tarang/
 
 ### Prerequisites
 - **Python**: 3.10, 3.11, or 3.12
-- **Node.js**: 18.x or 20.x
+- **Node.js**: 18.x, 20.x, or 22.x
 - **Git**
 - Valid API keys for **Groq** (required for LLM features) and optionally **Sarvam AI** (for Indian voice TTS) and **Twilio** (for WhatsApp/SMS).
 
@@ -500,12 +558,12 @@ Start the backend server:
 ```bash
 uvicorn main:app --reload --port 8000
 ```
-Backend will be live at: `http://localhost:8000` (API Docs at `http://localhost:8000/docs`).
+Backend will be live at: `http://localhost:8000` (Interactive API documentation at `http://localhost:8000/docs`).
 
 ---
 
 ### Step 3: Frontend Setup
-In a new terminal window:
+In a separate terminal window:
 ```bash
 cd frontend
 
@@ -529,7 +587,7 @@ Set these variables in `backend/.env`:
 # ---------------------------------------------------------------------------
 GROQ_API_KEY=gsk_your_groq_api_key_here
 GROQ_MODEL_FAST=openai/gpt-oss-20b        # Fast parser model
-GROQ_MODEL_QUALITY=openai/gpt-oss-120b    # Quality synthesis model
+GROQ_MODEL_QUALITY=openai/gpt-oss-120b    # Quality synthesis & researcher model
 SARVAM_API_KEY=your_sarvam_api_key_here    # Multilingual Voice TTS (optional)
 
 # ---------------------------------------------------------------------------
@@ -575,27 +633,31 @@ ROUTE_ASSUMED_SPEED_KMH=15.0               # Typical small fishing craft
 
 Tarang includes dedicated verification suites:
 
-### 1. Test Coastal Languages & Detection
+### 1. Test Ecosystem Analytics & Researcher Engine
+```bash
+cd backend
+python -c "from tools.ecosystem_analytics import diagnose_productivity_decline; res = diagnose_productivity_decline('malabar'); print('Status:', res['ecological_status'], 'Causes:', len(res['primary_causes']))"
+```
+
+### 2. Test Coastal Languages & Script Detection
 ```bash
 cd backend
 python test_coastal_languages.py
 ```
-*Validates script auto-detection and translated responses across Gujarati, Bengali, Malayalam, Tamil, Telugu, Marathi, and Odia.*
 
-### 2. Test Safe Route Optimizer
+### 3. Test Safe Route Optimizer
 ```bash
 cd backend
 python -c "from tools.route_planner import plan_safe_route; r = plan_safe_route(13.0827, 80.2707, 13.5, 80.8, 'Chennai', 'Offshore'); print('Status:', r['status'], 'Distance:', r.get('total_distance_km'))"
 ```
-*Validates landmask clipping, A\* navigation, and dynamic weather sampling.*
 
-### 3. Test Full Multi-Intent Agent Graph
+### 4. Test Multi-Intent Agent Graph
 ```bash
 cd backend
 python test_graph.py
 ```
 
-### 4. Build Frontend for Production
+### 5. Build Frontend for Production
 ```bash
 cd frontend
 npm run build
@@ -634,7 +696,7 @@ docker run -d -p 8000:8000 --env-file backend/.env tarang-backend
 
 1. **Decision-Support, Not Clearance**: Tarang explicitly acts as a navigational decision-support tool. It **never authorizes departure** and always reminds fishers to follow official advisories from IMD, INCOIS, and the Indian Coast Guard.
 2. **Fail-Closed Guarantee**: When critical safety sensors or live feeds are unreachable, Tarang refuses to issue a false "Safe" rating. It defaults to `UNKNOWN` risk with caution.
-3. **No Hallucinated Data**: Oceanographic figures (wave heights, water levels, wind speeds) must strictly originate from verified data traces. If data is absent, Tarang reports it as unavailable.
+3. **No Hallucinated Data**: Oceanographic figures (wave heights, water levels, wind speeds, catch figures) must strictly originate from verified data traces. If data is absent, Tarang reports it as unavailable.
 4. **Chlorophyll Disclaimers**: Satellite chlorophyll-a indicators are presented as potential indicators of fish presence, never as a commercial fish catch guarantee.
 5. **Border Respect**: Sovereign international borders are treated as inviolable boundaries to safeguard fishermen from international maritime friction.
 
@@ -642,6 +704,6 @@ docker run -d -p 8000:8000 --env-file backend/.env tarang-backend
 
 <div align="center">
 
-**Tarang (तरंग)** — *Built with precision, data, and purpose for the seafaring communities of India.*
+**Tarang (तरंग)** — *Built with precision, data, and purpose for the seafaring communities and marine scientists of India.*
 
 </div>
