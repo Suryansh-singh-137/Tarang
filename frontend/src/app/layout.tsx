@@ -45,9 +45,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${fraunces.variable} ${notoSans.variable} ${notoSansDevanagari.variable} ${notoSansTamil.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[var(--neutral)] text-[var(--ink)] font-sans selection:bg-[var(--foam)] selection:text-[var(--ink)]">
+      <body
+        suppressHydrationWarning
+        className="min-h-full flex flex-col bg-[var(--neutral)] text-[var(--ink)] font-sans selection:bg-[var(--foam)] selection:text-[var(--ink)]"
+      >
         <AppProviders>{children}</AppProviders>
       </body>
     </html>

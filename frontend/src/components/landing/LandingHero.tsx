@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { EmptyStateHorizon } from "../illustrations/EmptyStateHorizon";
@@ -50,13 +50,24 @@ export const LandingHero: React.FC<Props> = ({
     }
   };
 
-  // Current time in IST
-  const now = new Date();
-  const istTime = now.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Asia/Kolkata",
-  });
+  // Current time in IST (client-only hydration safe)
+  const [istTime, setIstTime] = useState<string>("");
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setIstTime(
+        now.toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Asia/Kolkata",
+        })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const lat = liveConditions?.lat ?? 8.7642;
   const lon = liveConditions?.lon ?? 78.1348;
@@ -244,10 +255,11 @@ export const LandingHero: React.FC<Props> = ({
 
           {/* ─── ROTATED 90° INSTRUMENT READOUT — right edge (PRD §0.1) ─── */}
           <div
+            suppressHydrationWarning
             className="hidden lg:block absolute right-0 top-1/2 -translate-y-1/2 writing-vertical font-mono-data text-[10px] text-[var(--ink-subtle)] tracking-widest opacity-60 select-none"
             aria-hidden="true"
           >
-            {lat.toFixed(4)}°N, {lon.toFixed(4)}°E · {istTime} IST
+            {lat.toFixed(4)}°N, {lon.toFixed(4)}°E{istTime ? ` · ${istTime} IST` : ""}
           </div>
 
         </div>

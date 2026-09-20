@@ -285,12 +285,12 @@ function AppWorkspace() {
 
     const deviceLocation = userCoords
       ? {
-          lat: userCoords.lat,
-          lon: userCoords.lon,
-          accuracy: null,
-          captured_at: new Date().toISOString(),
-          permission_status: "granted",
-        }
+        lat: userCoords.lat,
+        lon: userCoords.lon,
+        accuracy: null,
+        captured_at: new Date().toISOString(),
+        permission_status: "granted",
+      }
       : null;
 
     await streamQuery(
@@ -311,25 +311,25 @@ function AppWorkspace() {
             prev.map((msg) =>
               msg.id === assistantMsgId
                 ? {
-                    ...msg,
-                    request_id: result.request_id,
-                    content: result.answer_text,
-                    language: result.language,
-                    location: result.location,
-                    execution_status: result.execution_status,
-                    overall_data_status: result.overall_data_status,
-                    risk_data: result.risk_data,
-                    evidence: result.evidence,
-                    trace: result.trace,
-                    map_geojson: result.map_geojson,
-                    parsed_intent: result.parsed_intent,
-                    answer_plan: result.answer_plan,
-                    response_mode: result.response_mode,
-                    query_signature: result.query_signature,
-                    marine_snapshot: result.marine_snapshot,
-                    change_summary: result.change_summary,
-                    isStreaming: false,
-                  }
+                  ...msg,
+                  request_id: result.request_id,
+                  content: result.answer_text,
+                  language: result.language,
+                  location: result.location,
+                  execution_status: result.execution_status,
+                  overall_data_status: result.overall_data_status,
+                  risk_data: result.risk_data,
+                  evidence: result.evidence,
+                  trace: result.trace,
+                  map_geojson: result.map_geojson,
+                  parsed_intent: result.parsed_intent,
+                  answer_plan: result.answer_plan,
+                  response_mode: result.response_mode,
+                  query_signature: result.query_signature,
+                  marine_snapshot: result.marine_snapshot,
+                  change_summary: result.change_summary,
+                  isStreaming: false,
+                }
                 : msg
             )
           );
@@ -433,11 +433,11 @@ function AppWorkspace() {
             prev.map((msg) =>
               msg.id === assistantMsgId
                 ? {
-                    ...msg,
-                    content: err || "Something went wrong — please try again.",
-                    isStreaming: false,
-                    isError: true,
-                  }
+                  ...msg,
+                  content: err || "Something went wrong — please try again.",
+                  isStreaming: false,
+                  isError: true,
+                }
                 : msg
             )
           );
@@ -655,15 +655,14 @@ function AppWorkspace() {
                     </span>
                     <span>·</span>
                     <span
-                      className={`font-semibold ${
-                        currentRiskLabel === "HIGH"
+                      className={`font-semibold ${currentRiskLabel === "HIGH"
                           ? "text-[#DC2626]"
                           : currentRiskLabel === "MODERATE"
-                          ? "text-[#D97706]"
-                          : currentRiskLabel === "UNKNOWN"
-                          ? "text-amber-600"
-                          : "text-[#1B8755]"
-                      }`}
+                            ? "text-[#D97706]"
+                            : currentRiskLabel === "UNKNOWN"
+                              ? "text-amber-600"
+                              : "text-[#1B8755]"
+                        }`}
                     >
                       {currentRiskLabel} RISK
                     </span>
