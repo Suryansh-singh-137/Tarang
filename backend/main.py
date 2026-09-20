@@ -18,7 +18,7 @@ import logging
 import uuid
 from typing import AsyncIterator, Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -1355,3 +1355,61 @@ async def sms_webhook(request: Request):
             "Please verify the location and try again."
         )
         return Response(content=str(twiml), media_type="application/xml")
+
+
+# ---------------------------------------------------------------------------
+# Ecosystem Productivity & Researcher Suite Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/analytics/regions")
+async def get_ecosystem_regions():
+    from tools.ecosystem_analytics import get_available_regions
+    return {"regions": get_available_regions()}
+
+@app.get("/analytics/productivity")
+async def get_ecosystem_productivity(
+    region: str = Query("malabar", description="Coastal region ID"),
+    start_year: int = Query(2018, description="Start year"),
+    end_year: int = Query(2024, description="End year"),
+):
+    from tools.ecosystem_analytics import get_regional_ecosystem_data
+    try:
+        data = get_regional_ecosystem_data(region, start_year=start_year, end_year=end_year)
+        return data
+    except Exception as exc:
+        logger.exception(f"Error fetching productivity analytics for {region}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class DiagnoseProductivityRequest(BaseModel):
+    region: str = "malabar"
+    start_year: int = 2018
+    end_year: int = 2024
+
+@app.post("/analytics/productivity/diagnose")
+async def diagnose_productivity_endpoint(body: DiagnoseProductivityRequest):
+    from tools.ecosystem_analytics import diagnose_productivity_decline
+    try:
+        diag = diagnose_productivity_decline(body.region, start_year=body.start_year, end_year=body.end_year)
+        return diag
+    except Exception as exc:
+        logger.exception(f"Error diagnosing productivity decline for {body.region}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class ResearcherChatRequest(BaseModel):
+    region: str = "malabar"
+    message: str
+    history: Optional[List[Dict[str, str]]] = None
+
+@app.post("/analytics/chat")
+async def researcher_chat_endpoint(body: ResearcherChatRequest):
+    from tools.ecosystem_analytics import chat_researcher_ecosystem
+    try:
+        reply = chat_researcher_ecosystem(
+            region_id=body.region,
+            message=body.message,
+            history=body.history,
+        )
+        return {"region": body.region, "reply": reply}
+    except Exception as exc:
+        logger.exception(f"Error in researcher chat for {body.region}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))

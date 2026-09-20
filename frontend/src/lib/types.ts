@@ -442,3 +442,90 @@ export interface RouteResult {
   warnings: string[];
   error?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Ecosystem Productivity & Anomaly Types (Researcher Suite)
+// ---------------------------------------------------------------------------
+
+export interface EcosystemTimeSeriesPoint {
+  month: string;
+  year: number;
+  month_num: number;
+  sst_celsius: number;
+  sst_baseline_celsius: number;
+  sst_anomaly_celsius: number;
+  chlorophyll_mg_m3: number;
+  chlorophyll_baseline_mg_m3: number;
+  chlorophyll_anomaly_z: number;
+  catch_tonnes: number;
+  catch_baseline_tonnes: number;
+  cpue_kg_per_hour: number;
+  anomaly_flag: "nominal" | "thermal_mhw" | "trophic_deficit";
+  event_description?: string | null;
+}
+
+export interface EcosystemRegionMetadata {
+  id: string;
+  name: string;
+  state: string;
+  lat: number;
+  lon: number;
+  dominant_species: string[];
+  description: string;
+  time_range: string;
+  sources: string[];
+}
+
+export interface EcosystemCorrelations {
+  chl_vs_catch: { r: number; p_value: number; interpretation: string };
+  sst_anomaly_vs_catch: { r: number; p_value: number; interpretation: string };
+  chl_vs_sst: { r: number; p_value: number; interpretation: string };
+}
+
+export interface EcosystemAnomaliesSummary {
+  marine_heatwave_months: number;
+  chlorophyll_deficit_months: number;
+  severe_catch_drop_months: number;
+  stress_index: number;
+  stress_label: string;
+}
+
+export interface EcosystemProductivityResponse {
+  region: string;
+  metadata: EcosystemRegionMetadata;
+  time_window: {
+    start_year: number;
+    end_year: number;
+    total_months: number;
+  };
+  series: EcosystemTimeSeriesPoint[];
+  correlations: EcosystemCorrelations;
+  anomalies_summary: EcosystemAnomaliesSummary;
+}
+
+export interface ProductivityDiagnosisResponse {
+  region: string;
+  metadata: EcosystemRegionMetadata;
+  time_window: {
+    start_year: number;
+    end_year: number;
+  };
+  decline_periods: Array<{
+    period: string;
+    catch_drop_pct: number;
+    avg_sst_anomaly_c: number;
+    avg_chl_z: number;
+    classification: string;
+  }>;
+  primary_causes: Array<{
+    driver: string;
+    severity: string;
+    mechanism: string;
+    empirical_metric: string;
+  }>;
+  management_recommendations: Array<{
+    action: string;
+    detail: string;
+  }>;
+  data_citations: string[];
+}

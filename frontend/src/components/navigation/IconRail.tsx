@@ -1,7 +1,7 @@
 import React from "react";
-import { MessageSquare, Map as MapIcon, Fish, Compass, Navigation2, AlertTriangle, Layers } from "lucide-react";
+import { MessageSquare, Map as MapIcon, Fish, Compass, Navigation2, AlertTriangle, Layers, Activity } from "lucide-react";
 
-export type ActiveTab = "chat" | "map" | "pfz" | "trip" | "route" | "alerts" | "trace";
+export type ActiveTab = "chat" | "map" | "pfz" | "trip" | "route" | "research" | "alerts" | "trace";
 
 interface Props {
   activeTab: ActiveTab;
@@ -55,6 +55,11 @@ export const IconRail: React.FC<Props> = ({
       id: "route",
       label: "Route Optimizer",
       icon: Navigation2,
+    },
+    {
+      id: "research",
+      label: "Ecosystem Analytics",
+      icon: Activity,
     },
     {
       id: "alerts",

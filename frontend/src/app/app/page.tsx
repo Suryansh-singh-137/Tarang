@@ -12,6 +12,7 @@ import { TracePanel } from "@/components/trace/TracePanel";
 import { FishingZonesView } from "@/components/pfz/FishingZonesView";
 import { TripPlannerView } from "@/components/trip/TripPlannerView";
 import { RoutePanel } from "@/components/route/RoutePanel";
+import { EcosystemAnalyticsView } from "@/components/research/EcosystemAnalyticsView";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 import { WhyThisResultModal } from "@/components/dashboard/WhyThisResultModal";
 import { ChangeSinceLastCheck } from "@/components/dashboard/ChangeSinceLastCheck";
@@ -783,6 +784,13 @@ function AppWorkspace() {
                 }}
                 onNavigateToMap={() => setActiveTab("map")}
               />
+            </div>
+          )}
+
+          {/* Destination: Ecosystem Analytics & Productivity Decline */}
+          {activeTab === "research" && (
+            <div className="flex-1 h-full overflow-y-auto pb-16 md:pb-4 bg-[var(--neutral)]">
+              <EcosystemAnalyticsView />
             </div>
           )}
 
