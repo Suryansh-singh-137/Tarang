@@ -65,7 +65,7 @@ export async function streamQuery(
         last_results: state.last_results,
         user_lat: options?.user_lat ?? (options?.selected_location ? options.selected_location.lat : null),
         user_lon: options?.user_lon ?? (options?.selected_location ? options.selected_location.lon : null),
-        user_location_name: options?.user_location_name ?? (options?.selected_location ? options.selected_location.name : null),
+        user_location_name: options?.user_location_name ?? (options?.user_lat != null ? "Current Location" : (options?.selected_location ? options.selected_location.name : null)),
         language: options?.language ?? null,
       }),
       signal: options?.signal,

@@ -450,9 +450,9 @@ function AppWorkspace() {
         device_location: deviceLocation,
         selected_location: selectedLocation,
         marine_context: marineContext,
-        user_lat: userCoords?.lat ?? (selectedLocation ? selectedLocation.lat : null),
-        user_lon: userCoords?.lon ?? (selectedLocation ? selectedLocation.lon : null),
-        user_location_name: selectedLocation ? selectedLocation.name : null,
+        user_lat: userCoords ? userCoords.lat : (selectedLocation ? selectedLocation.lat : null),
+        user_lon: userCoords ? userCoords.lon : (selectedLocation ? selectedLocation.lon : null),
+        user_location_name: userCoords ? "Current Location" : (selectedLocation ? selectedLocation.name : null),
         language: currentLanguage,
       }
     );

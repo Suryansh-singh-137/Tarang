@@ -191,10 +191,16 @@ def _build_initial_state(body: QueryRequest) -> ORCAState:
 
     user_loc = None
     if device_loc:
+        dev_name = "Your Location"
+        if body.user_location_name and (
+            not session.selected_location
+            or body.user_location_name != session.selected_location.get("name")
+        ):
+            dev_name = body.user_location_name
         user_loc = {
             "lat": device_loc["lat"],
             "lon": device_loc["lon"],
-            "name": body.user_location_name or "Your Location",
+            "name": dev_name,
         }
     elif session.selected_location:
         user_loc = {

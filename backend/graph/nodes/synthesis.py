@@ -1392,7 +1392,8 @@ def synthesis(state: ORCAState) -> dict:
         }
 
     # 4. Inapplicability Notice (e.g. Inland water level/tide/PFZ)
-    if state.get("response_mode") == "APPLICABILITY_EXPLANATION" or (intent and intent.get("response_mode") == "APPLICABILITY_EXPLANATION"):
+    _resp_mode = str(state.get("response_mode") or (intent.get("response_mode") if intent else "")).upper()
+    if _resp_mode == "APPLICABILITY_EXPLANATION":
         app_text = state.get("final_answer_text")
         if app_text:
             return {
