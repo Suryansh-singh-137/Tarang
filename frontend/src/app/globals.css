@@ -248,3 +248,36 @@ details.prose-details[open] summary {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
+
+/* -------------------------------------------------------------------------
+   Nautical Navigation Marine Flow & Chart Styling
+   ------------------------------------------------------------------------- */
+@keyframes marineFlow {
+  from {
+    stroke-dashoffset: 48;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.leaflet-marine-flow {
+  stroke-dasharray: 10, 14;
+  animation: marineFlow 2.2s linear infinite;
+  pointer-events: none;
+}
+
+.custom-leg-badge {
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-chevron-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.custom-route-waypoint {
+  background: transparent !important;
+  border: none !important;
+}

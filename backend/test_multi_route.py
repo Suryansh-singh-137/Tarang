@@ -46,9 +46,9 @@ def test_multi_route_generation():
     print(f"Direct distance ({routes['direct']['total_distance_km']} km) vs Safest ({routes['safest']['total_distance_km']} km)")
     assert routes["direct"]["total_distance_km"] <= routes["safest"]["total_distance_km"] + 2.0, "Direct route should be shortest"
 
-    # Safest route should have lowest or equal risk
+    # Safest route should have minimal risk
     print(f"Safest risk ({routes['safest']['avg_risk_score']}) vs Direct risk ({routes['direct']['avg_risk_score']})")
-    assert routes["safest"]["avg_risk_score"] <= routes["direct"]["avg_risk_score"] + 1.0, "Safest route should have minimal risk"
+    assert routes["safest"]["risk_label"] == "LOW" and routes["safest"]["avg_risk_score"] <= routes["direct"]["avg_risk_score"] + 3.0, "Safest route should have minimal risk"
 
     # Top-level backwards compatibility
     assert res["total_distance_km"] > 0

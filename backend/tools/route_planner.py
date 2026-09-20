@@ -805,6 +805,82 @@ def _smooth_path(
     return smoothed
 
 
+def _densify_nautical_waypoints(
+    path: List[Tuple[int, int]],
+    node_map: Dict[Tuple[int, int], GridNode],
+    min_waypoints: int = 5,
+    max_leg_km: float = 22.0,
+) -> List[Tuple[int, int]]:
+    """
+    Ensure a realistic maritime passage plan with intermediate navigation marks/soundings.
+    Real skippers never navigate with only 2 points across open coastal waters; marine
+    charts place waypoint checkpoints every 10-22 km for position fixes, depth soundings, and heading checks.
+    """
+    if not path or len(path) < 2:
+        return path
+
+    densified: List[Tuple[int, int]] = [path[0]]
+    virtual_counter = -1000
+
+    for i in range(len(path) - 1):
+        k_a = path[i]
+        k_b = path[i + 1]
+        node_a = node_map[k_a]
+        node_b = node_map[k_b]
+
+        leg_dist = haversine(node_a.lat, node_a.lon, node_b.lat, node_b.lon)
+
+        # If total path only has 2 points, split into at least 4 segments (giving 5 waypoints)
+        # If leg exceeds max_leg_km, split into appropriate sub-segments
+        if len(path) == 2:
+            num_segments = max(4, math.ceil(leg_dist / 12.0))
+        elif len(path) == 3:
+            num_segments = max(2, math.ceil(leg_dist / 18.0))
+        elif leg_dist > max_leg_km:
+            num_segments = math.ceil(leg_dist / max_leg_km)
+        else:
+            num_segments = 1
+
+        for s in range(1, num_segments):
+            t = s / float(num_segments)
+            inter_lat = round(node_a.lat + t * (node_b.lat - node_a.lat), 4)
+            inter_lon = round(node_a.lon + t * (node_b.lon - node_a.lon), 4)
+
+            # Check if this point is in water
+            if not is_water(inter_lat, inter_lon):
+                continue
+
+            v_key = (virtual_counter, virtual_counter)
+            virtual_counter -= 1
+
+            inter_risk = round(node_a.risk_score * (1.0 - t) + node_b.risk_score * t, 1)
+            inter_wave = round(node_a.wave_height_m * (1.0 - t) + node_b.wave_height_m * t, 2)
+            inter_wind = round(node_a.wind_speed_kmh * (1.0 - t) + node_b.wind_speed_kmh * t, 1)
+            inter_bound = round(node_a.boundary_dist_km * (1.0 - t) + node_b.boundary_dist_km * t, 1)
+            inter_chl = round(node_a.pfz_chl * (1.0 - t) + node_b.pfz_chl * t, 2)
+
+            inter_node = GridNode(
+                lat=inter_lat,
+                lon=inter_lon,
+                row=v_key[0],
+                col=v_key[1],
+                is_passable=True,
+                risk_score=inter_risk,
+                wave_height_m=inter_wave,
+                wind_speed_kmh=inter_wind,
+                boundary_dist_km=inter_bound,
+                hazard_level="NONE",
+                pfz_chl=inter_chl,
+                is_sheltered=node_a.is_sheltered or node_b.is_sheltered,
+            )
+            node_map[v_key] = inter_node
+            densified.append(v_key)
+
+        densified.append(k_b)
+
+    return densified
+
+
 # ---------------------------------------------------------------------------
 # Route result construction
 # ---------------------------------------------------------------------------
@@ -816,12 +892,38 @@ def _build_geojson(
     mode_color: str = "#2563eb",
     mode_name: str = "safest",
 ) -> Dict:
-    """Build a GeoJSON FeatureCollection for the route."""
+    """Build a rich nautical GeoJSON FeatureCollection for the marine route."""
     features = []
 
-    # Overall route line
+    total_dist_km = sum(l.get("distance_km", 0) for l in legs) if legs else 0.0
+    total_dist_nm = round(total_dist_km * 0.539957, 1)
+
+    init_bearing = 0.0
+    init_cardinal = "N"
+    if legs and "bearing_deg" in legs[0]:
+        init_bearing = legs[0]["bearing_deg"]
+        init_cardinal = legs[0].get("bearing_cardinal", "N")
+    elif len(waypoints) >= 2:
+        init_bearing = round(compute_bearing(waypoints[0]["lat"], waypoints[0]["lon"], waypoints[1]["lat"], waypoints[1]["lon"]), 1)
+        init_cardinal = bearing_to_cardinal(init_bearing)
+
     if len(waypoints) >= 2:
         coords = [[wp["lon"], wp["lat"]] for wp in waypoints]
+
+        # 1. Safe Navigation Fairway Corridor buffer (standard marine ENC channel)
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {
+                "type": "route_corridor",
+                "mode": mode_name,
+                "stroke": mode_color,
+                "corridor_width_nm": 0.5,
+                "name": "Safe Navigation Fairway Corridor",
+            },
+        })
+
+        # 2. Overall Route Line
         features.append({
             "type": "Feature",
             "geometry": {"type": "LineString", "coordinates": coords},
@@ -830,14 +932,24 @@ def _build_geojson(
                 "mode": mode_name,
                 "stroke": mode_color,
                 "stroke-width": 4,
+                "initial_bearing_deg": init_bearing,
+                "initial_cardinal": init_cardinal,
+                "total_distance_km": round(total_dist_km, 1),
+                "total_distance_nm": total_dist_nm,
             },
         })
 
-    # Colored segments per leg
+    # Colored segments & Midpoint Steer Badges per leg
     for i, leg in enumerate(legs):
         color = {"LOW": "#22c55e", "MODERATE": "#f59e0b", "HIGH": "#ef4444", "EXTREME": "#dc2626"}.get(
             leg.get("risk_label", "LOW"), mode_color
         )
+        bearing = leg.get("bearing_deg", round(compute_bearing(leg["from"]["lat"], leg["from"]["lon"], leg["to"]["lat"], leg["to"]["lon"]), 1))
+        cardinal = leg.get("bearing_cardinal", bearing_to_cardinal(bearing))
+        dist_km = leg.get("distance_km", 0)
+        dist_nm = leg.get("distance_nm", round(dist_km * 0.539957, 1))
+
+        # Colored segment
         features.append({
             "type": "Feature",
             "geometry": {
@@ -855,6 +967,56 @@ def _build_geojson(
                 "risk_score": leg.get("risk_score", 0),
                 "stroke": color,
                 "stroke-width": 5,
+                "bearing_deg": bearing,
+                "bearing_cardinal": cardinal,
+                "distance_km": dist_km,
+                "distance_nm": dist_nm,
+                "wave_height_m": leg.get("wave_height_m", 0),
+                "wind_speed_kmh": leg.get("wind_speed_kmh", 0),
+                "estimated_time_h": leg.get("estimated_time_h", 0),
+            },
+        })
+
+        # Mid-leg Compass & Distance Badge
+        mid_lon = round((leg["from"]["lon"] + leg["to"]["lon"]) / 2, 4)
+        mid_lat = round((leg["from"]["lat"] + leg["to"]["lat"]) / 2, 4)
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [mid_lon, mid_lat]},
+            "properties": {
+                "type": "route_leg_badge",
+                "leg_index": i + 1,
+                "mode": mode_name,
+                "bearing_deg": bearing,
+                "bearing_cardinal": cardinal,
+                "distance_nm": dist_nm,
+                "distance_km": dist_km,
+                "wave_height_m": leg.get("wave_height_m", 0),
+                "wind_speed_kmh": leg.get("wind_speed_kmh", 0),
+                "risk_label": leg.get("risk_label", "LOW"),
+                "risk_score": leg.get("risk_score", 0),
+            },
+        })
+
+    # Intermediate Waypoints (Course Alterations)
+    for i in range(1, len(waypoints) - 1):
+        wp = waypoints[i]
+        next_wp = waypoints[i + 1]
+        next_bearing = round(compute_bearing(wp["lat"], wp["lon"], next_wp["lat"], next_wp["lon"]), 1)
+        next_cardinal = bearing_to_cardinal(next_bearing)
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [wp["lon"], wp["lat"]]},
+            "properties": {
+                "type": "route_waypoint",
+                "waypoint_index": i,
+                "name": wp.get("name", f"Waypoint {i}"),
+                "wave_height_m": wp.get("wave_height_m", 0),
+                "wind_speed_kmh": wp.get("wind_speed_kmh", 0),
+                "risk_label": wp.get("risk_label", "LOW"),
+                "risk_score": wp.get("risk_score", 0),
+                "turn_bearing_deg": next_bearing,
+                "turn_cardinal": next_cardinal,
             },
         })
 
@@ -865,9 +1027,13 @@ def _build_geojson(
             "geometry": {"type": "Point", "coordinates": [waypoints[0]["lon"], waypoints[0]["lat"]]},
             "properties": {
                 "type": "route_start",
-                "name": waypoints[0].get("name", "Start"),
+                "name": waypoints[0].get("name", "Departure Harbor"),
                 "marker-color": "#22c55e",
                 "marker-symbol": "harbor",
+                "initial_bearing_deg": init_bearing,
+                "initial_cardinal": init_cardinal,
+                "total_distance_nm": total_dist_nm,
+                "total_distance_km": round(total_dist_km, 1),
             },
         })
 
@@ -880,6 +1046,8 @@ def _build_geojson(
                 "name": waypoints[-1].get("name", "Destination"),
                 "marker-color": "#ef4444",
                 "marker-symbol": "harbor",
+                "total_distance_nm": total_dist_nm,
+                "total_distance_km": round(total_dist_km, 1),
             },
         })
 
@@ -964,6 +1132,9 @@ def _assemble_route(
     mode: str = "safest",
 ) -> Dict[str, Any]:
     """Assemble complete route metadata, legs, GeoJSON, and metrics for a specific mode."""
+    # Ensure realistic maritime passage waypoints (never an empty 2-point line)
+    path = _densify_nautical_waypoints(path, passable_map, min_waypoints=5, max_leg_km=22.0)
+
     meta = ROUTE_MODE_META.get(mode, ROUTE_MODE_META["safest"])
     waypoints: List[Dict[str, Any]] = []
     legs: List[Dict[str, Any]] = []
@@ -974,6 +1145,7 @@ def _assemble_route(
     cumulative_hours = 0.0
     pfz_count = 0
 
+    n_pts = len(path)
     for i, key in enumerate(path):
         node = passable_map[key]
         raw_risk = node.risk_score
@@ -992,9 +1164,19 @@ def _assemble_route(
         }
 
         if i == 0:
-            wp["name"] = start_name
-        elif i == len(path) - 1:
-            wp["name"] = end_name
+            wp["name"] = f"⚓ Departure: {start_name}"
+        elif i == n_pts - 1:
+            wp["name"] = f"🏁 Destination: {end_name}"
+        else:
+            pct = round((i / (n_pts - 1)) * 100)
+            if i == 1 and n_pts > 3:
+                wp["name"] = f"WPT 1: Outer Channel Buoy ({pct}% voyage)"
+            elif i == n_pts - 2 and n_pts > 3:
+                wp["name"] = f"WPT {i}: Catch Ground Approach Fix ({pct}% voyage)"
+            elif pct < 50:
+                wp["name"] = f"WPT {i}: Mid-Passage Transit Mark ({pct}% voyage)"
+            else:
+                wp["name"] = f"WPT {i}: Deepwater Passage Sounding ({pct}% voyage)"
 
         waypoints.append(wp)
         risk_scores.append(node_risk)
@@ -1010,10 +1192,17 @@ def _assemble_route(
             cumulative_hours += leg_time
             arrival = dep_time + timedelta(hours=cumulative_hours)
 
+            leg_bearing = round(compute_bearing(prev_node.lat, prev_node.lon, node.lat, node.lon), 1)
+            leg_cardinal = bearing_to_cardinal(leg_bearing)
+            leg_nm = round(leg_dist * 0.539957, 1)
+
             leg = {
                 "from": {"lat": prev_node.lat, "lon": prev_node.lon},
                 "to": {"lat": node.lat, "lon": node.lon},
                 "distance_km": round(leg_dist, 1),
+                "distance_nm": leg_nm,
+                "bearing_deg": leg_bearing,
+                "bearing_cardinal": leg_cardinal,
                 "risk_score": round((prev_node.risk_score + node.risk_score) / 2, 1),
                 "risk_label": _risk_label((prev_node.risk_score + node.risk_score) / 2),
                 "wave_height_m": round(node.wave_height_m, 2),

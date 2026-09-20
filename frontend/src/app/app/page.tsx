@@ -729,6 +729,7 @@ function AppWorkspace() {
                 locationName={activeLocationName}
                 snapshot={marineSnapshot}
                 onWhyThisResult={() => setIsWhyModalOpen(true)}
+                language={currentLanguage}
                 className="w-full h-full rounded-2xl border border-[var(--border)] shadow-2xs overflow-hidden"
               />
             </div>
