@@ -178,11 +178,11 @@ export const SidebarDashboard: React.FC<Props> = ({
 
         {isQuickPlacesOpen && (
           <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-[var(--border)]">
-            {QUICK_PLACES.map((p) => (
+            {(t.locationCapsules || QUICK_PLACES).map((p: any) => (
               <button
                 key={p.name}
                 type="button"
-                onClick={() => onSelectLocation(p.name)}
+                onClick={() => p.query ? onSelectPrompt(p.query) : onSelectLocation(p.name)}
                 className="px-3.5 py-2 rounded-full text-xs font-medium bg-[var(--surface-muted)] hover:bg-[var(--foam)] text-[var(--ink)] border border-[var(--border)] hover:border-[var(--current)] transition-all min-h-[48px] flex items-center justify-center cursor-pointer"
               >
                 {p.name}

@@ -10,6 +10,7 @@ import { FeaturesSection } from "@/components/landing/FeaturesSection";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LanguageToggle } from "@/components/common/LanguageToggle";
 import { LanguageCode, LiveConditionsSummary } from "@/lib/types";
+import { translations } from "@/lib/i18n";
 import { ArrowRight } from "lucide-react";
 import { useLocation } from "@/lib/locationContext";
 import { LocationSelector } from "@/components/location/LocationSelector";
@@ -18,6 +19,7 @@ export default function Home() {
   const router = useRouter();
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>("en");
   const { selectedLocation, marineContext } = useLocation();
+  const t = translations[currentLanguage] || translations.en;
 
   const [liveConditions, setLiveConditions] = useState<LiveConditionsSummary>({
     locationName: selectedLocation?.name || "Coastal Harbour",
@@ -68,19 +70,19 @@ export default function Home() {
               href="#how-it-works"
               className="hover:text-[var(--current)] transition-colors tracking-editorial uppercase"
             >
-              PIPELINE
+              {t.navPipeline}
             </a>
             <a
               href="#why-this-matters"
               className="hover:text-[var(--current)] transition-colors tracking-editorial uppercase"
             >
-              WHY THIS MATTERS
+              {t.navWhyMatters}
             </a>
             <a
               href="#features"
               className="hover:text-[var(--current)] transition-colors tracking-editorial uppercase"
             >
-              WHAT TARANG DOES
+              {t.navFeatures}
             </a>
           </nav>
         </div>
@@ -104,7 +106,7 @@ export default function Home() {
             href="/app"
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[var(--ink)] text-white text-xs font-sans font-medium hover:bg-[var(--current)] transition-all shadow-xs cursor-pointer"
           >
-            <span>Launch App</span>
+            <span>{t.launchApp}</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -131,7 +133,7 @@ export default function Home() {
         </div>
 
         {/* Quiet Hairline Footer (PRD Part 0) */}
-        <LandingFooter />
+        <LandingFooter language={currentLanguage} />
       </main>
     </div>
   );

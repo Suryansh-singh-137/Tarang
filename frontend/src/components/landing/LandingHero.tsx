@@ -77,7 +77,7 @@ export const LandingHero: React.FC<Props> = ({
           <div className="max-w-[520px]">
             {/* Small mono eyebrow label */}
             <div className="font-mono-data text-[11px] text-[var(--ink-muted)] tracking-widest uppercase mb-5 sm:mb-6">
-              CURRENT SURVEILLANCE
+              {t.heroEyebrow}
             </div>
 
             {/* Hero headline — Instrument Serif italic, large, tight leading */}

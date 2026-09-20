@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { LanguageCode } from "@/lib/types";
+import { translations } from "@/lib/i18n";
 
 interface Props {
   language: LanguageCode;
@@ -19,7 +20,7 @@ interface StatDef {
   source: string;
 }
 
-const STATS_DATA: Partial<Record<LanguageCode, StatDef[]>> = {
+const STATS_DATA: Record<LanguageCode, StatDef[]> = {
   en: [
     {
       target: 7516,
@@ -116,6 +117,198 @@ const STATS_DATA: Partial<Record<LanguageCode, StatDef[]>> = {
       source: "தாரங் ஆதாரச் சரிபார்ப்பு உத்தரவாதம்",
     },
   ],
+  gu: [
+    {
+      target: 7516,
+      suffix: " કિમી",
+      label: "દરિયાકાંઠાની દેખરેખ",
+      title: "સક્રિય તટીય પરિમિતિ",
+      description: "૯ તટીય રાજ્યો અને ૪ કેન્દ્રશાસિત પ્રદેશોમાં ભારતીય મુખ્ય ભૂમિ અને ટાપુઓના દરિયાકાંઠાનું સતત વિશ્લેષણ.",
+      source: "બંદરો, શિપિંગ અને જળમાર્ગ મંત્રાલય",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "ઉતરાણ કેન્દ્રો",
+      title: "બંદરો અને મત્સ્ય ઉતરાણ સ્થળો",
+      description: "વાસ્તવિક સમયના દરિયાઈ સ્થિતિ મૉડલ સાથે નકશા પર દર્શાવેલ પરંપરાગત મત્સ્ય કેન્દ્રો અને મુખ્ય બંદરો.",
+      source: "CMFRI દરિયાઈ મત્સ્યજનગણના",
+    },
+    {
+      target: 6,
+      label: "વિશેષજ્ઞ એજન્ટો",
+      title: "ડોમેન ઈન્ટેલિજન્સ યુનિટ્સ",
+      description: "હવામાન, મોજાં, ક્લોરોફિલ PFZ, વાવાઝોડાની ચેતવણીઓ અને આંતરરાષ્ટ્રીય દરિયાઈ સીમાઓની પુષ્ટિ કરતા વિશેષજ્ઞ એજન્ટો.",
+      source: "તરંગ મલ્ટી-એજન્ટ મહાસાગર પ્રણાલી",
+    },
+    {
+      target: 0,
+      label: "ખોટા દાવા",
+      title: "શૂન્ય ભ્રમ સહિષ્ણુતા",
+      description: "બધા જવાબો ૧૦૦% પ્રમાણિત અને વૈજ્ઞાનિક પુરાવા પર આધારિત છે. સુરક્ષા-સંવેદનશીલ નિર્ણયોમાં કોઈ અનુમાન નહીં.",
+      source: "તરંગ પુરાવા ચકાસણી માળખું",
+    },
+  ],
+  bn: [
+    {
+      target: 7516,
+      suffix: " কিমি",
+      label: "উপকূলীয় পর্যবেক্ষণ",
+      title: "সক্রিয় উপকূলীয় পরিধি",
+      description: "৯টি উপকূলীয় রাজ্য এবং ৪টি কেন্দ্রশাসিত অঞ্চল জুড়ে ভারতীয় মূল ভূখণ্ড ও দ্বীপপুঞ্জের উপকূলরেখা ক্রমাগত বিশ্লেষিত।",
+      source: "বন্দর, জাহাজ ও জলপথ মন্ত্রণালয়",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "ল্যান্ডিং কেন্দ্র",
+      title: "বন্দর ও মাছ ধরার কেন্দ্র",
+      description: "রিয়েল-টাইম সমুদ্র পরিস্থিতির মডেল সহ ঐতিহ্যবাহী মাছ ধরার ঘাট ও প্রধান বন্দর মানচিত্রায়িত।",
+      source: "CMFRI সামুদ্রিক মৎস্য শুমারি",
+    },
+    {
+      target: 6,
+      label: "বিশেষজ্ঞ এজেন্ট",
+      title: "ডোমেন বিশ্লেষণ ইউনিট",
+      description: "আবহাওয়া, ঢেউ, ক্লোরোফিল পিএফজেড, ঘূর্ণিঝড় এবং আন্তর্জাতিক সামুদ্রিক সীমানা যাচাইকারী বিশেষ এজেন্ট।",
+      source: "তরঙ্গ মাল্টি-এজেন্ট ব্যবস্থা",
+    },
+    {
+      target: 0,
+      label: "ভিত্তিহীন দাবি",
+      title: "শূন্য অনিশ্চয়তা নিশ্চয়তা",
+      description: "সমস্ত উত্তর শতভাগ সুনির্দিষ্ট এবং সরকারি তথ্যে প্রমাণিত। নিরাপত্তাজনিত সিদ্ধান্তে কোনো কাল্পনিক অনুমানের স্থান নেই।",
+      source: "তরঙ্গ প্রমাণ যাচাইকরণ কাঠামো",
+    },
+  ],
+  te: [
+    {
+      target: 7516,
+      suffix: " కి.మీ",
+      label: "తీరప్రాంత పర్యవేక్షణ",
+      title: "క్రియాశీల తీర పరిధి",
+      description: "9 తీరప్రాంత రాష్ట్రాలు, 4 కేంద్రపాలిత ప్రాంతాలలో భారత ప్రధాన భూభాగం మరియు ద్వీప తీరప్రాంతం నిరంతర విశ్లేషణ.",
+      source: "నౌకాశ్రయాలు, షిప్పింగ్ మరియు జలమార్గాల మంత్రిత్వ శాఖ",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "ల్యాండింగ్ కేంద్రాలు",
+      title: "రేవులు మరియు చేపల ల్యాండింగ్ ప్రాంతాలు",
+      description: "నిజ-సమయ సముద్ర పరిస్థితుల నమూనాలతో మ్యాప్ చేయబడిన సంప్రదాయ చేపల ల్యాండింగ్ కేంద్రాలు మరియు ప్రధాన రేవులు.",
+      source: "CMFRI సముద్ర మత్స్య గణన",
+    },
+    {
+      target: 6,
+      label: "నిపుణ ఏజెంట్లు",
+      title: "రంగ నిఘా విభాగాలు",
+      description: "వాతావరణం, అలలు, క్లోరోఫిల్ PFZ, తుఫాను హెచ్చరికలు మరియు అంతర్జాతీయ సముద్ర సరిహద్దులను ధృవీకరించే ప్రత్యేక ఏజెంట్లు.",
+      source: "తరంగ్ మల్టీ-ఏజెంట్ మహాసముద్ర వ్యవస్థ",
+    },
+    {
+      target: 0,
+      label: "కల్పిత వాదనలు",
+      title: "సున్నా భ్రమ సహనం",
+      description: "ప్రతి సమాధానం 100% ఖచ్చితమైనది మరియు నిరూపిత ఆధారాలతో కూడినది. భద్రతా మార్గంలో ఊహాగానాలకు తావులేదు.",
+      source: "తరంగ్ నిరూపిత ఆధారాల నిర్మాణం",
+    },
+  ],
+  ml: [
+    {
+      target: 7516,
+      suffix: " കി.മീ",
+      label: "തീരദേശ നിരീക്ഷണം",
+      title: "സജീവ തീരദേശ ചുറ്റളവ്",
+      description: "9 തീരദേശ സംസ്ഥാനങ്ങളിലെയും 4 കേന്ദ്രഭരണ പ്രദേശങ്ങളിലെയും ഇന്ത്യൻ തീരപ്രദേശങ്ങളുടെ നിരന്തരമായ സുരക്ഷാ വിശകലനം.",
+      source: "തുറമുഖ, കപ്പൽ ഗതാഗത മന്ത്രാലയം",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "ലാൻഡിംഗ് കേന്ദ്രങ്ങൾ",
+      title: "തുറമുഖങ്ങളും ഫിഷ് ലാൻഡിംഗ് കേന്ദ്രങ്ങളും",
+      description: "തത്സമയ കടൽ അവസ്ഥാ മോഡലുകൾ ഉപയോഗിച്ച് മാപ്പ് ചെയ്ത പരമ്പരാഗത ഫിഷ് ലാൻഡിംഗ് കേന്ദ്രങ്ങളും പ്രധാന തുറമുഖങ്ങളും.",
+      source: "CMFRI മറൈൻ ഫിഷറീസ് സെൻസസ്",
+    },
+    {
+      target: 6,
+      label: "വിദഗ്ദ്ധ ഏജന്റുകൾ",
+      title: "ഡൊമെയ്ൻ ഇന്റലിജൻസ് യൂണിറ്റുകൾ",
+      description: "കാലാവസ്ഥ, തിരമാലകൾ, ക്ലോറോഫിൽ PFZ, ചുഴലിക്കാറ്റ് മുന്നറിയിപ്പുകൾ, അന്താരാഷ്ട്ര സമുദ്ര അതിർത്തികൾ എന്നിവ പരിശോധിക്കുന്ന ഏജന്റുകൾ.",
+      source: "തരംഗ് മൾട്ടി-ഏജന്റ് സിസ്റ്റം",
+    },
+    {
+      target: 0,
+      label: "വ്യാജ അവകാശവാദങ്ങൾ",
+      title: "പൂർണ്ണ കൃത്യത",
+      description: "എല്ലാ ഉത്തരങ്ങളും 100% ശാസ്ത്രീയ ഡാറ്റയെ അടിസ്ഥാനമാക്കിയുള്ളതാണ്. സുരക്ഷാ തീരുമാനങ്ങളിൽ ഊഹങ്ങൾക്ക് സ്ഥാനമില്ല.",
+      source: "തരംഗ് എവിഡൻസ് വെരിഫിക്കേഷൻ",
+    },
+  ],
+  mr: [
+    {
+      target: 7516,
+      suffix: " किमी",
+      label: "किनारपट्टी देखरेख",
+      title: "सक्रिय सागरी परिमिती",
+      description: "९ किनारी राज्ये आणि ४ केंद्रशासित प्रदेशांमध्ये भारताची मुख्य भूमी व बेटांच्या किनारपट्टीचे सातत्यपूर्ण विश्लेषण.",
+      source: "बंदरे, नौवहन आणि जलमार्ग मंत्रालय",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "लँडिंग केंद्रे",
+      title: "बंदरे आणि मासळी उतरवण केंद्रे",
+      description: "थेट सागरी परिस्थितीच्या मॉडेल्ससह नकाशावर आणलेली पारंपरिक मासळी उतरवण केंद्रे आणि प्रमुख मासेमारी बंदरे.",
+      source: "CMFRI सागरी मत्स्यव्यवसाय जनगणना",
+    },
+    {
+      target: 6,
+      label: "विशेषज्ञ एजंट्स",
+      title: "डोमेन विश्लेषण युनिट्स",
+      description: "हवामान, लाटा, क्लोरोफिल मासेमारी क्षेत्र, चक्रीवादळ इशारे आणि सागरी सीमा यांची खातरजमा करणारे सहा स्वतंत्र एजंट्स.",
+      source: "तरंग मल्टी-एजंट प्रणाली",
+    },
+    {
+      target: 0,
+      label: "खोटे दावे",
+      title: "शून्य अनिश्चितता हमी",
+      description: "प्रत्येक उत्तर १००% वस्तुनिष्ठ आणि वैज्ञानिक पुराव्यांवर आधारित आहे. सुरक्षिततेच्या मार्गात अनुमानांना थारा नाही.",
+      source: "तरंग पुरावा पडताळणी रचना",
+    },
+  ],
+  od: [
+    {
+      target: 7516,
+      suffix: " କି.ମି",
+      label: "ଉପକୂଳ ନିରୀକ୍ଷଣ",
+      title: "ସକ୍ରିୟ ଉପକୂଳ ପରିଧି",
+      description: "୯ଟି ଉପକୂଳ ରାଜ୍ୟ ଓ ୪ଟି କେନ୍ଦ୍ରଶାସିତ ଅଞ୍ଚଳରେ ଭାରତୀୟ ମୁଖ୍ୟ ଭୂମି ଏବଂ ଦ୍ୱୀପପୁଞ୍ଜର ଉପକୂଳ ନିରନ୍ତର ବିଶ୍ଳେଷିତ।",
+      source: "ବନ୍ଦର, ଜାହାଜ ଚଳାଚଳ ଏବଂ ଜଳପଥ ମନ୍ତ୍ରଣାଳୟ",
+    },
+    {
+      target: 1265,
+      suffix: "+",
+      label: "ମତ୍ସ୍ୟ ଅବତରଣ କେନ୍ଦ୍ର",
+      title: "ବନ୍ଦର ଓ ମାଛ ଅବତରଣ ସ୍ଥଳ",
+      description: "ପ୍ରତ୍ୟକ୍ଷ ସାମୁଦ୍ରିକ ସ୍ଥିତି ମଡେଲ ସହିତ ମାନଚିତ୍ରିତ ପାରମ୍ପରିକ ମାଛ ଅବତରଣ କେନ୍ଦ୍ର ଓ ପ୍ରମୁଖ ମାଛଧରା ବନ୍ଦର।",
+      source: "CMFRI ସାମୁଦ୍ରିକ ମତ୍ସ୍ୟ ଗଣନା",
+    },
+    {
+      target: 6,
+      label: "ବିଶେଷଜ୍ଞ ଏଜେଣ୍ଟ",
+      title: "ବିଶ୍ଳେଷଣ ୟୁନିଟ୍",
+      description: "ପାଣିପାଗ, ଢେଉ, କ୍ଲୋରୋଫିଲ୍ PFZ, ବାତ୍ୟା ସତର୍କତା ଓ ଆନ୍ତର୍ଜାତୀୟ ସାମୁଦ୍ରିକ ସୀମା ଯାଞ୍ଚ କରୁଥିବା ୬ଟି ଏଜେଣ୍ଟ।",
+      source: "ତରଙ୍ଗ ମଲ୍ଟି-ଏଜେଣ୍ଟ ମହାସାଗର ବ୍ୟବସ୍ଥା"
+    },
+    {
+      target: 0,
+      label: "କଳ୍ପିତ ଦାବି",
+      title: "ଶୂନ୍ୟ ଭ୍ରାନ୍ତି ସହନଶୀଳତା",
+      description: "ସମସ୍ତ ଉତ୍ତର ୧୦୦% ନିର୍ଦ୍ଦିଷ୍ଟ ଏବଂ ପ୍ରମାଣ-ଆଧାରିତ। ସୁରକ୍ଷା ନିଷ୍ପତ୍ତିରେ କୌଣସି କାଳ୍ପନିକ ଅନୁମାନ ନାହିଁ।",
+      source: "ତରଙ୍ଗ ପ୍ରମାଣ ଯାଞ୍ଚ ବ୍ୟବସ୍ଥା"
+    },
+  ],
 };
 
 // Custom animated counter component
@@ -201,6 +394,7 @@ export const WhyThisMattersSection: React.FC<Props> = ({
     return () => observer.disconnect();
   }, []);
 
+  const t = translations[language] || translations.en;
   const stats = STATS_DATA[language] || STATS_DATA.en!;
 
   return (
@@ -216,7 +410,7 @@ export const WhyThisMattersSection: React.FC<Props> = ({
             hasEntered ? "reveal-visible" : "reveal-init"
           }`}
         >
-          WHY THIS MATTERS
+          {t.whyMattersEyebrow}
         </div>
 
         {/* Section Headline */}
@@ -226,10 +420,10 @@ export const WhyThisMattersSection: React.FC<Props> = ({
           }`}
         >
           <h2 className="font-serif-display text-2xl sm:text-3xl lg:text-4xl font-normal text-[var(--ink)] tracking-tight leading-snug">
-            Real scale, honest boundaries, zero fabricated claims.
+            {t.whyMattersHeadline}
           </h2>
           <p className="font-sans text-sm sm:text-base text-[var(--ink-muted)] mt-3 leading-relaxed">
-            Every statistic and safety decision is backed by live satellite feeds, government marine census records, and deterministic safety rules.
+            {t.whyMattersSub}
           </p>
         </div>
 
@@ -291,10 +485,10 @@ export const WhyThisMattersSection: React.FC<Props> = ({
         >
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-            <span>All metrics verifiable against official national gazettes and Open Science repositories.</span>
+            <span>{t.whyMattersFooter}</span>
           </div>
           <div className="text-[10px] tracking-wider uppercase text-[var(--ink-muted)]">
-            EST. 2024 / PROVENANCE VERIFIED
+            {t.whyMattersVerified}
           </div>
         </div>
       </div>

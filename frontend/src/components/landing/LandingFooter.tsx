@@ -1,6 +1,9 @@
 import React from "react";
+import { LanguageCode } from "@/lib/types";
+import { translations } from "@/lib/i18n";
 
 interface Props {
+  language?: LanguageCode;
   className?: string;
 }
 
@@ -9,7 +12,9 @@ interface Props {
  * "One hairline rule, wordmark, one line of context. Small and quiet,
  * not a heavy multi-column SaaS footer with a dozen links."
  */
-export const LandingFooter: React.FC<Props> = ({ className = "" }) => {
+export const LandingFooter: React.FC<Props> = ({ language = "en", className = "" }) => {
+  const t = translations[language] || translations.en;
+
   return (
     <footer className={`border-t border-[var(--border)] py-8 sm:py-10 ${className}`}>
       <div className="max-w-[1200px] mx-auto w-full px-6 sm:px-10 lg:px-16 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -21,7 +26,7 @@ export const LandingFooter: React.FC<Props> = ({ className = "" }) => {
             /
           </span>
           <span className="font-mono-data text-[11px] text-[var(--ink-subtle)]">
-            Built for ISRO Hackathon 2026 · Coastal systems for India&apos;s fishing communities
+            {t.footerTagline}
           </span>
         </div>
 
