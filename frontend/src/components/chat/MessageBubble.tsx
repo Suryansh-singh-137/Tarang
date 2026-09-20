@@ -177,7 +177,7 @@ export const MessageBubble: React.FC<Props> = ({
       setIsLoadingAudio(true);
       const audioBlob = await synthesizeSpeech(message.content, message.language || language || "en");
       console.log(`[TTS] Received audio blob (${audioBlob.size} bytes, type: ${audioBlob.type})`);
-      
+
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 

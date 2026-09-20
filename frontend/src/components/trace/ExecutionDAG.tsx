@@ -291,33 +291,30 @@ export const ExecutionDAG: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setFilterMode("all")}
-            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${
-              filterMode === "all"
+            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${filterMode === "all"
                 ? "bg-[var(--surface)] text-[var(--ink)] shadow-2xs font-semibold"
                 : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
-            }`}
+              }`}
           >
             All Nodes (11)
           </button>
           <button
             type="button"
             onClick={() => setFilterMode("active")}
-            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${
-              filterMode === "active"
+            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${filterMode === "active"
                 ? "bg-[var(--surface)] text-[var(--ink)] shadow-2xs font-semibold"
                 : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
-            }`}
+              }`}
           >
             Active Path
           </button>
           <button
             type="button"
             onClick={() => setFilterMode("specialists")}
-            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${
-              filterMode === "specialists"
+            className={`px-3 py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${filterMode === "specialists"
                 ? "bg-[var(--surface)] text-[var(--ink)] shadow-2xs font-semibold"
                 : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
-            }`}
+              }`}
           >
             Specialists Only
           </button>
@@ -354,11 +351,10 @@ export const ExecutionDAG: React.FC<Props> = ({
                     key={node.id}
                     type="button"
                     onClick={() => setSelectedNodeId(node.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
-                      isSelected
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${isSelected
                         ? "border-[var(--current)] bg-[var(--foam)]/40 shadow-xs ring-2 ring-[var(--current)]/20"
                         : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]/60"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -420,11 +416,10 @@ export const ExecutionDAG: React.FC<Props> = ({
                     key={node.id}
                     type="button"
                     onClick={() => setSelectedNodeId(node.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
-                      isSelected
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${isSelected
                         ? "border-[var(--current)] bg-[var(--foam)]/40 shadow-xs ring-2 ring-[var(--current)]/20"
                         : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]/60"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -477,11 +472,10 @@ export const ExecutionDAG: React.FC<Props> = ({
                     key={node.id}
                     type="button"
                     onClick={() => setSelectedNodeId(node.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
-                      isSelected
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${isSelected
                         ? "border-[var(--current)] bg-[var(--foam)]/40 shadow-xs ring-2 ring-[var(--current)]/20"
                         : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]/60"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
@@ -539,13 +533,12 @@ export const ExecutionDAG: React.FC<Props> = ({
           <div className="p-3.5 rounded-xl bg-[var(--surface-muted)]/70 border border-[var(--border)] space-y-2">
             <span className="text-[10px] font-bold text-[var(--ink-subtle)] uppercase tracking-wider font-mono-data flex items-center justify-between">
               <span>Active Query Execution</span>
-              <span className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase font-bold ${
-                selectedStatus.status === "success"
+              <span className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase font-bold ${selectedStatus.status === "success"
                   ? "bg-emerald-100 text-emerald-800"
                   : selectedStatus.status === "skipped"
-                  ? "bg-slate-200 text-slate-700"
-                  : "bg-amber-100 text-amber-800"
-              }`}>
+                    ? "bg-slate-200 text-slate-700"
+                    : "bg-amber-100 text-amber-800"
+                }`}>
                 {selectedStatus.status}
               </span>
             </span>

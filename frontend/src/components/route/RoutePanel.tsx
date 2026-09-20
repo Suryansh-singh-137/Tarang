@@ -21,10 +21,14 @@ import {
   Fuel,
   Sparkles,
   CheckCircle2,
+  ArrowUpDown,
+  Compass,
 } from "lucide-react";
 import { RouteResult, RouteLeg, RiskLabel, MapGeoJSON, RouteMode, RouteProfileData } from "@/lib/types";
 import { planRoute, PlanRouteOptions } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/api";
+import { RouteLocationPickerModal, RoutePoint } from "./RouteLocationPickerModal";
+import { useLocation } from "@/lib/locationContext";
 
 interface Props {
   onRouteResult?: (geojson: MapGeoJSON) => void;
@@ -40,6 +44,9 @@ interface LocationSuggestion {
 }
 
 export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) => {
+  const { selectedLocation } = useLocation();
+  const hasInitialized = useRef(false);
+
   // Form state
   const [startQuery, setStartQuery] = useState("");
   const [endQuery, setEndQuery] = useState("");
@@ -47,6 +54,46 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
   const [endLocation, setEndLocation] = useState<LocationSuggestion | null>(null);
   const [departureTime, setDepartureTime] = useState("");
   const [includePfz, setIncludePfz] = useState(true);
+
+  // Interactive Map Picker Modal state
+  const [isPickerModalOpen, setIsPickerModalOpen] = useState(false);
+  const [modalTarget, setModalTarget] = useState<"start" | "end">("start");
+
+  // Prepopulate start location from active global location if unset
+  useEffect(() => {
+    if (!hasInitialized.current && selectedLocation) {
+      hasInitialized.current = true;
+      setStartLocation({
+        name: selectedLocation.name,
+        display_name: selectedLocation.display_name,
+        lat: selectedLocation.lat,
+        lon: selectedLocation.lon,
+        state: selectedLocation.state,
+      });
+      setStartQuery(selectedLocation.name);
+    }
+  }, [selectedLocation]);
+
+  const handleSelectFromModal = (point: RoutePoint) => {
+    if (modalTarget === "start") {
+      setStartLocation(point);
+      setStartQuery(point.name);
+      setShowStartSuggestions(false);
+    } else {
+      setEndLocation(point);
+      setEndQuery(point.name);
+      setShowEndSuggestions(false);
+    }
+  };
+
+  const handleSwapPoints = () => {
+    const prevStart = startLocation;
+    const prevStartQuery = startQuery;
+    setStartLocation(endLocation);
+    setStartQuery(endQuery);
+    setEndLocation(prevStart);
+    setEndQuery(prevStartQuery);
+  };
 
   // Search suggestions
   const [startSuggestions, setStartSuggestions] = useState<LocationSuggestion[]>([]);
@@ -206,7 +253,24 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 space-y-3">
         {/* Start Location */}
         <div ref={startRef} className="relative">
-          <label className="text-xs font-medium text-[var(--ink-muted)] mb-1 block">From</label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20" />
+              Departure Harbor / Coast (From)
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setModalTarget("start");
+                setIsPickerModalOpen(true);
+              }}
+              className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 px-2.5 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800 flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] shadow-xs active:scale-95"
+              title="Pick departure harbor or coordinates on map"
+            >
+              <Compass className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>🗺️ Pick on Map</span>
+            </button>
+          </div>
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
             <input
@@ -218,11 +282,11 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
                 debouncedSearch(e.target.value, "start");
               }}
               placeholder="Search departure port or coast..."
-              className="w-full pl-9 pr-3 py-2.5 text-sm bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0C6E8C]/30 focus:border-[#0C6E8C] text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
+              className="w-full pl-9 pr-24 py-2.5 text-sm bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0C6E8C]/30 focus:border-[#0C6E8C] text-[var(--ink)] placeholder:text-[var(--ink-muted)] font-medium"
             />
             {startLocation && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
-                ✓ Set
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold border border-emerald-300/40 truncate max-w-[120px]">
+                ✓ {startLocation.lat.toFixed(2)}°, {startLocation.lon.toFixed(2)}°
               </span>
             )}
           </div>
@@ -246,18 +310,48 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
           )}
         </div>
 
-        {/* Direction Arrow */}
-        <div className="flex justify-center">
-          <div className="w-8 h-8 rounded-full bg-[var(--surface-muted)] flex items-center justify-center">
-            <ArrowRight className="w-4 h-4 text-[var(--ink-muted)] rotate-90" />
+        {/* Direction Arrow and Swap Controls */}
+        <div className="flex items-center justify-center relative py-1">
+          <div className="h-px bg-[var(--border)] w-full absolute inset-0 my-auto" />
+          <div className="flex items-center gap-2 relative z-10 bg-[var(--surface)] px-2">
+            <div className="w-7 h-7 rounded-full bg-[var(--surface-muted)] border border-[var(--border)] flex items-center justify-center text-[var(--ink-muted)] shadow-2xs">
+              <ArrowRight className="w-3.5 h-3.5 rotate-90" />
+            </div>
+            <button
+              type="button"
+              onClick={handleSwapPoints}
+              disabled={!startLocation && !endLocation}
+              title="Swap Departure and Destination"
+              className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold text-[var(--ink-muted)] hover:text-[#0C6E8C] bg-[var(--surface-muted)] hover:bg-[var(--surface)] border border-[var(--border)] rounded-full transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs active:scale-95"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-[#0C6E8C]" />
+              <span>Swap</span>
+            </button>
           </div>
         </div>
 
         {/* End Location */}
         <div ref={endRef} className="relative">
-          <label className="text-xs font-medium text-[var(--ink-muted)] mb-1 block">To</label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-semibold text-[var(--ink)] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-500/20" />
+              Destination / Fishing Zone (To)
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setModalTarget("end");
+                setIsPickerModalOpen(true);
+              }}
+              className="text-[11px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 px-2.5 py-0.5 rounded-lg border border-rose-200 dark:border-rose-800 flex items-center gap-1 cursor-pointer transition-all hover:scale-[1.02] shadow-xs active:scale-95"
+              title="Pick destination fishing ground or port on map"
+            >
+              <Compass className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              <span>🗺️ Pick on Map</span>
+            </button>
+          </div>
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-500" />
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-500" />
             <input
               type="text"
               value={endQuery}
@@ -267,11 +361,11 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
                 debouncedSearch(e.target.value, "end");
               }}
               placeholder="Search destination coast or port..."
-              className="w-full pl-9 pr-3 py-2.5 text-sm bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0C6E8C]/30 focus:border-[#0C6E8C] text-[var(--ink)] placeholder:text-[var(--ink-muted)]"
+              className="w-full pl-9 pr-24 py-2.5 text-sm bg-[var(--surface-muted)] border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0C6E8C]/30 focus:border-[#0C6E8C] text-[var(--ink)] placeholder:text-[var(--ink-muted)] font-medium"
             />
             {endLocation && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">
-                ✓ Set
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded-full font-semibold border border-rose-300/40 truncate max-w-[120px]">
+                ✓ {endLocation.lat.toFixed(2)}°, {endLocation.lon.toFixed(2)}°
               </span>
             )}
           </div>
@@ -646,6 +740,16 @@ export const RoutePanel: React.FC<Props> = ({ onRouteResult, onNavigateToMap }) 
           </div>
         </div>
       )}
+
+      {/* Interactive Map Location Picker Modal */}
+      <RouteLocationPickerModal
+        mode={modalTarget}
+        isOpen={isPickerModalOpen}
+        onClose={() => setIsPickerModalOpen(false)}
+        onSelect={handleSelectFromModal}
+        currentPoint={modalTarget === "start" ? startLocation : endLocation}
+        otherPoint={modalTarget === "start" ? endLocation : startLocation}
+      />
     </div>
   );
 };

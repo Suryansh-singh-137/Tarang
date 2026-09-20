@@ -7,6 +7,7 @@ import { MapGeoJSON, RiskLabel, MarineSnapshot } from "@/lib/types";
 import { useLocation } from "@/lib/locationContext";
 import { synthesizeSpeech } from "@/lib/api";
 import { LANGUAGES } from "../common/LanguageToggle";
+import { MapLocationControl } from "./MapLocationControl";
 
 function formatDDM(lat: number, lon: number): string {
   const latDeg = Math.floor(Math.abs(lat));
@@ -130,8 +131,35 @@ export const MarineMap: React.FC<Props> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoadingVoice, setIsLoadingVoice] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [isPickingOnMap, setIsPickingOnMap] = useState(false);
+  const [clickedPoint, setClickedPoint] = useState<{ lat: number; lon: number } | null>(null);
+  const pickedMarkerRef = useRef<any>(null);
 
   const hasGeoData = Boolean(geoJson && geoJson.features && geoJson.features.length > 0);
+
+  const handleClearClickedPoint = () => {
+    setClickedPoint(null);
+    if (pickedMarkerRef.current && mapInstanceRef.current) {
+      mapInstanceRef.current.removeLayer(pickedMarkerRef.current);
+      pickedMarkerRef.current = null;
+    }
+  };
+
+  const handleConfirmClickedPoint = async (lat: number, lon: number) => {
+    await selectCoordinates(lat, lon, undefined, "map");
+    setClickedPoint(null);
+    setIsPickingOnMap(false);
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setView([lat, lon], Math.max(mapInstanceRef.current.getZoom(), 8));
+    }
+  };
+
+  // Pan to selected location when changed externally
+  useEffect(() => {
+    if (mapInstanceRef.current && selectedLocation && !hasGeoData) {
+      mapInstanceRef.current.setView([selectedLocation.lat, selectedLocation.lon], 8);
+    }
+  }, [selectedLocation?.lat, selectedLocation?.lon, hasGeoData]);
 
   // Guard SSR
   useEffect(() => {
@@ -175,15 +203,36 @@ export const MarineMap: React.FC<Props> = ({
         map.on("click", (e: any) => {
           const lat = Number(e.latlng.lat.toFixed(4));
           const lon = Number(e.latlng.lng.toFixed(4));
+
+          setClickedPoint({ lat, lon });
+
+          // Drop animated visual marker on Leaflet map
+          if (pickedMarkerRef.current) {
+            pickedMarkerRef.current.setLatLng([lat, lon]);
+          } else {
+            const dropIcon = L.divIcon({
+              className: "picked-pin-marker",
+              html: `
+                <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+                  <div style="position: absolute; width: 36px; height: 36px; background: rgba(2, 132, 199, 0.35); border-radius: 50%; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+                  <div style="width: 20px; height: 20px; background: #0284C7; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.35); z-index: 10;"></div>
+                </div>
+              `,
+              iconSize: [36, 36],
+              iconAnchor: [18, 18],
+            });
+            pickedMarkerRef.current = L.marker([lat, lon], { icon: dropIcon }).addTo(map);
+          }
+
           const btnId = `btn-set-loc-${Math.round(lat * 100)}-${Math.round(lon * 100)}`;
           L.popup()
             .setLatLng(e.latlng)
             .setContent(
               `<div style="font-family: sans-serif; font-size: 12px; padding: 4px; color: #1c1917;">
-                <div style="font-weight: 600; margin-bottom: 2px;">Marine Point</div>
+                <div style="font-weight: 700; color: #0284c7; margin-bottom: 2px;">📍 Selected Marine Point</div>
                 <div style="font-family: monospace; font-size: 11px; color: #57534e; margin-bottom: 6px;">${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E</div>
-                <button id="${btnId}" style="background: #f59e0b; color: #1c1917; border: none; border-radius: 6px; padding: 4px 8px; font-weight: 600; font-size: 11px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                  📍 Set Active Location
+                <button id="${btnId}" style="background: #0284c7; color: white; border: none; border-radius: 6px; padding: 5px 10px; font-weight: 600; font-size: 11px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.15);">
+                  ✅ Set Active Location
                 </button>
               </div>`
             )
@@ -195,6 +244,8 @@ export const MarineMap: React.FC<Props> = ({
               btn.onclick = () => {
                 selectCoordinates(lat, lon, undefined, "map");
                 map.closePopup();
+                setClickedPoint(null);
+                setIsPickingOnMap(false);
               };
             }
           }, 50);
@@ -840,78 +891,93 @@ export const MarineMap: React.FC<Props> = ({
   // ── Active chart state ──
   return (
     <div className={`relative bg-[#E2ECEE] rounded-xl overflow-hidden border border-[var(--border)] shadow-xs flex flex-col ${className}`}>
-      {/* Map Control Toolbar */}
-      <div className="absolute top-3 left-3 z-[1000] bg-white/90 backdrop-blur-xs border border-[var(--border)] rounded-lg p-2 shadow-xs flex items-center gap-3 text-xs text-[var(--ink)]">
-        <div className="flex items-center gap-1.5 font-semibold text-[var(--current)]">
-          <Layers className="w-4 h-4" />
-          <span>Marine Chart</span>
+      {/* Top Controls: Status Toolbar (Left) & Location + Actions (Right) */}
+      <div className="absolute top-3 left-3 right-3 z-[1000] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+        {/* Left: Chart Status Badge */}
+        <div className="bg-white/95 backdrop-blur-xs border border-[var(--border)] rounded-lg p-2 shadow-xs flex items-center gap-3 text-xs text-[var(--ink)] pointer-events-auto">
+          <div className="flex items-center gap-1.5 font-semibold text-[var(--current)]">
+            <Layers className="w-4 h-4" />
+            <span className="hidden sm:inline">Marine Chart</span>
+          </div>
+
+          <div className="h-3.5 w-px bg-[var(--border)]" />
+
+          {/* Dynamic badges */}
+          {!hasGeoData ? (
+            <span className="text-[11px] text-[var(--ink-muted)]">
+              📍 Coastal Waters Overview
+            </span>
+          ) : (
+            <div className="flex items-center gap-2 text-[11px] text-[var(--ink-muted)]">
+              {featuresCount.query && (
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-[var(--current)]" /> Query Point
+                </span>
+              )}
+              {featuresCount.pfz > 0 && (
+                <span className="flex items-center gap-1 font-medium text-[#1B8755]">
+                  <Fish className="w-3 h-3" /> {featuresCount.pfz} PFZ
+                </span>
+              )}
+              {featuresCount.imbl && (
+                <span className="flex items-center gap-1 font-medium text-[#DC2626]">
+                  <AlertTriangle className="w-3 h-3" /> IMBL Line
+                </span>
+              )}
+              {snapshot?.sst?.sst_celsius != null && (
+                <span className="flex items-center gap-1 font-medium text-[#0284C7] bg-[#E0F2FE] px-1.5 py-0.5 rounded border border-[#BAE6FD]" title="Sea Surface Temperature (INCOIS ERDDAP). Thermal indicator only; does not guarantee fish.">
+                  <Thermometer className="w-3 h-3 text-[#0284C7]" />
+                  {snapshot.sst.sst_celsius.toFixed(1)}°C SST
+                  {snapshot.sst.sst_anomaly_c != null && (
+                    <span className="text-[10px] opacity-80">
+                      ({snapshot.sst.sst_anomaly_c >= 0 ? "+" : ""}{snapshot.sst.sst_anomaly_c.toFixed(1)}°)
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="h-3.5 w-px bg-[var(--border)]" />
+        {/* Right: Location Selection + Legend + Recenter */}
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          {/* Map Location Control (Search, Manual Lat/Lon, GPS, Map Click Mode) */}
+          <MapLocationControl
+            isPickingOnMap={isPickingOnMap}
+            onTogglePickOnMap={setIsPickingOnMap}
+            clickedPoint={clickedPoint}
+            onClearClickedPoint={handleClearClickedPoint}
+            onConfirmClickedPoint={handleConfirmClickedPoint}
+          />
 
-        {/* Dynamic badges */}
-        {!hasGeoData ? (
-          <span className="text-[11px] text-[var(--ink-muted)]">
-            📍 Coastal Waters Overview
-          </span>
-        ) : (
-          <div className="flex items-center gap-2 text-[11px] text-[var(--ink-muted)]">
-            {featuresCount.query && (
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-[var(--current)]" /> Query Point
-              </span>
-            )}
-            {featuresCount.pfz > 0 && (
-              <span className="flex items-center gap-1 font-medium text-[#1B8755]">
-                <Fish className="w-3 h-3" /> {featuresCount.pfz} PFZ
-              </span>
-            )}
-            {featuresCount.imbl && (
-              <span className="flex items-center gap-1 font-medium text-[#DC2626]">
-                <AlertTriangle className="w-3 h-3" /> IMBL Line
-              </span>
-            )}
-            {snapshot?.sst?.sst_celsius != null && (
-              <span className="flex items-center gap-1 font-medium text-[#0284C7] bg-[#E0F2FE] px-1.5 py-0.5 rounded border border-[#BAE6FD]" title="Sea Surface Temperature (INCOIS ERDDAP). Thermal indicator only; does not guarantee fish.">
-                <Thermometer className="w-3 h-3 text-[#0284C7]" />
-                {snapshot.sst.sst_celsius.toFixed(1)}°C SST
-                {snapshot.sst.sst_anomaly_c != null && (
-                  <span className="text-[10px] opacity-80">
-                    ({snapshot.sst.sst_anomaly_c >= 0 ? "+" : ""}{snapshot.sst.sst_anomaly_c.toFixed(1)}°)
-                  </span>
-                )}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Action buttons: Info / Legend Toggle + Recenter (Part 1C.1) */}
-      <div className="absolute top-3 right-3 z-[1000] flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => setIsLegendOpen(!isLegendOpen)}
-          className={`p-2 bg-white/90 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer ${
-            isLegendOpen ? "ring-2 ring-[var(--current)]" : ""
-          }`}
-          title="Toggle map symbols legend"
-          aria-label="Toggle map symbols legend"
-        >
-          <HelpCircle className="w-4 h-4 text-[var(--ink-muted)]" />
-        </button>
-        <button
-          type="button"
-          onClick={handleRecenter}
-          className="p-2 bg-white/90 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer"
-          title="Recenter map on active features"
-          aria-label="Recenter map"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+          <button
+            type="button"
+            onClick={() => setIsLegendOpen(!isLegendOpen)}
+            className={`p-2 bg-white/95 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer ${
+              isLegendOpen ? "ring-2 ring-[var(--current)]" : ""
+            }`}
+            title="Toggle map symbols legend"
+            aria-label="Toggle map symbols legend"
+          >
+            <HelpCircle className="w-4 h-4 text-[var(--ink-muted)]" />
+          </button>
+          <button
+            type="button"
+            onClick={handleRecenter}
+            className="p-2 bg-white/95 backdrop-blur-xs hover:bg-white text-[var(--ink)] border border-[var(--border)] rounded-lg shadow-xs transition-colors cursor-pointer"
+            title="Recenter map on active features"
+            aria-label="Recenter map"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Map DOM target */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[350px] z-10" />
+      <div
+        ref={mapContainerRef}
+        className={`w-full h-full min-h-[350px] z-10 ${isPickingOnMap ? "cursor-crosshair" : ""}`}
+      />
 
       {/* Real-World Fisherman Helmsman HUD (Floating Navigation Cockpit when Route is Loaded) */}
       {activeRouteInfo && (
