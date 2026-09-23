@@ -93,6 +93,16 @@ _IMBL_INDONESIA_DEFAULT: list[tuple[float, float]] = [
     (5.45, 96.00),
 ]
 
+# India-Thailand Maritime Boundary (1978 Agreement / Central Andaman Sea)
+# Ordered North to South
+_IMBL_THAILAND_DEFAULT: list[tuple[float, float]] = [
+    (13.50, 96.50),
+    (12.50, 96.80),
+    (11.00, 97.10),
+    (9.50,  97.40),
+    (7.50,  97.60),
+]
+
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return great-circle distance in km between two (lat, lon) points."""
@@ -169,10 +179,24 @@ def distance_to_polyline(
     return min_dist
 
 
-def load_imbl_waypoints() -> list[tuple[float, float]]:
-    """Load IMBL boundary waypoints from GeoJSON file, or fall back to hardcoded."""
+def load_imbl_waypoints(boundary_key: Optional[str] = "sri_lanka") -> list[tuple[float, float]]:
+    """
+    Load IMBL boundary waypoints from GeoJSON file for a specific country/boundary.
+    Defaults to Sri Lanka for backwards compatibility.
+    """
+    defaults_map = {
+        "sri_lanka": _IMBL_SRI_LANKA_DEFAULT,
+        "pakistan": _IMBL_PAKISTAN_DEFAULT,
+        "bangladesh": _IMBL_BANGLADESH_DEFAULT,
+        "maldives": _IMBL_MALDIVES_DEFAULT,
+        "myanmar": _IMBL_MYANMAR_DEFAULT,
+        "indonesia": _IMBL_INDONESIA_DEFAULT,
+        "thailand": _IMBL_THAILAND_DEFAULT,
+    }
+    target = (boundary_key or "sri_lanka").lower()
+
     if not _IMBL_FILE.exists():
-        return _IMBL_SRI_LANKA_DEFAULT
+        return defaults_map.get(target, _IMBL_SRI_LANKA_DEFAULT)
 
     try:
         with open(_IMBL_FILE, "r", encoding="utf-8") as f:
@@ -180,6 +204,17 @@ def load_imbl_waypoints() -> list[tuple[float, float]]:
 
         waypoints: list[tuple[float, float]] = []
         for feature in geojson.get("features", []):
+            props = feature.get("properties", {})
+            feat_name = (
+                props.get("name", "") + " " +
+                props.get("id", "") + " " +
+                props.get("neighbor_country", "")
+            ).lower()
+
+            # If target != "all", filter only to the matching boundary
+            if target != "all" and target not in feat_name:
+                continue
+
             geom = feature.get("geometry", {})
             gtype = geom.get("type", "")
             coords = geom.get("coordinates", [])
@@ -195,9 +230,24 @@ def load_imbl_waypoints() -> list[tuple[float, float]]:
                 lon_c, lat_c = coords[0], coords[1]
                 waypoints.append((lat_c, lon_c))
 
-        return waypoints if len(waypoints) >= 2 else _IMBL_SRI_LANKA_DEFAULT
+        if waypoints:
+            return waypoints
+        return defaults_map.get(target, _IMBL_SRI_LANKA_DEFAULT)
     except Exception:
-        return _IMBL_SRI_LANKA_DEFAULT
+        return defaults_map.get(target, _IMBL_SRI_LANKA_DEFAULT)
+
+
+def load_all_imbl_boundaries() -> dict[str, list[tuple[float, float]]]:
+    """Return dictionary of country -> list of (lat, lon) waypoints for all 7 boundaries."""
+    return {
+        "sri_lanka": load_imbl_waypoints("sri_lanka"),
+        "pakistan": load_imbl_waypoints("pakistan"),
+        "bangladesh": load_imbl_waypoints("bangladesh"),
+        "maldives": load_imbl_waypoints("maldives"),
+        "myanmar": load_imbl_waypoints("myanmar"),
+        "indonesia": load_imbl_waypoints("indonesia"),
+        "thailand": load_imbl_waypoints("thailand"),
+    }
 
 
 class GeofenceEvaluation(TypedDict):
@@ -391,6 +441,34 @@ def evaluate_maritime_geofence(lat: float, lon: float, location_name: str = "") 
         if cross < 0:
             id_breached = True
 
+    # 7. Evaluate Thailand Maritime Boundary (Andaman Sea)
+    # Boundary runs North to South in the central Andaman Sea between 7.5°N - 13.5°N, 96.5°E - 97.6°E.
+    # Indian waters (Andaman & Nicobar) are to the WEST; Thai waters (Phuket Basin) are to the EAST.
+    th_waypoints = _IMBL_THAILAND_DEFAULT
+    th_min_dist = float("inf")
+    th_closest_pt = th_waypoints[0]
+    th_breached = False
+
+    for i in range(len(th_waypoints) - 1):
+        a_lat, a_lon = th_waypoints[i]
+        b_lat, b_lon = th_waypoints[i + 1]
+        c_lat, c_lon, dist = closest_point_on_segment(lat, lon, a_lat, a_lon, b_lat, b_lon)
+        if dist < th_min_dist:
+            th_min_dist = dist
+            th_closest_pt = (c_lat, c_lon)
+
+    if 7.0 <= lat <= 14.5 and 96.0 <= lon <= 99.0:
+        for i in range(len(th_waypoints) - 1):
+            a_lat, a_lon = th_waypoints[i]
+            b_lat, b_lon = th_waypoints[i + 1]
+            min_l, max_l = min(a_lat, b_lat), max(a_lat, b_lat)
+            if min_l <= lat <= max_l:
+                frac = (lat - a_lat) / (b_lat - a_lat) if (b_lat != a_lat) else 0.0
+                th_lon = a_lon + frac * (b_lon - a_lon)
+                if lon > th_lon:
+                    th_breached = True
+                break
+
     # Multi-boundary Candidate Selection
     candidates = [
         {
@@ -434,6 +512,13 @@ def evaluate_maritime_geofence(lat: float, lon: float, location_name: str = "") 
             "breached": id_breached,
             "dist": id_min_dist,
             "safe_pt": (id_closest_pt[0] + 0.06, id_closest_pt[1] - 0.06),  # Steer NW towards Nicobar
+        },
+        {
+            "name": "India–Thailand Maritime Boundary",
+            "sector": "Central Andaman Sea / Phuket Basin Sector",
+            "breached": th_breached,
+            "dist": th_min_dist,
+            "safe_pt": (th_closest_pt[0], th_closest_pt[1] - 0.08),  # Steer West towards Andaman
         },
     ]
 

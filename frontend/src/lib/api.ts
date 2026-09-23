@@ -521,3 +521,156 @@ export async function chatResearcherEcosystemApi(
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Wind Direction Grid API
+// ---------------------------------------------------------------------------
+
+export interface WindPoint {
+  lat: number;
+  lon: number;
+  speed_kmh: number;
+  /** Meteorological convention: direction FROM which the wind blows (0° = from North) */
+  direction_deg: number;
+}
+
+export interface WindGridResponse {
+  points: WindPoint[];
+  total: number;
+  source: string;
+}
+
+/**
+ * Fetch a spatial grid of wind vectors for the given bounding box.
+ * Uses Open-Meteo Forecast API via the Tarang backend (no API key exposed).
+ *
+ * @param latMin  Southern latitude bound
+ * @param latMax  Northern latitude bound
+ * @param lonMin  Western longitude bound
+ * @param lonMax  Eastern longitude bound
+ * @param gridN   Points per side (total = gridN²). Default 4 → 16 arrows.
+ */
+export async function fetchWindGridApi(
+  latMin: number,
+  latMax: number,
+  lonMin: number,
+  lonMax: number,
+  gridN: number = 4
+): Promise<WindGridResponse | null> {
+  try {
+    let s = Math.max(-85, Math.min(85, latMin));
+    let n = Math.max(-85, Math.min(85, latMax));
+    let w = Math.max(-180, Math.min(180, lonMin));
+    let e = Math.max(-180, Math.min(180, lonMax));
+    if (s > n) [s, n] = [n, s];
+    if (w > e) [w, e] = [e, w];
+
+    const params = new URLSearchParams({
+      lat_min: s.toFixed(4),
+      lat_max: n.toFixed(4),
+      lon_min: w.toFixed(4),
+      lon_max: e.toFixed(4),
+      grid_n: String(Math.max(2, Math.min(gridN, 5))),
+    });
+    const res = await fetch(`${API_BASE_URL}/weather/wind-grid?${params}`, {
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!res.ok) {
+      console.warn("[WindGrid] Backend returned", res.status);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn("[WindGrid] Failed to fetch wind grid:", err);
+    return null;
+  }
+}
+
+export interface MarineScalarPoint {
+  lat: number;
+  lon: number;
+  value: number;
+  unit: string;
+}
+
+export interface MarineLayerResponse {
+  layer_type: string;
+  points: MarineScalarPoint[];
+  total: number;
+  unit: string;
+  source: string;
+}
+
+export async function fetchMarineLayerGrid(
+  latMin: number,
+  latMax: number,
+  lonMin: number,
+  lonMax: number,
+  layerType: "temperature" | "sst" | "chlorophyll",
+  gridN: number = 4
+): Promise<MarineLayerResponse | null> {
+  try {
+    let s = Math.max(-85, Math.min(85, latMin));
+    let n = Math.max(-85, Math.min(85, latMax));
+    let w = Math.max(-180, Math.min(180, lonMin));
+    let e = Math.max(-180, Math.min(180, lonMax));
+    if (s > n) [s, n] = [n, s];
+    if (w > e) [w, e] = [e, w];
+
+    const params = new URLSearchParams({
+      lat_min: s.toFixed(4),
+      lat_max: n.toFixed(4),
+      lon_min: w.toFixed(4),
+      lon_max: e.toFixed(4),
+      layer_type: layerType,
+      grid_n: String(Math.max(2, Math.min(gridN, 5))),
+    });
+    const res = await fetch(`${API_BASE_URL}/weather/marine-layer-grid?${params}`, {
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn(`[MarineLayer] Failed to fetch ${layerType}:`, err);
+    return null;
+  }
+}
+
+export async function fetchImblBoundary(): Promise<any | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/boundaries/imbl`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn("[IMBL] Failed to fetch IMBL boundary:", err);
+    return null;
+  }
+}
+
+export async function fetchRegionalPfz(
+  latMin: number,
+  latMax: number,
+  lonMin: number,
+  lonMax: number
+): Promise<{ zones: any[]; features: any[]; total: number } | null> {
+  try {
+    const params = new URLSearchParams({
+      lat_min: latMin.toFixed(4),
+      lat_max: latMax.toFixed(4),
+      lon_min: lonMin.toFixed(4),
+      lon_max: lonMax.toFixed(4),
+    });
+    const res = await fetch(`${API_BASE_URL}/marine/pfz-grid?${params}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn("[PFZ] Failed to fetch regional PFZ:", err);
+    return null;
+  }
+}
+
+
