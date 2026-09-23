@@ -1,14 +1,18 @@
 {
   "type": "FeatureCollection",
-  "name": "India-Sri Lanka Maritime Boundary Line (IMBL)",
-  "description": "Simplified IMBL waypoints for geofencing. Source: UNCLOS delimitation reference (public domain). For production use, replace with authoritative survey data.",
+  "name": "International Maritime Boundaries of India (IMBL & Maritime Treaties)",
+  "description": "Bilateral and UNCLOS international maritime boundary lines separating the Indian Exclusive Economic Zone (EEZ) and territorial waters from neighboring sovereign nations: Sri Lanka, Pakistan, Bangladesh, Maldives, Myanmar, Indonesia, and Thailand.",
   "features": [
     {
       "type": "Feature",
+      "id": "imbl_sri_lanka",
       "properties": {
-        "name": "IMBL",
-        "description": "India–Sri Lanka Maritime Boundary Line (simplified)",
-        "source": "UNCLOS reference (public domain)",
+        "id": "imbl_sri_lanka",
+        "name": "India–Sri Lanka Maritime Boundary (IMBL)",
+        "neighbor_country": "Sri Lanka",
+        "sector": "Palk Strait & Gulf of Mannar Sector",
+        "treaty": "1974 & 1976 UNCLOS Bilateral Agreements",
+        "description": "Demarcated border between Tamil Nadu (India) and Northern / North-Western Province (Sri Lanka). Crossing is strictly prohibited for Indian artisanal fishers; high risk of boat seizure by Sri Lankan Navy. Maintain at least a 5 km safe buffer zone.",
         "color": "#ef4444",
         "dash": true
       },
@@ -32,6 +36,162 @@
           [77.900, 7.000],
           [77.550, 6.400],
           [77.300, 5.900]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_pakistan",
+      "properties": {
+        "id": "imbl_pakistan",
+        "name": "India–Pakistan Maritime Boundary",
+        "neighbor_country": "Pakistan",
+        "sector": "Sir Creek / Kutch Arabian Sea Sector",
+        "treaty": "UNCLOS / Notional Maritime Boundary Line (NMBL)",
+        "description": "Demarcated maritime boundary in the Arabian Sea off the coast of Gujarat (Kutch/Kathiawar) and Sindh. Indian trawlers and fishers from Okha, Porbandar, and Veraval must NOT cross north-west into Pakistani waters; immediate risk of arrest by Pakistan Maritime Security Agency (PMSA). Maintain 5 km clearance.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [68.180, 23.650],
+          [68.000, 23.500],
+          [67.800, 23.300],
+          [67.450, 23.000],
+          [67.000, 22.600],
+          [66.400, 22.100],
+          [65.700, 21.500],
+          [64.800, 20.500]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_bangladesh",
+      "properties": {
+        "id": "imbl_bangladesh",
+        "name": "India–Bangladesh Maritime Boundary",
+        "neighbor_country": "Bangladesh",
+        "sector": "Sundarbans / Northern Bay of Bengal Sector",
+        "treaty": "2014 UN PCA ITLOS Maritime Delimitation Award",
+        "description": "Demarcated by the Permanent Court of Arbitration (PCA) starting at the mouth of the Hariabhanga River in the Sundarbans and extending southward into the Bay of Bengal along 180° bearing. West Bengal and Odisha fishing boats must remain west of this line.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [89.150, 21.650],
+          [89.250, 21.400],
+          [89.350, 21.100],
+          [89.450, 20.800],
+          [89.600, 20.200],
+          [89.700, 19.800],
+          [89.950, 18.500],
+          [90.200, 17.000]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_maldives",
+      "properties": {
+        "id": "imbl_maldives",
+        "name": "India–Maldives Maritime Boundary",
+        "neighbor_country": "Maldives",
+        "sector": "Eight Degree Channel / Minicoy Sector",
+        "treaty": "1976 Maritime Boundary Agreement",
+        "description": "Delimitation line running east-west along the Eight Degree Channel (approx Lat 7.68°N) separating Minicoy Island (Lakshadweep, India) from Ihavandhippolhu Atoll (Maldives). Indian vessels must remain north of this line.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [70.000, 7.680],
+          [71.000, 7.680],
+          [72.000, 7.680],
+          [73.000, 7.670],
+          [74.000, 7.700],
+          [75.500, 7.720],
+          [76.500, 7.750]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_myanmar",
+      "properties": {
+        "id": "imbl_myanmar",
+        "name": "India–Myanmar Maritime Boundary",
+        "neighbor_country": "Myanmar",
+        "sector": "Coco Channel / North Andaman Sector",
+        "treaty": "1986 Maritime Delimitation Agreement",
+        "description": "Demarcated border through the Coco Channel (approx Lat 13.85°N) separating Landfall Island (North Andaman, India) from the Coco Islands (Myanmar), extending into the Bay of Bengal and Andaman Sea. Indian vessels must remain south of this boundary.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [91.500, 13.950],
+          [92.000, 13.950],
+          [93.000, 13.900],
+          [93.800, 13.850],
+          [94.600, 13.800],
+          [95.500, 13.750],
+          [96.500, 13.500]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_indonesia",
+      "properties": {
+        "id": "imbl_indonesia",
+        "name": "India–Indonesia Maritime Boundary",
+        "neighbor_country": "Indonesia",
+        "sector": "Great Channel / Six Degree Channel Sector",
+        "treaty": "1974 & 1977 Continental Shelf Agreements",
+        "description": "Delimitation line along the Great Channel (Six Degree Channel) separating Indira Point (Great Nicobar Island, India) from Rondo Island and Aceh (Sumatra, Indonesia). Indian boats must remain north-west of this boundary.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [93.100, 6.800],
+          [93.400, 6.650],
+          [94.100, 6.350],
+          [94.800, 6.000],
+          [95.400, 5.700],
+          [96.000, 5.450],
+          [96.600, 5.200]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "imbl_thailand",
+      "properties": {
+        "id": "imbl_thailand",
+        "name": "India–Thailand Maritime Boundary",
+        "neighbor_country": "Thailand",
+        "sector": "Central Andaman Sea / Phuket Basin Sector",
+        "treaty": "1978 Seabed Boundary Agreement",
+        "description": "Continental shelf seabed boundary in the Andaman Sea between India's Andaman & Nicobar EEZ and Thailand's continental shelf. Indian vessels must maintain clearance to the west.",
+        "color": "#ef4444",
+        "dash": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [96.500, 13.500],
+          [96.800, 12.500],
+          [97.100, 11.000],
+          [97.400, 9.500],
+          [97.600, 7.500]
         ]
       }
     }

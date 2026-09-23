@@ -1413,4 +1413,141 @@ async def researcher_chat_endpoint(body: ResearcherChatRequest):
         return {"region": body.region, "reply": reply}
     except Exception as exc:
         logger.exception(f"Error in researcher chat for {body.region}: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Wind Direction Grid Endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/weather/wind-grid")
+async def get_wind_grid(
+    lat_min: float = Query(..., description="Southern latitude bound"),
+    lat_max: float = Query(..., description="Northern latitude bound"),
+    lon_min: float = Query(..., description="Western longitude bound"),
+    lon_max: float = Query(..., description="Eastern longitude bound"),
+    grid_n: int = Query(4, ge=2, le=6, description="Grid points per side (total = grid_n²)"),
+):
+    """
+    Return a spatial grid of wind vectors (speed + direction) for the given bounding box.
+    Uses Open-Meteo Forecast API (free, keyless).
+    """
+    from tools.wind_grid import fetch_grid_async
+
+    # Normalize bounds if inverted
+    if lat_min > lat_max:
+        lat_min, lat_max = lat_max, lat_min
+    if lon_min > lon_max:
+        lon_min, lon_max = lon_max, lon_min
+
+    # If bounding box is overly large (zoomed out far), gently center-clamp to max 40° span
+    c_lat = (lat_min + lat_max) / 2.0
+    c_lon = (lon_min + lon_max) / 2.0
+    if (lat_max - lat_min) > 40.0:
+        lat_min = max(-85.0, c_lat - 20.0)
+        lat_max = min(85.0, c_lat + 20.0)
+    if (lon_max - lon_min) > 40.0:
+        lon_min = max(-180.0, c_lon - 20.0)
+        lon_max = min(180.0, c_lon + 20.0)
+
+    try:
+        points = await fetch_grid_async(
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
+            grid_n=grid_n,
+        )
+        return {
+            "points": points,
+            "total": len(points),
+            "bbox": {
+                "lat_min": lat_min,
+                "lat_max": lat_max,
+                "lon_min": lon_min,
+                "lon_max": lon_max,
+            },
+            "grid_n": grid_n,
+            "source": "Open-Meteo Forecast API (ERA5-ICON)",
+        }
+    except Exception as exc:
+        logger.exception("[WindGrid] Error fetching wind grid: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Wind grid fetch failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Marine Scalar Grid (Temperature, SST, Chlorophyll)
+# ---------------------------------------------------------------------------
+
+@app.get("/weather/marine-layer-grid")
+async def get_marine_layer_grid(
+    lat_min: float = Query(..., description="Southern latitude bound"),
+    lat_max: float = Query(..., description="Northern latitude bound"),
+    lon_min: float = Query(..., description="Western longitude bound"),
+    lon_max: float = Query(..., description="Eastern longitude bound"),
+    layer_type: str = Query(..., description="'temperature', 'sst', or 'chlorophyll'"),
+    grid_n: int = Query(4, ge=2, le=6, description="Grid points per side"),
+):
+    """
+    Return a spatial grid of scalar values (Air Temp, SST, or Chlorophyll)
+    for the requested marine bounding box.
+    """
+    from tools.marine_layers import fetch_marine_layer_grid
+
+    # Normalize bounds if inverted
+    if lat_min > lat_max:
+        lat_min, lat_max = lat_max, lat_min
+    if lon_min > lon_max:
+        lon_min, lon_max = lon_max, lon_min
+
+    # Center-clamp if span is too wide
+    c_lat = (lat_min + lat_max) / 2.0
+    c_lon = (lon_min + lon_max) / 2.0
+    if (lat_max - lat_min) > 40.0:
+        lat_min = max(-85.0, c_lat - 20.0)
+        lat_max = min(85.0, c_lat + 20.0)
+    if (lon_max - lon_min) > 40.0:
+        lon_min = max(-180.0, c_lon - 20.0)
+        lon_max = min(180.0, c_lon + 20.0)
+
+    try:
+        data = await fetch_marine_layer_grid(
+            lat_min=lat_min,
+            lat_max=lat_max,
+            lon_min=lon_min,
+            lon_max=lon_max,
+            layer_type=layer_type,
+            grid_n=grid_n,
+        )
+        return data
+    except Exception as exc:
+        logger.exception("[MarineLayers] Error fetching %s layer grid: %s", layer_type, exc)
+        raise HTTPException(status_code=500, detail=f"Layer {layer_type} fetch failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Maritime Boundaries (IMBL) Endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/boundaries/imbl")
+def get_imbl_boundary():
+    """Return the International Maritime Boundary Line GeoJSON."""
+    from tools.marine_layers import get_imbl_geojson
+    return get_imbl_geojson()
+
+
+# ---------------------------------------------------------------------------
+# Regional Potential Fishing Zones (PFZ) Grid Endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/marine/pfz-grid")
+def get_regional_pfz(
+    lat_min: float = Query(..., description="Southern latitude bound"),
+    lat_max: float = Query(..., description="Northern latitude bound"),
+    lon_min: float = Query(..., description="Western longitude bound"),
+    lon_max: float = Query(..., description="Eastern longitude bound"),
+):
+    """Return Potential Fishing Zones advisory beacons for visible bounding box."""
+    from tools.marine_layers import get_regional_pfz_features
+    return get_regional_pfz_features(lat_min, lat_max, lon_min, lon_max)
+

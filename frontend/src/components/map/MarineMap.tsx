@@ -8,6 +8,10 @@ import { useLocation } from "@/lib/locationContext";
 import { synthesizeSpeech } from "@/lib/api";
 import { LANGUAGES } from "../common/LanguageToggle";
 import { MapLocationControl } from "./MapLocationControl";
+import { WindLayer, WindClickInfo } from "./WindLayer";
+import { MapLayersPanel } from "./MapLayersPanel";
+import { MarineScalarLayer, MarineScalarClickInfo, MarineScalarType } from "./MarineScalarLayer";
+import { fetchImblBoundary, fetchRegionalPfz } from "@/lib/api";
 
 function formatDDM(lat: number, lon: number): string {
   const latDeg = Math.floor(Math.abs(lat));
@@ -134,6 +138,168 @@ export const MarineMap: React.FC<Props> = ({
   const [isPickingOnMap, setIsPickingOnMap] = useState(false);
   const [clickedPoint, setClickedPoint] = useState<{ lat: number; lon: number } | null>(null);
   const pickedMarkerRef = useRef<any>(null);
+  const [windLayerEnabled, setWindLayerEnabled] = useState(false);
+  const [windClickInfo, setWindClickInfo] = useState<WindClickInfo | null>(null);
+
+  // New Marine Layers
+  const [tempEnabled, setTempEnabled] = useState(false);
+  const [sstEnabled, setSstEnabled] = useState(false);
+  const [chlEnabled, setChlEnabled] = useState(false);
+  const [pfzEnabled, setPfzEnabled] = useState(false);
+  const [imblEnabled, setImblEnabled] = useState(false);
+  const [scalarClickInfo, setScalarClickInfo] = useState<MarineScalarClickInfo | null>(null);
+
+  const activeScalarLayer: MarineScalarType | null =
+    sstEnabled ? "sst" : chlEnabled ? "chlorophyll" : tempEnabled ? "temperature" : null;
+
+  const windLayerEnabledRef = useRef(windLayerEnabled);
+  useEffect(() => { windLayerEnabledRef.current = windLayerEnabled; }, [windLayerEnabled]);
+
+  const activeScalarLayerRef = useRef(activeScalarLayer);
+  useEffect(() => { activeScalarLayerRef.current = activeScalarLayer; }, [activeScalarLayer]);
+
+  const isPickingOnMapRef = useRef(isPickingOnMap);
+  useEffect(() => { isPickingOnMapRef.current = isPickingOnMap; }, [isPickingOnMap]);
+
+  const pfzLayerGroupRef = useRef<any>(null);
+  const imblLayerGroupRef = useRef<any>(null);
+
+  // Synchronize PFZ Layer Beacons
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    if (!pfzEnabled) {
+      if (pfzLayerGroupRef.current) pfzLayerGroupRef.current.clearLayers();
+      return;
+    }
+
+    let isSubscribed = true;
+
+    const updatePfz = () => {
+      const b = map.getBounds();
+      fetchRegionalPfz(b.getSouth() - 0.5, b.getNorth() + 0.5, b.getWest() - 0.5, b.getEast() + 0.5).then(res => {
+        if (!isSubscribed) return;
+        import("leaflet").then(L => {
+          if (!pfzLayerGroupRef.current) {
+            pfzLayerGroupRef.current = L.layerGroup().addTo(map);
+          }
+          pfzLayerGroupRef.current.clearLayers();
+
+          if (!res?.zones || res.zones.length === 0) return;
+
+          res.zones.forEach((z: any) => {
+            const pfzHtml = `
+              <div style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background-color: #15803d; color: white; border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.35); font-size: 14px;">
+                🐟
+              </div>
+            `;
+            const icon = L.divIcon({ html: pfzHtml, className: "custom-pfz-beacon", iconSize: [28, 28], iconAnchor: [14, 14] });
+            L.marker([z.lat, z.lon], { icon })
+              .bindPopup(`
+                <div style="font-family: sans-serif; font-size: 12px; color: #16242B; min-width: 190px;">
+                  <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                    <span style="font-size: 15px;">🐟</span>
+                    <strong style="color: #15803d; font-size: 13px;">${z.zone_id} Fishing Zone</strong>
+                  </div>
+                  <div style="line-height: 1.5; color: #374151; font-size: 11.5px;">
+                    • <b>Coordinates:</b> ${formatDDM(z.lat, z.lon)}<br/>
+                    • <b>Target Catch:</b> <span style="color: #0369a1; font-weight: 600;">${z.target_species || "Pelagic Fish"}</span><br/>
+                    • <b>Distance:</b> ${z.distance_km} km offshore<br/>
+                    • <b>Chlorophyll-a:</b> <b>${z.chlorophyll_mg_m3} mg/m³</b><br/>
+                    • <b>Depth:</b> ~${z.depth_m || 30} meters
+                  </div>
+                  <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #6b7280;">
+                    Source: ${z.source || "INCOIS Satellite Advisory"}
+                  </div>
+                </div>
+              `)
+              .addTo(pfzLayerGroupRef.current);
+          });
+        });
+      });
+    };
+
+    updatePfz();
+    map.on("moveend", updatePfz);
+
+    return () => {
+      isSubscribed = false;
+      map.off("moveend", updatePfz);
+    };
+  }, [pfzEnabled]);
+
+  // Synchronize IMBL Boundary Layer
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    if (!imblEnabled) {
+      if (imblLayerGroupRef.current) imblLayerGroupRef.current.clearLayers();
+      return;
+    }
+
+    let isSubscribed = true;
+    fetchImblBoundary().then(geo => {
+      if (!isSubscribed || !geo?.features) return;
+      import("leaflet").then(L => {
+        if (!imblLayerGroupRef.current) {
+          imblLayerGroupRef.current = L.layerGroup().addTo(map);
+        }
+        imblLayerGroupRef.current.clearLayers();
+
+        geo.features.forEach((feat: any) => {
+          if (feat.geometry?.type === "LineString") {
+            const coords = feat.geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]);
+
+            // 5km warning buffer
+            L.polyline(coords, {
+              color: "#ef4444",
+              weight: 18,
+              opacity: 0.15,
+              lineCap: "round",
+            }).addTo(imblLayerGroupRef.current);
+
+            const bProps = feat.properties || {};
+            const bName = bProps.name || "International Maritime Boundary Line";
+            const bCountry = bProps.neighbor_country || "Neighbor Nation";
+            const bSector = bProps.sector || "UNCLOS Treaty Boundary";
+            const bTreaty = bProps.treaty || "UNCLOS Bilateral Agreement";
+            const bDesc = bProps.description || "Crossing prohibited for Indian fishing vessels. High risk of vessel seizure / detention.";
+
+            // Red dashed treaty polyline
+            L.polyline(coords, {
+              color: bProps.color || "#dc2626",
+              weight: 3,
+              dashArray: "8, 8",
+              opacity: 0.95,
+            })
+              .bindPopup(`
+                <div style="font-family: sans-serif; font-size: 12px; color: #1e293b; min-width: 230px; max-width: 280px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <strong style="color: #dc2626; font-size: 13px;">⛔ ${bName}</strong>
+                  </div>
+                  <div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px;">
+                    <span style="display: inline-block; background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;">${bCountry} Border</span>
+                    <span style="display: inline-block; background: #f1f5f9; color: #475569; padding: 1px 6px; border-radius: 4px; font-size: 10px;">${bSector}</span>
+                  </div>
+                  <div style="color: #334155; font-size: 11px; line-height: 1.4; margin-bottom: 6px;">
+                    ${bDesc}
+                  </div>
+                  <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 4px 6px; font-size: 10px; color: #991b1b;">
+                    <b>Agreement:</b> ${bTreaty}<br/>
+                    <b>Buffer Rule:</b> Maintain at least 5 km clearance inside Indian waters.
+                  </div>
+                </div>
+              `)
+              .addTo(imblLayerGroupRef.current);
+          }
+        });
+      });
+    });
+
+    return () => { isSubscribed = false; };
+  }, [imblEnabled]);
 
   const hasGeoData = Boolean(geoJson && geoJson.features && geoJson.features.length > 0);
 
@@ -201,6 +367,12 @@ export const MarineMap: React.FC<Props> = ({
 
         // Click to pick location
         map.on("click", (e: any) => {
+          // If wind layer or scalar layer is active and user is not explicitly in pick-on-map mode,
+          // don't drop location pin; let the layer display the Fisherman Advisory
+          if ((windLayerEnabledRef.current || activeScalarLayerRef.current) && !isPickingOnMapRef.current) {
+            return;
+          }
+
           const lat = Number(e.latlng.lat.toFixed(4));
           const lon = Number(e.latlng.lng.toFixed(4));
 
@@ -735,17 +907,23 @@ export const MarineMap: React.FC<Props> = ({
             return [lat, lon];
           });
 
+          const bName = props.name || "International Maritime Boundary Line";
+          const bCountry = props.neighbor_country || "Neighbor Nation";
+          const bDesc = props.description || "International Maritime Boundary Line. Indian fishermen must NOT cross this demarcation line under any circumstances.";
+
           L.polyline(latLngs, {
-            color: "#DC2626",
+            color: props.color || "#DC2626",
             weight: 2.5,
             dashArray: "6, 6",
             opacity: 0.9,
           })
             .bindPopup(`
-              <div style="font-family: sans-serif; font-size: 12px;">
-                <strong style="color: #DC2626;">⛔ ${props.name || "India-Sri Lanka IMBL"}</strong><br/>
-                <p style="margin-top: 4px; font-size: 11px; color: #4B5563;">
-                  International Maritime Boundary Line. Indian fishermen must NOT cross this demarcation line under any circumstances.
+              <div style="font-family: sans-serif; font-size: 12px; color: #1e293b; min-width: 230px; max-width: 280px;">
+                <strong style="color: #DC2626; font-size: 13px;">⛔ ${bName}</strong><br/>
+                ${props.neighbor_country ? `<span style="display: inline-block; background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 10px; margin: 3px 0;">Border with ${bCountry}</span><br/>` : ""}
+                <p style="margin-top: 4px; font-size: 11px; color: #4B5563; line-height: 1.4;">
+                  ${bDesc}<br/>
+                  <b style="color: #dc2626;">Buffer Rule:</b> Maintain 5 km clearance inside Indian waters.
                 </p>
               </div>
             `)
@@ -979,6 +1157,317 @@ export const MarineMap: React.FC<Props> = ({
         className={`w-full h-full min-h-[350px] z-10 ${isPickingOnMap ? "cursor-crosshair" : ""}`}
       />
 
+      {/* Canvas wind particle flow layer */}
+      {isMounted && (
+        <WindLayer
+          mapRef={mapInstanceRef}
+          enabled={windLayerEnabled}
+          onWindInfo={(info) => {
+            if (isPickingOnMap) return;
+            setWindClickInfo(info);
+          }}
+        />
+      )}
+
+      {/* Canvas scalar oceanographic layer (Temperature / SST / Chlorophyll) */}
+      {isMounted && (
+        <MarineScalarLayer
+          mapRef={mapInstanceRef}
+          activeLayer={activeScalarLayer}
+          onLayerClick={(info) => {
+            if (isPickingOnMap) return;
+            setScalarClickInfo(info);
+          }}
+        />
+      )}
+
+      {/* Map Layers Panel — right-side floating panel */}
+      {isMounted && (
+        <MapLayersPanel
+          windEnabled={windLayerEnabled}
+          onWindToggle={() => {
+            setWindLayerEnabled(v => !v);
+            setWindClickInfo(null);
+          }}
+          tempEnabled={tempEnabled}
+          onTempToggle={() => {
+            setTempEnabled(v => {
+              const nv = !v;
+              if (nv) { setSstEnabled(false); setChlEnabled(false); }
+              return nv;
+            });
+            setScalarClickInfo(null);
+          }}
+          sstEnabled={sstEnabled}
+          onSstToggle={() => {
+            setSstEnabled(v => {
+              const nv = !v;
+              if (nv) { setTempEnabled(false); setChlEnabled(false); }
+              return nv;
+            });
+            setScalarClickInfo(null);
+          }}
+          chlEnabled={chlEnabled}
+          onChlToggle={() => {
+            setChlEnabled(v => {
+              const nv = !v;
+              if (nv) { setTempEnabled(false); setSstEnabled(false); }
+              return nv;
+            });
+            setScalarClickInfo(null);
+          }}
+          pfzEnabled={pfzEnabled}
+          onPfzToggle={() => setPfzEnabled(v => !v)}
+          imblEnabled={imblEnabled}
+          onImblToggle={() => setImblEnabled(v => !v)}
+        />
+      )}
+
+      {/* Fisherman Scalar Layer Info Card (Temperature / SST / Chlorophyll) */}
+      {scalarClickInfo && activeScalarLayer && (
+        <div
+          style={{
+            position: "absolute",
+            left: Math.max(12, Math.min(scalarClickInfo.sx + 14, (typeof window !== "undefined" ? window.innerWidth : 800) - 340)),
+            top: Math.max(scalarClickInfo.sy - 130, 65),
+            zIndex: 1002,
+            pointerEvents: "auto",
+          }}
+          className="animate-in fade-in zoom-in-95 duration-150"
+        >
+          <div className="bg-white/98 backdrop-blur-md border border-[var(--border)] rounded-2xl shadow-2xl p-3.5 w-[310px] sm:w-[330px] text-[var(--ink)]">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <span className="text-base">
+                  {scalarClickInfo.layerType === "sst" ? "🌊" : scalarClickInfo.layerType === "chlorophyll" ? "🌱" : "🌡️"}
+                </span>
+                <div>
+                  <h4 className="text-[12px] font-bold text-sky-900 tracking-tight leading-tight">
+                    {scalarClickInfo.layerType === "sst" ? "Sea Surface Temperature" :
+                     scalarClickInfo.layerType === "chlorophyll" ? "Satellite Ocean Color" : "Coastal Air Temperature"}
+                  </h4>
+                  <p className="text-[10px] text-[var(--ink-muted)]">
+                    {scalarClickInfo.lat.toFixed(2)}°N, {scalarClickInfo.lon.toFixed(2)}°E
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScalarClickInfo(null)}
+                className="text-[var(--ink-muted)] hover:text-[var(--ink)] text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors cursor-pointer"
+                aria-label="Close marine info"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Metric Banner */}
+            <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 mb-2.5">
+              <div>
+                <span className="text-[9.5px] uppercase font-bold text-[var(--ink-muted)] tracking-wider block">Observed Value</span>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-2xl font-black text-slate-900 tracking-tight">{scalarClickInfo.value}</span>
+                  <span className="text-[11px] font-bold text-slate-600">{scalarClickInfo.unit}</span>
+                </div>
+              </div>
+              <div
+                className="px-2 py-1 rounded-lg text-[10.5px] font-bold text-right"
+                style={{ backgroundColor: scalarClickInfo.badgeBg, color: scalarClickInfo.badgeColor }}
+              >
+                {scalarClickInfo.badgeText}
+              </div>
+            </div>
+
+            {/* Fisherman Guidance */}
+            <div className="bg-sky-50/70 border border-sky-200/80 rounded-lg p-2.5 text-[10.5px] text-sky-950 mb-2 leading-snug">
+              <span className="font-bold flex items-center gap-1 mb-0.5 text-sky-900">
+                💡 Fisherman Advice:
+              </span>
+              {scalarClickInfo.fishermanTip}
+            </div>
+
+            {/* Science note */}
+            <p className="text-[9.5px] text-[var(--ink-muted)] leading-tight italic">
+              {scalarClickInfo.scienceNote}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Fisherman Wind Info Card — shown on ocean click when wind layer is active */}
+      {windClickInfo && windLayerEnabled && (
+        <div
+          style={{
+            position: "absolute",
+            left: Math.max(12, Math.min(windClickInfo.sx + 14, (typeof window !== "undefined" ? window.innerWidth : 800) - 340)),
+            top: Math.max(windClickInfo.sy - 150, 65),
+            zIndex: 1002,
+            pointerEvents: "auto",
+          }}
+          className="animate-in fade-in zoom-in-95 duration-150"
+        >
+          <div className="bg-white/98 backdrop-blur-md border border-[var(--border)] rounded-2xl shadow-2xl p-3.5 w-[310px] sm:w-[330px] text-[var(--ink)]">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <span className="text-base">⛵</span>
+                <div>
+                  <h4 className="text-[12px] font-bold text-sky-900 tracking-tight leading-tight">Fisherman Marine Advisory</h4>
+                  <p className="text-[10px] text-[var(--ink-muted)]">
+                    {windClickInfo.lat.toFixed(2)}°N, {windClickInfo.lon.toFixed(2)}°E • Live Marine Conditions
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWindClickInfo(null)}
+                className="text-[var(--ink-muted)] hover:text-[var(--ink)] text-xs w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors cursor-pointer"
+                aria-label="Close wind advisory"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Safety status banner */}
+            <div
+              className="px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-2 mb-2.5"
+              style={{
+                backgroundColor: windClickInfo.advisory.safetyBadgeColor,
+                borderColor: windClickInfo.advisory.safetyBorderColor,
+                color: windClickInfo.advisory.safetyTextColor,
+              }}
+            >
+              <span className="text-sm">
+                {windClickInfo.advisory.safetyStatus === "SAFE" ? "🟢" :
+                 windClickInfo.advisory.safetyStatus === "CAUTION" ? "🟡" :
+                 windClickInfo.advisory.safetyStatus === "ROUGH" ? "🟠" : "🔴"}
+              </span>
+              <span className="leading-tight">{windClickInfo.advisory.safetyTitle}</span>
+            </div>
+
+            {/* Wind metrics grid */}
+            <div className="grid grid-cols-2 gap-2 bg-[var(--surface-2)]/60 rounded-xl p-2.5 mb-2.5 border border-[var(--border)]">
+              {/* Wind Speed */}
+              <div>
+                <span className="text-[9.5px] uppercase font-bold text-[var(--ink-muted)] tracking-wider block">Wind Speed</span>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className="text-2xl font-black text-slate-900 tracking-tight">{Math.round(windClickInfo.speedKmh)}</span>
+                  <span className="text-[11px] font-bold text-slate-600">km/h</span>
+                </div>
+                <span className="text-[10px] font-semibold text-sky-700">({windClickInfo.speedKnots} Knots)</span>
+              </div>
+
+              {/* Wind Travel Direction */}
+              <div>
+                <span className="text-[9.5px] uppercase font-bold text-[var(--ink-muted)] tracking-wider block">Flow Direction</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "50%",
+                      backgroundColor: "#0284c7",
+                      color: "#fff",
+                      fontSize: "13px",
+                      fontWeight: 800,
+                      transform: `rotate(${windClickInfo.travelDeg}deg)`,
+                      transformOrigin: "center center",
+                    }}
+                  >
+                    ↑
+                  </span>
+                  <div className="leading-tight">
+                    <span className="text-[12px] font-bold text-slate-900 block">{windClickInfo.fromCardinal} → {windClickInfo.toCardinal}</span>
+                    <span className="text-[9.5px] text-[var(--ink-muted)]">From {windClickInfo.fromCardinal}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sea State Wave Estimate */}
+            <div className="flex items-center gap-2 text-[10.5px] text-slate-700 bg-blue-50/70 border border-blue-200/80 rounded-lg px-2.5 py-1.5 mb-2">
+              <span className="text-sm">🌊</span>
+              <div>
+                <span className="font-semibold text-blue-900">Estimated Waves: </span>
+                <span>{windClickInfo.advisory.waveEstimate}</span>
+              </div>
+            </div>
+
+            {/* Boat & Craft Suitability */}
+            <div className="text-[10.5px] bg-slate-50 border border-slate-200 rounded-lg p-2 mb-2">
+              <div className="font-bold text-slate-800 flex items-center gap-1.5 mb-0.5">
+                <span>🚤</span> Craft Advisory:
+              </div>
+              <p className="text-[10px] text-slate-600 leading-snug">
+                {windClickInfo.advisory.boatAdvisory}
+              </p>
+            </div>
+
+            {/* Actionable Fisherman Advantages */}
+            <div className="space-y-1 text-[10px] text-slate-700">
+              <div className="flex items-start gap-1.5">
+                <span className="text-xs shrink-0">🎣</span>
+                <p className="leading-tight">
+                  <strong className="text-slate-900 font-semibold">Netting: </strong>
+                  {windClickInfo.advisory.advantageTip}
+                </p>
+              </div>
+
+              <div className="flex items-start gap-1.5">
+                <span className="text-xs shrink-0">🧭</span>
+                <p className="leading-tight">
+                  <strong className="text-slate-900 font-semibold">Drift: </strong>
+                  {windClickInfo.advisory.driftWarning}
+                </p>
+              </div>
+
+              <div className="flex items-start gap-1.5">
+                <span className="text-xs shrink-0">⛽</span>
+                <p className="leading-tight">
+                  <strong className="text-slate-900 font-semibold">Fuel: </strong>
+                  {windClickInfo.advisory.fuelTip}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Compass Rose — bottom-right corner */}
+      {isMounted && (
+        <div
+          style={{
+            position: "absolute", bottom: 24, right: 10,
+            zIndex: 1000, pointerEvents: "none",
+          }}
+          aria-label="Compass"
+          title="Compass: N is up"
+        >
+          <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+            {/* Outer ring */}
+            <circle cx="26" cy="26" r="24" fill="rgba(255,255,255,0.90)" stroke="#e2e8f0" strokeWidth="1"
+              style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.12))" }}
+            />
+            {/* N arrow (dark) */}
+            <polygon points="26,6 22,22 30,22" fill="#0f172a" />
+            {/* S arrow (grey) */}
+            <polygon points="26,46 22,30 30,30" fill="#94a3b8" />
+            {/* E arrow (grey) */}
+            <polygon points="46,26 30,22 30,30" fill="#94a3b8" />
+            {/* W arrow (grey) */}
+            <polygon points="6,26 22,22 22,30" fill="#94a3b8" />
+            {/* Center circle */}
+            <circle cx="26" cy="26" r="4" fill="white" stroke="#0f172a" strokeWidth="1.5" />
+            {/* N label */}
+            <text x="26" y="4.5" textAnchor="middle" fontSize="7" fontWeight="800"
+              fontFamily="system-ui,sans-serif" fill="#0f172a">N</text>
+          </svg>
+        </div>
+      )}
+
       {/* Real-World Fisherman Helmsman HUD (Floating Navigation Cockpit when Route is Loaded) */}
       {activeRouteInfo && (
         <div className="absolute bottom-3 right-3 left-3 md:left-auto md:w-[470px] z-[1000] bg-[#0B151C]/95 backdrop-blur-md border border-[#1E3A4A] rounded-xl shadow-2xl p-3 text-white pointer-events-auto animate-in slide-in-from-bottom-2 duration-200">
@@ -1156,7 +1645,7 @@ export const MarineMap: React.FC<Props> = ({
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-[#0284C7] border border-white" />
-            <span>SST & Anomaly (INCOIS ERDDAP — temperature only, no catch guarantee)</span>
+            <span>SST &amp; Anomaly (INCOIS ERDDAP — temperature only, no catch guarantee)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-5 h-0.5 border-t-2 border-dashed border-[#DC2626]" />
@@ -1166,6 +1655,8 @@ export const MarineMap: React.FC<Props> = ({
             <div className="w-5 h-2 bg-[#0284C7]/20 border border-[#0284C7]" />
             <span>Safe Fairway Corridor (±0.5 NM)</span>
           </div>
+
+          {/* Wind Direction is shown in the Map Layers Panel (right side). */}
         </div>
       )}
     </div>
