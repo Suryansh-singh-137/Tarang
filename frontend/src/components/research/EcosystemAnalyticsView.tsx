@@ -220,8 +220,12 @@ export const EcosystemAnalyticsView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const correlations = data?.correlations;
-  const anomalies = data?.anomalies_summary;
+  const correlations =
+    data?.correlations || (data as any)?.statistics?.correlations;
+  const anomalies =
+    data?.anomalies_summary ||
+    (data as any)?.statistics?.anomalies_summary ||
+    (data as any)?.statistics?.anomalies;
 
   // Markdown Report Export Handler
   const handleExportMarkdown = () => {
@@ -869,77 +873,170 @@ ${(data.metadata.sources || []).map((s) => `- ${s}`).join("\n")}
           {/* Statistical Telemetry Grid: Correlations & Anomaly Indicators */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Card 1: Chlorophyll ↔ Catch Correlation */}
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Trophic Coupling
-                </span>
-                <span className="font-mono text-xs font-bold text-[var(--ink-muted)]">
-                  p = {correlations?.chl_vs_catch?.p_value ?? 0.001}
-                </span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-[var(--ink)]">
-                  r = {correlations?.chl_vs_catch?.r ?? 0.45}
-                </span>
-                <span className="text-[11px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-200">
-                  Bottom-Up Driver
-                </span>
-              </div>
-              <p className="text-[11px] text-[var(--ink-muted)] leading-relaxed">
-                {correlations?.chl_vs_catch?.interpretation ||
-                  "Abundance of primary phytoplankton biomass directly dictates pelagic foraging schools and landing volume."}
-              </p>
-            </div>
+            {(() => {
+              const chlR = correlations?.chl_vs_catch?.r;
+              const chlP = correlations?.chl_vs_catch?.p_value;
+              return (
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      Trophic Coupling
+                    </span>
+                    <span className="font-mono text-xs font-bold text-[var(--ink-muted)]">
+                      p = {chlP !== undefined && chlP !== null ? (chlP < 0.001 ? "< 0.001" : chlP.toFixed(3)) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-black font-mono text-[var(--ink)]">
+                      r = {chlR !== undefined && chlR !== null
+                        ? (chlR > 0 ? `+${chlR.toFixed(2)}` : chlR.toFixed(2))
+                        : "—"}
+                    </span>
+                    {chlR !== undefined && chlR !== null && (
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
+                          chlR >= 0.4
+                            ? "text-emerald-800 bg-emerald-50 border-emerald-200"
+                            : chlR >= 0.1
+                            ? "text-teal-800 bg-teal-50 border-teal-200"
+                            : chlR >= -0.1
+                            ? "text-slate-800 bg-slate-50 border-slate-200"
+                            : "text-amber-800 bg-amber-50 border-amber-200"
+                        }`}
+                      >
+                        {chlR >= 0.4
+                          ? "Bottom-Up Driver"
+                          : chlR >= 0.1
+                          ? "Moderate Coupling"
+                          : chlR >= -0.1
+                          ? "Decoupled / Neutral"
+                          : "Inverse Decoupling"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-[var(--ink-muted)] leading-relaxed">
+                    {correlations?.chl_vs_catch?.interpretation ||
+                      "Primary phytoplankton biomass versus pelagic foraging landing volume."}
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Card 2: SST Anomaly ↔ Catch Correlation */}
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-rose-500" />
-                  Thermal Stress Impact
-                </span>
-                <span className="font-mono text-xs font-bold text-[var(--ink-muted)]">
-                  p = {correlations?.sst_anomaly_vs_catch?.p_value ?? 0.001}
-                </span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-[var(--ink)]">
-                  r = {correlations?.sst_anomaly_vs_catch?.r ?? -0.39}
-                </span>
-                <span className="text-[11px] text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full font-semibold border border-rose-200">
-                  Thermal Avoidance
-                </span>
-              </div>
-              <p className="text-[11px] text-[var(--ink-muted)] leading-relaxed">
-                {correlations?.sst_anomaly_vs_catch?.interpretation ||
-                  "Positive sea surface thermal anomalies drive pelagic shoals into deeper cooler layers beyond traditional artisanal gear."}
-              </p>
-            </div>
+            {(() => {
+              const sstR = correlations?.sst_anomaly_vs_catch?.r;
+              const sstP = correlations?.sst_anomaly_vs_catch?.p_value;
+              return (
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      Thermal Stress Impact
+                    </span>
+                    <span className="font-mono text-xs font-bold text-[var(--ink-muted)]">
+                      p = {sstP !== undefined && sstP !== null ? (sstP < 0.001 ? "< 0.001" : sstP.toFixed(3)) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-black font-mono text-[var(--ink)]">
+                      r = {sstR !== undefined && sstR !== null
+                        ? (sstR > 0 ? `+${sstR.toFixed(2)}` : sstR.toFixed(2))
+                        : "—"}
+                    </span>
+                    {sstR !== undefined && sstR !== null && (
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
+                          sstR <= -0.3
+                            ? "text-rose-800 bg-rose-50 border-rose-200"
+                            : sstR < 0
+                            ? "text-amber-800 bg-amber-50 border-amber-200"
+                            : "text-emerald-800 bg-emerald-50 border-emerald-200"
+                        }`}
+                      >
+                        {sstR <= -0.3
+                          ? "Thermal Avoidance"
+                          : sstR < 0
+                          ? "Thermal Sensitivity"
+                          : "Thermally Resilient"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-[var(--ink-muted)] leading-relaxed">
+                    {correlations?.sst_anomaly_vs_catch?.interpretation ||
+                      "Thermal anomaly impact on pelagic school concentration."}
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Card 3: Ecological Stress Index */}
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                  Ecosystem Stress Level
-                </span>
-                <span className="font-mono text-xs font-bold text-amber-700">
-                  Score: {anomalies?.stress_index ?? 75}/100
-                </span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-base font-bold text-[var(--ink)]">
-                  {anomalies?.stress_label || "Severe Ecological Disruption"}
-                </span>
-              </div>
-              <div className="flex items-center gap-3 text-[11px] text-[var(--ink-muted)] pt-1">
-                <span>🔥 {anomalies?.marine_heatwave_months ?? 0} MHW Months</span>
-                <span>·</span>
-                <span>📉 {anomalies?.chlorophyll_deficit_months ?? 0} Deficit Months</span>
-              </div>
-            </div>
+            {(() => {
+              const stressScore = anomalies?.stress_index ?? 0;
+              const isHigh = stressScore >= 65;
+              const isMod = stressScore >= 35 && stressScore < 65;
+              const stressLabel =
+                anomalies?.stress_label ||
+                (isHigh
+                  ? "Severe Ecological Disruption"
+                  : isMod
+                  ? "Moderate Environmental Stress"
+                  : "Nominal Ecological Balance");
+
+              return (
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                        isHigh
+                          ? "text-rose-800"
+                          : isMod
+                          ? "text-amber-800"
+                          : "text-emerald-800"
+                      }`}
+                    >
+                      <AlertTriangle
+                        className={`w-3.5 h-3.5 ${
+                          isHigh
+                            ? "text-rose-600"
+                            : isMod
+                            ? "text-amber-600"
+                            : "text-emerald-600"
+                        }`}
+                      />
+                      Ecosystem Stress Level
+                    </span>
+                    <span
+                      className={`font-mono text-xs font-bold ${
+                        isHigh
+                          ? "text-rose-700"
+                          : isMod
+                          ? "text-amber-700"
+                          : "text-emerald-700"
+                      }`}
+                    >
+                      Score: {stressScore}/100
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-base font-bold text-[var(--ink)]">
+                      {stressLabel}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] text-[var(--ink-muted)] pt-1 flex-wrap">
+                    <span>🔥 {anomalies?.marine_heatwave_months ?? 0} MHW Months</span>
+                    <span>·</span>
+                    <span>📉 {anomalies?.chlorophyll_deficit_months ?? 0} Deficit Months</span>
+                    {anomalies?.catch_collapse_months !== undefined && (
+                      <>
+                        <span>·</span>
+                        <span>⚠️ {anomalies.catch_collapse_months} Catch Drops</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Deep Scientific Causal Attribution Panel */}

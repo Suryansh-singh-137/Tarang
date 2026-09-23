@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Response, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -1105,6 +1105,7 @@ class GeofenceEvaluateRequest(BaseModel):
     name: Optional[str] = None
     trigger_whatsapp: Optional[bool] = True
     trigger_sms: Optional[bool] = True
+    force_dispatch: Optional[bool] = False
 
 
 # Server-side rate limiter for geofence WhatsApp/SMS alerts
@@ -1192,7 +1193,7 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
             last_sent = _geofence_whatsapp_last_sent.get(recipient_phone, 0.0)
             elapsed = now - last_sent
 
-            if elapsed >= cooldown_s:
+            if body.force_dispatch or elapsed >= cooldown_s:
                 whatsapp_status = send_geofence_breach_alert(recipient_phone, eval_result)
                 _geofence_whatsapp_last_sent[recipient_phone] = now
                 logger.warning(
@@ -1219,7 +1220,7 @@ def geofence_evaluate_endpoint(body: GeofenceEvaluateRequest):
             last_sent_sms = _geofence_sms_last_sent.get(recipient_phone, 0.0)
             elapsed_sms = now - last_sent_sms
 
-            if elapsed_sms >= cooldown_s:
+            if body.force_dispatch or elapsed_sms >= cooldown_s:
                 sms_status = send_geofence_breach_sms(recipient_phone, eval_result)
                 _geofence_sms_last_sent[recipient_phone] = now
                 logger.warning(

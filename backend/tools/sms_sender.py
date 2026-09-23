@@ -64,23 +64,18 @@ def send_sms_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     from dotenv import dotenv_values
     from pathlib import Path
 
-    # Dynamically read credentials from environment or directly from .env
-    account_sid = (os.getenv("TWILIO_ACCOUNT_SID") or getattr(config, "TWILIO_ACCOUNT_SID", "")).strip()
-    auth_token = (os.getenv("TWILIO_AUTH_TOKEN") or getattr(config, "TWILIO_AUTH_TOKEN", "")).strip()
+    # Always read dynamically from .env on disk first, falling back to os.environ / config
+    base_dir = Path(__file__).parent.parent
+    env_dict = {**dotenv_values(base_dir.parent / ".env"), **dotenv_values(base_dir / ".env")}
+    account_sid = (env_dict.get("TWILIO_ACCOUNT_SID") or os.getenv("TWILIO_ACCOUNT_SID") or getattr(config, "TWILIO_ACCOUNT_SID", "")).strip()
+    auth_token = (env_dict.get("TWILIO_AUTH_TOKEN") or os.getenv("TWILIO_AUTH_TOKEN") or getattr(config, "TWILIO_AUTH_TOKEN", "")).strip()
     sms_number = (
-        os.getenv("TWILIO_PHONE_NUMBER")
+        env_dict.get("TWILIO_PHONE_NUMBER")
+        or env_dict.get("TWILIO_SMS_NUMBER")
+        or os.getenv("TWILIO_PHONE_NUMBER")
         or os.getenv("TWILIO_SMS_NUMBER")
         or getattr(config, "TWILIO_PHONE_NUMBER", "")
     ).strip()
-
-    if not account_sid or not auth_token:
-        # Check backend/.env and root .env directly
-        base_dir = Path(__file__).parent.parent
-        env_dict = {**dotenv_values(base_dir.parent / ".env"), **dotenv_values(base_dir / ".env")}
-        account_sid = (env_dict.get("TWILIO_ACCOUNT_SID") or "").strip()
-        auth_token = (env_dict.get("TWILIO_AUTH_TOKEN") or "").strip()
-        if not sms_number:
-            sms_number = (env_dict.get("TWILIO_PHONE_NUMBER") or env_dict.get("TWILIO_SMS_NUMBER") or "").strip()
 
     # If no SMS-capable number configured, simulate delivery safely
     if not sms_number:
@@ -134,11 +129,16 @@ def send_sms_message(to_phone: str, message_body: str) -> Dict[str, Any]:
             "status": msg.status,
         }
     except Exception as exc:
+        err_str = str(exc)
+        if "unverified" in err_str.lower() or "21608" in err_str:
+            friendly_err = f"Number {clean_phone} is unverified in Twilio Trial account. Add it to Twilio Console -> Verified Caller IDs."
+        else:
+            friendly_err = err_str
         logger.exception("[SMSSender] Failed to send SMS via Twilio: %s", exc)
         return {
             "success": False,
             "simulated": False,
-            "error": str(exc),
+            "error": friendly_err,
             "to": clean_phone,
         }
 

@@ -69,7 +69,8 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
         phone.trim(),
         evaluation.boundary_name,
         true,
-        true
+        true,
+        true // force dispatch on explicit user button click
       );
 
       const msgs: string[] = [];
@@ -82,9 +83,11 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
               ? "📱 WhatsApp alert simulated"
               : "📱 WhatsApp alert dispatched"
           );
+        } else if (res.whatsapp_result.rate_limited) {
+          msgs.push(`📱 WhatsApp in cooldown (${res.whatsapp_result.next_allowed_in_seconds}s remaining)`);
         } else {
           const errDetail = res.whatsapp_result.error ? `: ${res.whatsapp_result.error}` : "";
-          msgs.push(`📱 WhatsApp unconfirmed${errDetail}`);
+          msgs.push(`📱 WhatsApp failed${errDetail}`);
         }
       }
 
@@ -96,9 +99,11 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
               ? "💬 SMS alert simulated"
               : "💬 SMS alert dispatched"
           );
+        } else if (res.sms_result.rate_limited) {
+          msgs.push(`💬 SMS in cooldown (${res.sms_result.next_allowed_in_seconds}s remaining)`);
         } else {
           const errDetail = res.sms_result.error ? `: ${res.sms_result.error}` : "";
-          msgs.push(`💬 SMS unconfirmed${errDetail}`);
+          msgs.push(`💬 SMS failed${errDetail}`);
         }
       }
 

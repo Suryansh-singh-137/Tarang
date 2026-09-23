@@ -75,19 +75,12 @@ def send_whatsapp_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     from dotenv import dotenv_values
     from pathlib import Path
 
-    # Dynamically read credentials from environment or directly from .env
-    account_sid = (os.getenv("TWILIO_ACCOUNT_SID") or getattr(config, "TWILIO_ACCOUNT_SID", "")).strip()
-    auth_token = (os.getenv("TWILIO_AUTH_TOKEN") or getattr(config, "TWILIO_AUTH_TOKEN", "")).strip()
-    sender = (os.getenv("TWILIO_WHATSAPP_NUMBER") or getattr(config, "TWILIO_WHATSAPP_NUMBER", "") or "whatsapp:+14155238886").strip()
-
-    if not account_sid or not auth_token:
-        # Check backend/.env and root .env directly
-        base_dir = Path(__file__).parent.parent
-        env_dict = {**dotenv_values(base_dir.parent / ".env"), **dotenv_values(base_dir / ".env")}
-        account_sid = (env_dict.get("TWILIO_ACCOUNT_SID") or "").strip()
-        auth_token = (env_dict.get("TWILIO_AUTH_TOKEN") or "").strip()
-        if env_dict.get("TWILIO_WHATSAPP_NUMBER"):
-            sender = env_dict["TWILIO_WHATSAPP_NUMBER"].strip()
+    # Always read dynamically from .env on disk first, falling back to os.environ / config
+    base_dir = Path(__file__).parent.parent
+    env_dict = {**dotenv_values(base_dir.parent / ".env"), **dotenv_values(base_dir / ".env")}
+    account_sid = (env_dict.get("TWILIO_ACCOUNT_SID") or os.getenv("TWILIO_ACCOUNT_SID") or getattr(config, "TWILIO_ACCOUNT_SID", "")).strip()
+    auth_token = (env_dict.get("TWILIO_AUTH_TOKEN") or os.getenv("TWILIO_AUTH_TOKEN") or getattr(config, "TWILIO_AUTH_TOKEN", "")).strip()
+    sender = (env_dict.get("TWILIO_WHATSAPP_NUMBER") or os.getenv("TWILIO_WHATSAPP_NUMBER") or getattr(config, "TWILIO_WHATSAPP_NUMBER", "") or "whatsapp:+14155238886").strip()
 
     # If no credentials configured, simulate delivery safely
     if not account_sid or not auth_token:
@@ -123,11 +116,16 @@ def send_whatsapp_message(to_phone: str, message_body: str) -> Dict[str, Any]:
             "status": msg.status,
         }
     except Exception as exc:
+        err_str = str(exc)
+        if "63015" in err_str or "could not find" in err_str.lower():
+            friendly_err = f"Number {clean_phone} has not joined Twilio WhatsApp Sandbox. Send 'join <keyword>' to +14155238886 from this phone."
+        else:
+            friendly_err = err_str
         logger.exception("[WhatsAppSender] Failed to send WhatsApp message via Twilio: %s", exc)
         return {
             "success": False,
             "simulated": False,
-            "error": str(exc),
+            "error": friendly_err,
             "to": clean_phone,
         }
 
