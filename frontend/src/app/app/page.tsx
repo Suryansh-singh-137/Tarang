@@ -250,6 +250,28 @@ function AppWorkspace() {
     requestBrowserLocation(false);
   }, []);
 
+  // Continuous GPS tracking for real-time maritime geofence surveillance
+  useEffect(() => {
+    if (typeof window === "undefined" || !navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        setUserCoords({ lat, lon });
+      },
+      (err) => {
+        // Quietly log non-fatal watch errors
+        console.debug("[GPS Watch] Position update skipped:", err.message);
+      },
+      { timeout: 20000, maximumAge: 5000, enableHighAccuracy: true }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
+
   // Handle Query Submission
   const handleSendMessage = async (queryText: string) => {
     if (!queryText.trim() || isLoading) return;

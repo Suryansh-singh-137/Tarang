@@ -352,6 +352,8 @@ export interface GeofenceEvaluationResult {
     error?: string;
     message_preview?: string;
     note?: string;
+    rate_limited?: boolean;
+    next_allowed_in_seconds?: number;
   };
   sms_sent?: boolean;
   sms_result?: {
@@ -363,6 +365,8 @@ export interface GeofenceEvaluationResult {
     error?: string;
     message_preview?: string;
     note?: string;
+    rate_limited?: boolean;
+    next_allowed_in_seconds?: number;
   };
 }
 
@@ -375,7 +379,8 @@ export async function evaluateGeofenceApi(
   phone?: string,
   name?: string,
   triggerWhatsapp: boolean = true,
-  triggerSms: boolean = true
+  triggerSms: boolean = true,
+  forceDispatch: boolean = false
 ): Promise<GeofenceEvaluationResult | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/geofence/evaluate`, {
@@ -388,6 +393,7 @@ export async function evaluateGeofenceApi(
         name: name || undefined,
         trigger_whatsapp: triggerWhatsapp,
         trigger_sms: triggerSms,
+        force_dispatch: forceDispatch,
       }),
     });
     if (!res.ok) return null;

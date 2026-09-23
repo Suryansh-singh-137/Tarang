@@ -195,49 +195,73 @@ def get_regional_ecosystem_data(
     if current_period is not None:
         decline_periods.append(current_period)
 
+    correlations_data = {
+        "chl_vs_catch": {
+            "r": r_chl_catch,
+            "p_value": p_chl_catch,
+            "significance": "statistically_significant" if p_chl_catch < 0.05 else "non_significant",
+            "interpretation": (
+                "Strong positive trophic coupling: abundance of primary producers (chlorophyll) directly sustains pelagic fish biomass."
+                if r_chl_catch > 0.4
+                else "Moderate bottom-up coupling between ocean primary production and landing volume."
+                if r_chl_catch > 0.1
+                else "Inverse or decoupled relation: biomass swings decoupled from surface chlorophyll blooms."
+                if r_chl_catch < -0.1
+                else "Neutral/weak correlation between chlorophyll and catch in this sector."
+            ),
+        },
+        "sst_anomaly_vs_catch": {
+            "r": r_sstanom_catch,
+            "p_value": p_sstanom_catch,
+            "significance": "statistically_significant" if p_sstanom_catch < 0.05 else "non_significant",
+            "interpretation": (
+                "Strong negative thermal impact: anomalous sea surface warming drives pelagic shoals into deeper thermoclines or poleward."
+                if r_sstanom_catch < -0.3
+                else "Mild thermal sensitivity: temperature rises intermittently disrupt traditional school aggregation."
+                if r_sstanom_catch < 0
+                else "Thermally resilient: pelagic biomass remains resilient under ambient temperature variations."
+            ),
+        },
+        "chl_vs_sst": {
+            "r": r_chl_sst,
+            "p_value": p_chl_sst,
+            "significance": "statistically_significant" if p_chl_sst < 0.05 else "non_significant",
+            "interpretation": (
+                "Classical tropical upwelling relationship: colder deep waters bring nutrient-rich pulses that spike chlorophyll blooms."
+                if r_chl_sst < -0.2
+                else "Stratified conditions: weak coupling between thermal variations and surface nutrient pulses."
+            ),
+        },
+    }
+
+    anomalies_data = {
+        "marine_heatwave_months": mhw_count,
+        "chlorophyll_deficit_months": chl_deficit_count,
+        "catch_collapse_months": severe_catch_drop_count,
+        "stress_index": stress_index,
+        "stress_level": stress_level,
+        "stress_label": stress_label,
+    }
+
+    time_win = {
+        "start_year": start_year,
+        "end_year": end_year,
+        "total_months": len(series),
+    }
+
     return {
         "metadata": metadata,
         "region_id": region_id,
-        "time_window": f"{start_year} - {end_year}",
+        "region": region_id,
+        "time_window": time_win,
         "total_months": len(series),
         "series": series,
+        "correlations": correlations_data,
+        "anomalies_summary": anomalies_data,
         "statistics": {
-            "correlations": {
-                "chl_vs_catch": {
-                    "r": r_chl_catch,
-                    "p_value": p_chl_catch,
-                    "significance": "statistically_significant" if p_chl_catch < 0.05 else "non_significant",
-                    "interpretation": (
-                        "Strong positive trophic coupling: abundance of primary producers (chlorophyll) directly sustains pelagic fish biomass."
-                        if r_chl_catch > 0.4
-                        else "Moderate bottom-up coupling between ocean primary production and landing volume."
-                    ),
-                },
-                "sst_anomaly_vs_catch": {
-                    "r": r_sstanom_catch,
-                    "p_value": p_sstanom_catch,
-                    "significance": "statistically_significant" if p_sstanom_catch < 0.05 else "non_significant",
-                    "interpretation": (
-                        "Strong negative thermal impact: anomalous sea surface warming drives pelagic shoals into deeper thermoclines or poleward."
-                        if r_sstanom_catch < -0.3
-                        else "Thermal anomalies intermittently disrupt normal seasonal coastal aggregation."
-                    ),
-                },
-                "chl_vs_sst": {
-                    "r": r_chl_sst,
-                    "p_value": p_chl_sst,
-                    "significance": "statistically_significant" if p_chl_sst < 0.05 else "non_significant",
-                    "interpretation": "Classical tropical upwelling relationship: colder deep waters bring nutrient-rich pulses that spike chlorophyll blooms.",
-                },
-            },
-            "anomalies": {
-                "marine_heatwave_months": mhw_count,
-                "chlorophyll_deficit_months": chl_deficit_count,
-                "catch_collapse_months": severe_catch_drop_count,
-                "stress_index": stress_index,
-                "stress_level": stress_level,
-                "stress_label": stress_label,
-            },
+            "correlations": correlations_data,
+            "anomalies": anomalies_data,
+            "anomalies_summary": anomalies_data,
             "decline_periods": decline_periods,
         },
     }
