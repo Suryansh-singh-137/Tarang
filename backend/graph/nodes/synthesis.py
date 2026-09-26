@@ -39,6 +39,7 @@ import logging
 import config
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
+import math
 
 from graph.state import AgentResult, EvidenceItem, ORCAState, AnswerPlan
 
@@ -600,16 +601,30 @@ def _render_weather_response(
     loc_name = resolved.get("name", "your location") if resolved else "your location"
     tw = _TIME_LABELS.get(lang, _TIME_LABELS["en"]).get(time_window, time_window)
 
-    lines = []
-    if lang == "hi":
-        lines.append(f"🌤 **{loc_name} — वर्तमान एवं पूर्वानुमानित मौसम ({tw})**\n")
-    elif lang == "ta":
-        lines.append(f"🌤 **{loc_name} — தற்போதைய மற்றும் முன்னறிவிப்பு வானிலை ({tw})**\n")
-    else:
-        lines.append(f"🌤 **Current & Forecast Weather — {loc_name} ({tw}):**\n")
+    titles = {
+        "hi": f"🌤 **{loc_name} — वर्तमान एवं पूर्वानुमानित मौसम ({tw})**\n",
+        "ta": f"🌤 **{loc_name} — தற்போதைய மற்றும் முன்னறிவிப்பு வானிலை ({tw})**\n",
+        "gu": f"🌤 **{loc_name} — વર્તમાન અને આગાહી હવામાન સ્થિતિ ({tw})**\n",
+        "bn": f"🌤 **{loc_name} — বর্তমান ও পূর্বাভাসের আবহাওয়া ({tw})**\n",
+        "te": f"🌤 **{loc_name} — ప్రస్తుత మరియు అంచనా వాతావరణం ({tw})**\n",
+        "ml": f"🌤 **{loc_name} — നിലവിലെയും പ്രവചനവുമായ കാലാവസ്ഥ ({tw})**\n",
+        "mr": f"🌤 **{loc_name} — सद्य व अंदाजित हवामान ({tw})**\n",
+        "od": f"🌤 **{loc_name} — ବର୍ତ୍ତମାନ ଓ ପୂର୍ବାନୁମାନ ପାଣିପାଗ ({tw})**\n",
+    }
+    lines = [titles.get(lang, f"🌤 **Current & Forecast Weather — {loc_name} ({tw}):**\n")]
 
     if not weather or weather.get("status") in ("error", "insufficient_data") or not weather.get("data"):
-        lines.append("Live weather data is currently unavailable for this location.")
+        unavail = {
+            "hi": "इस स्थान के लिए लाइव मौसम डेटा वर्तमान में उपलब्ध नहीं है।",
+            "ta": "இந்த இடத்திற்கான நேரடி வானிலை தரவு தற்போது கிடைக்கவில்லை.",
+            "gu": "આ સ્થળ માટે લાઈવ હવામાન ડેટા હાલ ઉપલબ્ધ નથી.",
+            "bn": "এই অবস্থানের জন্য লাইভ আবহাওয়ার তথ্য বর্তমানে উপলব্ধ নয়।",
+            "te": "ఈ ప్రదేశానికి ప్రత్యక్ష వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు.",
+            "ml": "ഈ ലൊക്കേഷനിലെ തത്സമയ കാലാവസ്ഥാ വിവരങ്ങൾ ഇപ്പോൾ ലഭ്യമല്ല.",
+            "mr": "या ठिकाणासाठी थेट हवामान डेटा सध्या उपलब्ध नाही.",
+            "od": "ଏହି ସ୍ଥାନ ପାଇଁ ଲାଇଭ୍ ପାଣିପାଗ ତଥ୍ୟ ବର୍ତ୍ତମାନ ଉପଲବ୍ଧ ନାହିଁ।",
+        }
+        lines.append(unavail.get(lang, "Live weather data is currently unavailable for this location."))
     else:
         d = weather.get("data", {})
         temp = d.get("temperature_c") or d.get("air_temperature_c")
@@ -620,23 +635,159 @@ def _render_weather_response(
         sea = d.get("sea_state")
 
         conds = []
-        if temp is not None:
-            conds.append(f"Temperature is around {temp}°C")
-        if wind is not None:
-            conds.append(f"wind is {wind} km/h from {wind_dir}")
-        if wave is not None:
-            conds.append(f"wave height is {wave} m")
-        if sea:
-            conds.append(f"sea state is {sea}")
-        if conds:
-            lines.append("• " + ", ".join(conds) + ".")
-        if pressure is not None:
-            lines.append(f"• Air pressure: **{pressure} hPa** (MSL)")
-        if d.get("visibility_km"):
-            lines.append(f"• Visibility: {d['visibility_km']} km")
-
-        src = weather.get("source", "Open-Meteo Marine + Forecast")
-        lines.append(f"\n*(Source: {src})*")
+        if lang == "hi":
+            if temp is not None:
+                conds.append(f"तापमान लगभग {temp}°C है")
+            if wind is not None:
+                conds.append(f"हवा की गति {wind} km/h ({wind_dir}) है")
+            if wave is not None:
+                conds.append(f"लहरों की ऊँचाई {wave} m है")
+            if sea:
+                conds.append(f"समुद्र की स्थिति '{sea}' है")
+            if conds:
+                lines.append("• " + ", ".join(conds) + "।")
+            if pressure is not None:
+                lines.append(f"• वायुमंडलीय दबाव: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• दृश्यता: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(स्रोत: {src})*")
+        elif lang == "ta":
+            if temp is not None:
+                conds.append(f"வெப்பநிலை சுமார் {temp}°C")
+            if wind is not None:
+                conds.append(f"காற்று வேகம் {wind} km/h ({wind_dir})")
+            if wave is not None:
+                conds.append(f"அலை உயரம் {wave} m")
+            if sea:
+                conds.append(f"கடல் நிலை '{sea}'")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• வளிமண்டல அழுத்தம்: **{pressure} hPa**")
+            if d.get("visibility_km"):
+                lines.append(f"• பார்வை தூரம்: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(மூலம்: {src})*")
+        elif lang == "gu":
+            if temp is not None:
+                conds.append(f"તાપમાન આશરે {temp}°C છે")
+            if wind is not None:
+                conds.append(f"પવનની ગતિ {wind} km/h ({wind_dir}) છે")
+            if wave is not None:
+                conds.append(f"મોજાંની ઊંચાઈ {wave} m છે")
+            if sea:
+                conds.append(f"દરિયાની સ્થિતિ '{sea}' છે")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• હવાનું દબાણ: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• દૃશ્યતા: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(સ્રોત: {src})*")
+        elif lang == "bn":
+            if temp is not None:
+                conds.append(f"তাপমাত্রা প্রায় {temp}°C")
+            if wind is not None:
+                conds.append(f"বাতাসের গতি {wind} km/h ({wind_dir})")
+            if wave is not None:
+                conds.append(f"ঢেউয়ের উচ্চতা {wave} m")
+            if sea:
+                conds.append(f"সমুদ্রের অবস্থা '{sea}'")
+            if conds:
+                lines.append("• " + ", ".join(conds) + "।")
+            if pressure is not None:
+                lines.append(f"• বায়ুমণ্ডলীয় চাপ: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• দৃশ্যমানতা: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(উৎস: {src})*")
+        elif lang == "te":
+            if temp is not None:
+                conds.append(f"ఉష్ణోగ్రత దాదాపు {temp}°C")
+            if wind is not None:
+                conds.append(f"గాలి వేగం {wind} km/h ({wind_dir})")
+            if wave is not None:
+                conds.append(f"అలల ఎత్తు {wave} m")
+            if sea:
+                conds.append(f"సముద్ర స్థితి '{sea}'")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• వాతావరణ పీడనం: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• దృశ్యమానత: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(మూలం: {src})*")
+        elif lang == "ml":
+            if temp is not None:
+                conds.append(f"താപനില ഏകദേശം {temp}°C ആണ്")
+            if wind is not None:
+                conds.append(f"കാറ്റിന്റെ വേഗത {wind} km/h ({wind_dir}) ആണ്")
+            if wave is not None:
+                conds.append(f"തിരമാല ഉയരം {wave} m ആണ്")
+            if sea:
+                conds.append(f"കടലിന്റെ അവസ്ഥ '{sea}' ആണ്")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• അന്തരീക്ഷ മർദ്ദം: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• ദൃശ്യപരത: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(ഉറവിടം: {src})*")
+        elif lang == "mr":
+            if temp is not None:
+                conds.append(f"तापमान सुमारे {temp}°C आहे")
+            if wind is not None:
+                conds.append(f"वाऱ्याचा वेग {wind} km/h ({wind_dir}) आहे")
+            if wave is not None:
+                conds.append(f"लाटांची उंची {wave} m आहे")
+            if sea:
+                conds.append(f"समुद्राची स्थिती '{sea}' आहे")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• हवेचा दाब: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• दृश्यमानता: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(स्रोत: {src})*")
+        elif lang in ("od", "or"):
+            if temp is not None:
+                conds.append(f"ତାପମାତ୍ରା ପ୍ରାୟ {temp}°C")
+            if wind is not None:
+                conds.append(f"ପବନର ବେଗ {wind} km/h ({wind_dir})")
+            if wave is not None:
+                conds.append(f"ଢେଉର ଉଚ୍ଚତା {wave} m")
+            if sea:
+                conds.append(f"ସମୁଦ୍ରର ଅବସ୍ଥା '{sea}'")
+            if conds:
+                lines.append("• " + ", ".join(conds) + "।")
+            if pressure is not None:
+                lines.append(f"• ବାୟୁମଣ୍ଡଳୀୟ ଚାପ: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• ଦୃଶ୍ୟମାନତା: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(ଉତ୍ସ: {src})*")
+        else:
+            if temp is not None:
+                conds.append(f"Temperature is around {temp}°C")
+            if wind is not None:
+                conds.append(f"wind is {wind} km/h from {wind_dir}")
+            if wave is not None:
+                conds.append(f"wave height is {wave} m")
+            if sea:
+                conds.append(f"sea state is {sea}")
+            if conds:
+                lines.append("• " + ", ".join(conds) + ".")
+            if pressure is not None:
+                lines.append(f"• Air pressure: **{pressure} hPa** (MSL)")
+            if d.get("visibility_km"):
+                lines.append(f"• Visibility: {d['visibility_km']} km")
+            src = weather.get("source", "Open-Meteo Marine + Forecast")
+            lines.append(f"\n*(Source: {src})*")
     return "\n".join(lines)
 
 
@@ -646,29 +797,65 @@ def _render_ocean_response(
     ocean: Optional[AgentResult],
 ) -> str:
     loc_name = resolved.get("name", "coastal waters") if resolved else "coastal waters"
-    lines = []
-    if lang == "hi":
-        lines.append(f"🌊 **{loc_name} — ज्वार एवं जल स्तर का पूर्वानुमान (Chart Datum)**\n")
-    elif lang == "ta":
-        lines.append(f"🌊 **{loc_name} — கடல் அலை மற்றும் நீர்மட்ட முன்னறிவிப்பு (Chart Datum)**\n")
-    else:
-        lines.append(f"🌊 **Tide & Water Level Prediction — {loc_name} (Chart Datum)**\n")
+    titles = {
+        "hi": f"🌊 **{loc_name} — ज्वार एवं जल स्तर का पूर्वानुमान (Chart Datum)**\n",
+        "ta": f"🌊 **{loc_name} — கடல் அலை மற்றும் நீர்மட்ட முன்னறிவிப்பு (Chart Datum)**\n",
+        "gu": f"🌊 **{loc_name} — ભરતી અને જળસ્તરની આગાહી (Chart Datum)**\n",
+        "bn": f"🌊 **{loc_name} — জোয়ার ও জলস্তরের পূর্বাভাস (Chart Datum)**\n",
+        "te": f"🌊 **{loc_name} — పోటు-పాటు మరియు నీటి మట్టం అంచనా (Chart Datum)**\n",
+        "ml": f"🌊 **{loc_name} — വേലിയേറ്റവും ജലനിരപ്പ് പ്രവചനവും (Chart Datum)**\n",
+        "mr": f"🌊 **{loc_name} — भरती-ओहोटी व पाण्याची पातळी अंदाज (Chart Datum)**\n",
+        "od": f"🌊 **{loc_name} — ଜୁଆର ଏବଂ ଜଳସ୍ତର ପୂର୍ବାନୁମାନ (Chart Datum)**\n",
+    }
+    lines = [titles.get(lang, f"🌊 **Tide & Water Level Prediction — {loc_name} (Chart Datum)**\n")]
 
     if not ocean or ocean.get("status") in ("error", "insufficient_data") or not ocean.get("data"):
-        lines.append("Live tide and ocean water level data is currently unavailable for this location.")
+        unavail = {
+            "hi": "इस स्थान के लिए लाइव ज्वार और जल स्तर डेटा वर्तमान में उपलब्ध नहीं है।",
+            "ta": "இந்த இடத்திற்கான நேரடி அலை மற்றும் நீர்மட்டத் தரவு தற்போது கிடைக்கவில்லை.",
+            "gu": "આ સ્થળ માટે લાઈવ ભરતી અને જળસ્તર ડેટા હાલ ઉપલબ્ધ નથી.",
+            "bn": "এই অবস্থানের জন্য লাইভ জোয়ার ও জলস্তরের তথ্য বর্তমানে উপলব্ধ নয়।",
+            "te": "ఈ ప్రదేశానికి ప్రత్యక్ష పోటు మరియు నీటి మట్టం సమాచారం ప్రస్తుతం అందుబాటులో లేదు.",
+            "ml": "ഈ ലൊക്കേഷനിലെ തത്സമയ വേലിയേറ്റ വിവരങ്ങൾ ഇപ്പോൾ ലഭ്യമല്ല.",
+            "mr": "या ठिकाणासाठी थेट भरती आणि पाण्याची पातळी डेटा सध्या उपलब्ध नाही.",
+            "od": "ଏହି ସ୍ଥାନ ପାଇଁ ଲାଇଭ୍ ଜୁଆର ଓ ଜଳସ୍ତର ତଥ୍ୟ ବର୍ତ୍ତମାନ ଉପଲବ୍ଧ ନାହିଁ।",
+        }
+        lines.append(unavail.get(lang, "Live tide and ocean water level data is currently unavailable for this location."))
     else:
         od = ocean.get("data", {})
         wl = od.get("water_level_m", 0.0)
         phase = od.get("current_phase", "Normal")
-        lines.append(f"• The current water level at **{loc_name}** is about **{wl:.2f} m** above chart datum.")
-        lines.append(f"• Tide status: **{phase}** right now.")
-        if od.get("next_high_tide"):
-            ht = od["next_high_tide"]
-            lines.append(f"• Next High Tide: **{ht.get('time_ist')}** ({ht.get('height_m')} m CD)")
-        if od.get("next_low_tide"):
-            lt = od["next_low_tide"]
-            lines.append(f"• Next Low Tide: **{lt.get('time_ist')}** ({lt.get('height_m')} m CD)")
-        lines.append(f"\n*(Source: {ocean.get('source', 'INCOIS ERDDAP')} • Type: Harmonic tidal prediction model)*")
+        src = ocean.get("source", "INCOIS ERDDAP")
+        if lang == "hi":
+            lines.append(f"• **{loc_name}** पर वर्तमान जल स्तर चार्ट डेटम से लगभग **{wl:.2f} m** ऊपर है।")
+            lines.append(f"• ज्वार की स्थिति: अभी **{phase}** है।")
+            if od.get("next_high_tide"):
+                ht = od["next_high_tide"]
+                lines.append(f"• अगला उच्च ज्वार: **{ht.get('time_ist')}** ({ht.get('height_m')} m CD)")
+            if od.get("next_low_tide"):
+                lt = od["next_low_tide"]
+                lines.append(f"• अगला निम्न ज्वार: **{lt.get('time_ist')}** ({lt.get('height_m')} m CD)")
+            lines.append(f"\n*(स्रोत: {src} • प्रकार: हार्मोनिक ज्वार मॉडल)*")
+        elif lang == "ta":
+            lines.append(f"• **{loc_name}** இல் தற்போதைய நீர்மட்டம் சார்ட் டேட்டத்திற்கு மேல் சுமார் **{wl:.2f} m** உள்ளது.")
+            lines.append(f"• அலை நிலை: இப்போது **{phase}**.")
+            if od.get("next_high_tide"):
+                ht = od["next_high_tide"]
+                lines.append(f"• அடுத்த உயர் அலை: **{ht.get('time_ist')}** ({ht.get('height_m')} m CD)")
+            if od.get("next_low_tide"):
+                lt = od["next_low_tide"]
+                lines.append(f"• அடுத்த குறைந்த அலை: **{lt.get('time_ist')}** ({lt.get('height_m')} m CD)")
+            lines.append(f"\n*(மூலம்: {src})*")
+        else:
+            lines.append(f"• The current water level at **{loc_name}** is about **{wl:.2f} m** above chart datum.")
+            lines.append(f"• Tide status: **{phase}** right now.")
+            if od.get("next_high_tide"):
+                ht = od["next_high_tide"]
+                lines.append(f"• Next High Tide: **{ht.get('time_ist')}** ({ht.get('height_m')} m CD)")
+            if od.get("next_low_tide"):
+                lt = od["next_low_tide"]
+                lines.append(f"• Next Low Tide: **{lt.get('time_ist')}** ({lt.get('height_m')} m CD)")
+            lines.append(f"\n*(Source: {src} • Type: Harmonic tidal prediction model)*")
     return "\n".join(lines)
 
 
@@ -678,13 +865,30 @@ def _render_pressure_response(
     weather: Optional[AgentResult],
 ) -> str:
     loc_name = resolved.get("name", "your location") if resolved else "your location"
-    lines = [f"🌡 **Air Pressure (MSL) — {loc_name}**\n"]
-    if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
-        p = weather["data"]["pressure_msl_hpa"]
-        lines.append(f"• Air pressure: **{p} hPa** (mean sea level datum)")
-        lines.append(f"\n*(Source: {weather.get('source', 'Open-Meteo')})*")
+    if lang == "hi":
+        lines = [f"🌡 **वायुमंडलीय दबाव (MSL) — {loc_name}**\n"]
+        if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
+            p = weather["data"]["pressure_msl_hpa"]
+            lines.append(f"• वायुमंडलीय दबाव: **{p} hPa** (समुद्र तल स्तर)")
+            lines.append(f"\n*(स्रोत: {weather.get('source', 'Open-Meteo')})*")
+        else:
+            lines.append("इस स्थान के लिए वायुमंडलीय दबाव डेटा वर्तमान में उपलब्ध नहीं है।")
+    elif lang == "ta":
+        lines = [f"🌡 **வளிமண்டல அழுத்தம் (MSL) — {loc_name}**\n"]
+        if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
+            p = weather["data"]["pressure_msl_hpa"]
+            lines.append(f"• வளிமண்டல அழுத்தம்: **{p} hPa**")
+            lines.append(f"\n*(மூலம்: {weather.get('source', 'Open-Meteo')})*")
+        else:
+            lines.append("இந்த இடத்திற்கான வளிமண்டல அழுத்தத் தரவு தற்போது கிடைக்கவில்லை.")
     else:
-        lines.append("Atmospheric surface pressure data is currently unavailable for this location.")
+        lines = [f"🌡 **Air Pressure (MSL) — {loc_name}**\n"]
+        if weather and weather.get("status") == "success" and weather.get("data", {}).get("pressure_msl_hpa"):
+            p = weather["data"]["pressure_msl_hpa"]
+            lines.append(f"• Air pressure: **{p} hPa** (mean sea level datum)")
+            lines.append(f"\n*(Source: {weather.get('source', 'Open-Meteo')})*")
+        else:
+            lines.append("Atmospheric surface pressure data is currently unavailable for this location.")
     return "\n".join(lines)
 
 
@@ -694,21 +898,50 @@ def _render_pfz_response(
     pfz: Optional[AgentResult],
 ) -> str:
     loc_name = resolved.get("name", "waters") if resolved else "waters"
-    lines = [f"🐟 **Fishing Potential Indicator — {loc_name}**\n"]
-    if pfz and pfz.get("status") == "success" and pfz.get("data"):
-        d = pfz["data"]
-        nearest = d.get("nearest_zone_km", 104)
-        n_zones = len(d.get("zones", []))
-        productivity = d.get("overall_productivity", "moderate")
-        lines.append("🐟 Fishing indicator found.")
-        if isinstance(nearest, (int, float)):
-            lines.append(f"The nearest indicator zone is about **{nearest:.0f} km** away.")
-        lines.append("It is based on satellite chlorophyll data and is only an indicator, not a guarantee of fish.")
-        if n_zones > 1:
-            lines.append(f"Total indicator zones identified: {n_zones} (general productivity: {productivity}).")
-        lines.append(f"\n*(Source: {pfz.get('source', 'INCOIS Oceansat-2')} • Type: Satellite chlorophyll proxy)*")
+    if lang == "hi":
+        lines = [f"🐟 **मछली पकड़ने के क्षेत्र सूचक (PFZ) — {loc_name}**\n"]
+        if pfz and pfz.get("status") == "success" and pfz.get("data"):
+            d = pfz["data"]
+            nearest = d.get("nearest_zone_km", 104)
+            n_zones = len(d.get("zones", []))
+            productivity = d.get("overall_productivity", "moderate")
+            lines.append("🐟 मछली क्षेत्र सूचक मिला।")
+            if isinstance(nearest, (int, float)):
+                lines.append(f"सबसे निकटतम सूचक क्षेत्र लगभग **{nearest:.0f} km** दूर है।")
+            lines.append("यह उपग्रह क्लोरोफिल डेटा पर आधारित केवल एक वैज्ञानिक सूचक है, मछली की गारंटी नहीं।")
+            if n_zones > 1:
+                lines.append(f"कुल पहचाने गए क्षेत्र: {n_zones} (उत्पादकता: {productivity})।")
+            lines.append(f"\n*(स्रोत: {pfz.get('source', 'INCOIS Oceansat-2')} • प्रकार: उपग्रह क्लोरोफिल प्रॉक्सी)*")
+        else:
+            lines.append("इस स्थान के लिए लाइव मछली पकड़ने के क्षेत्र का डेटा वर्तमान में उपलब्ध नहीं है।")
+    elif lang == "ta":
+        lines = [f"🐟 **மீன்பிடி திறன் சுட்டி (PFZ) — {loc_name}**\n"]
+        if pfz and pfz.get("status") == "success" and pfz.get("data"):
+            d = pfz["data"]
+            nearest = d.get("nearest_zone_km", 104)
+            lines.append("🐟 மீன்பிடி சாத்தியக்கூறு சுட்டி கண்டறியப்பட்டது.")
+            if isinstance(nearest, (int, float)):
+                lines.append(f"அருகிலுள்ள மண்டலம் சுமார் **{nearest:.0f} km** தொலைவில் உள்ளது.")
+            lines.append("இது செயற்கைக்கோள் குளோரோஃபில் அடிப்படையிலான சுட்டி மட்டுமே, மீன் கிடைக்கும் உத்தரவாதம் அல்ல.")
+            lines.append(f"\n*(மூலம்: {pfz.get('source', 'INCOIS Oceansat-2')})*")
+        else:
+            lines.append("இந்த இடத்திற்கான நேரடி மீன்பிடி மண்டலத் தரவு தற்போது கிடைக்கவில்லை.")
     else:
-        lines.append("Live fishing-zone data is currently unavailable for this location.")
+        lines = [f"🐟 **Fishing Potential Indicator — {loc_name}**\n"]
+        if pfz and pfz.get("status") == "success" and pfz.get("data"):
+            d = pfz["data"]
+            nearest = d.get("nearest_zone_km", 104)
+            n_zones = len(d.get("zones", []))
+            productivity = d.get("overall_productivity", "moderate")
+            lines.append("🐟 Fishing indicator found.")
+            if isinstance(nearest, (int, float)):
+                lines.append(f"The nearest indicator zone is about **{nearest:.0f} km** away.")
+            lines.append("It is based on satellite chlorophyll data and is only an indicator, not a guarantee of fish.")
+            if n_zones > 1:
+                lines.append(f"Total indicator zones identified: {n_zones} (general productivity: {productivity}).")
+            lines.append(f"\n*(Source: {pfz.get('source', 'INCOIS Oceansat-2')} • Type: Satellite chlorophyll proxy)*")
+        else:
+            lines.append("Live fishing-zone data is currently unavailable for this location.")
     return "\n".join(lines)
 
 
@@ -1167,51 +1400,99 @@ def _render_risk_explanation_response(
     # Sub-intent 1: COMPARE_WITH_PREVIOUS (PRD §10)
     if subtype == "COMPARE_WITH_PREVIOUS":
         if change_summary and change_summary.get("has_changes"):
-            lines = ["📊 **Changed Since Your Last Check**\n"]
+            title = "📊 **पिछली जांच के बाद से बदलाव**\n" if lang == "hi" else "📊 **முந்தைய சரிபார்ப்பிற்குப் பிறகு ஏற்பட்ட மாற்றங்கள்**\n" if lang == "ta" else "📊 **Changed Since Your Last Check**\n"
+            lines = [title]
             for ch in change_summary.get("changes", []):
                 lines.append(f"• **{ch['factor']}**: {ch['from']} → {ch['to']}")
-            lines.append(f"\nOverall Risk: **{change_summary.get('previous_risk')}** → **{change_summary.get('current_risk')}**")
+            r_str = f"\nकुल जोखिम: **{change_summary.get('previous_risk')}** → **{change_summary.get('current_risk')}**" if lang == "hi" else f"\nஒட்டுமொத்த ஆபத்து: **{change_summary.get('previous_risk')}** → **{change_summary.get('current_risk')}**" if lang == "ta" else f"\nOverall Risk: **{change_summary.get('previous_risk')}** → **{change_summary.get('current_risk')}**"
+            lines.append(r_str)
             return "\n".join(lines)
         else:
-            return f"Conditions near **{loc_name}** are unchanged since your previous check. Wave height, wind, and hazard levels have remained steady at **{label} Risk**."
+            if lang == "hi":
+                return f"**{loc_name}** के पास समुद्र की स्थिति आपकी पिछली जांच के समान ही स्थिर बनी हुई है। लहरें, हवा और खतरे का स्तर **{label} जोखिम** पर बना हुआ है।"
+            elif lang == "ta":
+                return f"**{loc_name}** இல் கடல் நிலைமைகள் உங்கள் முந்தைய சரிபார்ப்பிலிருந்து மாறாமல் உள்ளன. ஆபத்து நிலை: **{label}**."
+            else:
+                return f"Conditions near **{loc_name}** are unchanged since your previous check. Wave height, wind, and hazard levels have remained steady at **{label} Risk**."
 
     # Sub-intent 2: WHAT_DOES_THIS_LEVEL_MEAN (PRD §6)
     if subtype == "WHAT_DOES_THIS_LEVEL_MEAN":
         raw_lower = raw_query.lower()
         if "didn't ask" in raw_lower or "didnt ask" in raw_lower or "i didn't" in raw_lower or "what do you mean" in raw_lower:
-            return (
-                f"Tarang evaluated conditions near **{loc_name}** as **{label} Risk** to provide automatic marine safety context for this coastline, not because you asked for departure clearance. "
-                f"You can ask me about weather, wave heights, tides, or fishing indicators anytime."
-            )
+            if lang == "hi":
+                return (
+                    f"Tarang ने **{loc_name}** के लिए **{label} जोखिम** का आकलन स्वचालित समुद्री सुरक्षा संदर्भ देने के लिए किया है। "
+                    f"आप मौसम, लहरों, ज्वार-भाटा या मछली क्षेत्रों के बारे में कभी भी पूछ सकते हैं।"
+                )
+            elif lang == "ta":
+                return (
+                    f"Tarang **{loc_name}** க்கான **{label} ஆபத்து** மதிப்பீட்டை தானியங்கி கடல் பாதுகாப்பு பின்னணியாக வழங்கியுள்ளது. "
+                    f"வானிலை, அலைகள் அல்லது மீன்பிடி பகுதிகள் பற்றி நீங்கள் எப்போது வேண்டுமானாலும் கேட்கலாம்."
+                )
+            else:
+                return (
+                    f"Tarang evaluated conditions near **{loc_name}** as **{label} Risk** to provide automatic marine safety context for this coastline, not because you asked for departure clearance. "
+                    f"You can ask me about weather, wave heights, tides, or fishing indicators anytime."
+                )
         else:
-            return (
-                f"**{label} Risk** means Tarang is detecting conditions that make venturing out to sea unsafe or unsuitable right now. "
-                f"Always consult official advisories from IMD and local port authorities before planning a trip."
-            )
+            if lang == "hi":
+                return (
+                    f"**{label} जोखिम** का अर्थ है कि Tarang ने वर्तमान परिस्थितियों का विश्लेषण कर सुरक्षा मार्गदर्शन प्रदान किया है। "
+                    f"समुद्र में जाने से पहले IMD और स्थानीय बंदरगाह की आधिकारिक सलाह अवश्य देखें।"
+                )
+            elif lang == "ta":
+                return (
+                    f"**{label} ஆபத்து** என்பது தற்போதைய சூழ்நிலையின் அடிப்படையில் Tarang வழங்கும் வழிகாட்டுதலாகும். "
+                    f"பயணத்திற்கு முன் IMD மற்றும் உள்ளூர் துறைமுக அதிகாரிகளின் அதிகாரப்பூர்வ ஆலோசனைகளைக் கவனிக்கவும்."
+                )
+            else:
+                return (
+                    f"**{label} Risk** means Tarang is detecting conditions that make venturing out to sea unsafe or unsuitable right now. "
+                    f"Always consult official advisories from IMD and local port authorities before planning a trip."
+                )
 
     # Sub-intent 3: HAZARD_IMPACT (PRD §6)
     if subtype == "HAZARD_IMPACT":
         if active_warnings:
             warn_str = ", ".join(active_warnings)
-            return (
-                f"An active **{warn_str}** warning is present for **{loc_name}**. "
-                f"In Tarang's safety engine, active severe weather warnings act as an automatic override that elevates risk to protect small craft, even if surface wind and waves are moderate."
-            )
+            if lang == "hi":
+                return (
+                    f"**{loc_name}** के लिए एक सक्रिय **{warn_str}** चेतावनी जारी है। "
+                    f"Tarang के सुरक्षा इंजन में, गंभीर मौसम चेतावनियां सुरक्षा जोखिम को स्वचालित रूप से बढ़ा देती हैं।"
+                )
+            elif lang == "ta":
+                return (
+                    f"**{loc_name}** க்காக தீவிர **{warn_str}** எச்சரிக்கை நடைமுறையில் உள்ளது. "
+                    f"கடுமையான வானிலை எச்சரிக்கைகள் சிறிய படகுகளின் பாதுகாப்பிற்காக ஆபத்தை உயர்த்துகின்றன."
+                )
+            else:
+                return (
+                    f"An active **{warn_str}** warning is present for **{loc_name}**. "
+                    f"In Tarang's safety engine, active severe weather warnings act as an automatic override that elevates risk to protect small craft, even if surface wind and waves are moderate."
+                )
         else:
-            return f"No severe weather warnings are active for **{loc_name}**, so hazard alerts are not currently elevating the risk score."
+            if lang == "hi":
+                return f"**{loc_name}** के लिए कोई गंभीर मौसम चेतावनी सक्रिय नहीं है।"
+            elif lang == "ta":
+                return f"**{loc_name}** க்காக கடுமையான வானிலை எச்சரிக்கைகள் எதுவும் நடைமுறையில் இல்லை."
+            else:
+                return f"No severe weather warnings are active for **{loc_name}**, so hazard alerts are not currently elevating the risk score."
 
     # Sub-intent 4: WHAT_CAUSED_THIS_RISK (PRD §6)
     if subtype == "WHAT_CAUSED_THIS_RISK":
-        lines = [f"Here are the primary factors contributing to the **{label} Risk** rating for **{loc_name}**:\n"]
+        title = f"यहाँ **{loc_name}** के लिए **{label} जोखिम** में योगदान देने वाले प्रमुख कारक हैं:\n" if lang == "hi" else f"**{loc_name}** க்கான **{label} ஆபத்து** மதிப்பீட்டிற்கு பங்களிக்கும் முதன்மை காரணிகள்:\n" if lang == "ta" else f"Here are the primary factors contributing to the **{label} Risk** rating for **{loc_name}**:\n"
+        lines = [title]
         for comp in components:
-            lines.append(f"• **{comp.get('label')}**: measured at {comp.get('raw_value')} {comp.get('raw_unit')} (contribution: {comp.get('contribution', 0.0):.1f} pts)")
-        lines.append(f"\nTotal decision score: **{score:.1f}/100** ({label}).")
+            lines.append(f"• **{comp.get('label')}**: {comp.get('raw_value')} {comp.get('raw_unit')} (योगदान: {comp.get('contribution', 0.0):.1f} अंक)" if lang == "hi" else f"• **{comp.get('label')}**: {comp.get('raw_value')} {comp.get('raw_unit')} (பங்களிப்பு: {comp.get('contribution', 0.0):.1f} புள்ளிகள்)" if lang == "ta" else f"• **{comp.get('label')}**: measured at {comp.get('raw_value')} {comp.get('raw_unit')} (contribution: {comp.get('contribution', 0.0):.1f} pts)")
+        r_sum = f"\nकुल स्कोर: **{score:.1f}/100** ({label})।" if lang == "hi" else f"\nமொத்த மதிப்பெண்: **{score:.1f}/100** ({label})." if lang == "ta" else f"\nTotal decision score: **{score:.1f}/100** ({label})."
+        lines.append(r_sum)
         return "\n".join(lines)
 
     # Sub-intent 5: WHY_THIS_RISK (default)
     factor_lines = []
     if components:
-        factor_lines.append("\n\nHere is a breakdown of how Tarang calculated the risk score:")
+        intro_breakdown = "\n\nयहाँ जोखिम स्कोर की गणना का विवरण है:" if lang == "hi" else "\n\nஆபத்து மதிப்பெண் எவ்வாறு கணக்கிடப்பட்டது என்பதன் விவரம்:" if lang == "ta" else "\n\nHere is a breakdown of how Tarang calculated the risk score:"
+        factor_lines.append(intro_breakdown)
         for comp in components:
             raw_val = comp.get("raw_value")
             raw_unit = comp.get("raw_unit", "")
@@ -1219,20 +1500,40 @@ def _render_risk_explanation_response(
             weight_pct = comp.get("weight", 0.25) * 100
             contrib = comp.get("contribution", 0.0)
             lbl = comp.get("label", "")
-            factor_lines.append(f"• **{lbl}** — measured at **{raw_val} {raw_unit}** → component score {comp_score:.0f}/100 × weight {weight_pct:.0f}% = **{contrib:.1f}** points contribution")
+            factor_lines.append(f"• **{lbl}** — {raw_val} {raw_unit} → घटक स्कोर {comp_score:.0f}/100 × भार {weight_pct:.0f}% = **{contrib:.1f}** अंक" if lang == "hi" else f"• **{lbl}** — {raw_val} {raw_unit} → கூறு மதிப்பெண் {comp_score:.0f}/100 × எடை {weight_pct:.0f}% = **{contrib:.1f}** புள்ளிகள்" if lang == "ta" else f"• **{lbl}** — measured at **{raw_val} {raw_unit}** → component score {comp_score:.0f}/100 × weight {weight_pct:.0f}% = **{contrib:.1f}** points contribution")
 
     factors_str = "\n".join(factor_lines) if factor_lines else ""
 
     if active_warnings:
         warn_str = ", ".join(active_warnings)
-        return (
-            f"The risk is **{label}** mainly because an active **{warn_str}** warning is present near **{loc_name}**. "
-            f"Even though current wind and waves are moderate, the warning increases the overall risk and makes conditions unsuitable for departure.{factors_str}"
-        )
+        if lang == "hi":
+            return (
+                f"जोखिम **{label}** है क्योंकि **{loc_name}** के पास सक्रिय **{warn_str}** चेतावनी जारी है। "
+                f"चेतावनी से कुल जोखिम बढ़ जाता है।{factors_str}"
+            )
+        elif lang == "ta":
+            return (
+                f"**{loc_name}** அருகில் தீவிர **{warn_str}** எச்சரிக்கை உள்ளதால் ஆபத்து **{label}** ஆக உள்ளது.{factors_str}"
+            )
+        else:
+            return (
+                f"The risk is **{label}** mainly because an active **{warn_str}** warning is present near **{loc_name}**. "
+                f"Even though current wind and waves are moderate, the warning increases the overall risk and makes conditions unsuitable for departure.{factors_str}"
+            )
     elif label == "LOW":
-        return f"The risk is **LOW** near **{loc_name}** because the sea is fairly calm right now. Waves are small, wind is light, and no major hazard warning is active.{factors_str}"
+        if lang == "hi":
+            return f"**{loc_name}** के पास जोखिम स्तर **कम (LOW)** है क्योंकि समुद्र काफी शांत है। लहरें छोटी हैं, हवा हल्की है और कोई मौसम चेतावनी सक्रिय नहीं है।{factors_str}"
+        elif lang == "ta":
+            return f"**{loc_name}** அருகில் ஆபத்து **குறைவாக (LOW)** உள்ளது, ஏனெனில் கடல் தற்போது அமைதியாக உள்ளது. அலைகள் சிறியவை, காற்று லேசானது மற்றும் வானிலை எச்சரிக்கைகள் இல்லை.{factors_str}"
+        else:
+            return f"The risk is **LOW** near **{loc_name}** because the sea is fairly calm right now. Waves are small, wind is light, and no major hazard warning is active.{factors_str}"
     else:
-        return f"The risk is **{label}** near **{loc_name}** mainly due to {top_comp.lower()}. Monitor official local advisories before leaving shore.{factors_str}"
+        if lang == "hi":
+            return f"**{loc_name}** के पास जोखिम स्तर **{label}** है। समुद्र में जाने से पहले स्थानीय मौसम सलाह अवश्य देखें।{factors_str}"
+        elif lang == "ta":
+            return f"**{loc_name}** அருகில் ஆபத்து **{label}** ஆக உள்ளது. புறப்படுவதற்கு முன் அதிகாரப்பூர்வ ஆலோசனைகளைக் கவனியுங்கள்.{factors_str}"
+        else:
+            return f"The risk is **{label}** near **{loc_name}** mainly due to {top_comp.lower()}. Monitor official local advisories before leaving shore.{factors_str}"
 
 
 # ---------------------------------------------------------------------------
@@ -1525,25 +1826,23 @@ USER-FACING RESPONSE POLICY (PRD §5.1, §8, §16, §19):
 11. If the intent is PFZ_QUERY: refer to it as 'Fishing Potential Indicator' (satellite chlorophyll proxy), never an 'official PFZ advisory'. State distance and note that satellite data does not guarantee fish.
 12. If cached data was used (e.g. PFZ), state: 'Some fishing-zone data is from the latest available dataset rather than live data.'
 13. NEVER state a numeric value that is not present in the provided evidence or location coordinates.
-14. The response must be in the {lang} language.
+14. {lang_directive}
 
 JSON Evidence:
 {evidence_str}
 """
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_template),
-        ("user", f"Answer this query directly: {raw_query}")
-    ])
-
-    llm = ChatGroq(
-        model=config.GROQ_MODEL_QUALITY,
-        api_key=config.GROQ_API_KEY,
-        temperature=0.2,
-        max_retries=0,
-        timeout=10.0
-    )
-    chain = prompt | llm
+    LANG_DIRECTIVES = {
+        "en": "Respond in English.",
+        "hi": "MANDATORY: You MUST respond ENTIRELY in Hindi (हिन्दी) using Devanagari script. Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Hindi.",
+        "ta": "MANDATORY: You MUST respond ENTIRELY in Tamil (தமிழ்). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Tamil.",
+        "gu": "MANDATORY: You MUST respond ENTIRELY in Gujarati (ગુજરાતી). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Gujarati.",
+        "bn": "MANDATORY: You MUST respond ENTIRELY in Bengali (বাংলা). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Bengali.",
+        "te": "MANDATORY: You MUST respond ENTIRELY in Telugu (తెలుగు). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Telugu.",
+        "ml": "MANDATORY: You MUST respond ENTIRELY in Malayalam (മലയാളം). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Malayalam.",
+        "mr": "MANDATORY: You MUST respond ENTIRELY in Marathi (मराठी) using Devanagari script. Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Marathi.",
+        "od": "MANDATORY: You MUST respond ENTIRELY in Odia (ଓଡ଼ିଆ). Do NOT respond in English. Translate all advice, conditions, and measurements into fluent, natural Odia.",
+    }
 
     LANG_NAMES = {
         "en": "English",
@@ -1558,6 +1857,23 @@ JSON Evidence:
         "or": "Odia",
     }
     lang_name = LANG_NAMES.get(lang, "English")
+    lang_directive = LANG_DIRECTIVES.get(lang, f"Respond in {lang_name}.")
+
+    user_query_msg = f"Answer this query directly in {lang_name}: {raw_query}" if lang != "en" else f"Answer this query directly: {raw_query}"
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_template),
+        ("user", user_query_msg)
+    ])
+
+    llm = ChatGroq(
+        model=config.GROQ_MODEL_QUALITY,
+        api_key=config.GROQ_API_KEY,
+        temperature=0.2,
+        max_retries=0,
+        timeout=10.0
+    )
+    chain = prompt | llm
 
     try:
         res = chain.invoke({
@@ -1569,7 +1885,7 @@ JSON Evidence:
             "lon": lon,
             "area_type": area_type,
             "answer_plan_str": json.dumps(answer_plan, indent=2) if answer_plan else "None",
-            "lang": lang_name,
+            "lang_directive": lang_directive,
             "dq_str": dq_str,
             "evidence_str": evidence_str,
         })
@@ -1597,7 +1913,29 @@ JSON Evidence:
             0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5,
             48.0, 72.0, 100.0, 300.0, 500.0, 1000.0, 1013.25
         }
-        ungrounded = output_nums - evidence_nums - safe_nums
+
+        # Expand evidence numbers with natural rounding variants (e.g. 1.21 -> 1.2, 1011.8 -> 1012.0)
+        expanded_evidence_nums = set(evidence_nums)
+        for n in list(evidence_nums):
+            expanded_evidence_nums.update({
+                round(n, 1),
+                round(n, 2),
+                float(round(n)),
+                float(int(n)),
+                float(math.floor(n)),
+                float(math.ceil(n)),
+            })
+        evidence_nums = expanded_evidence_nums
+
+        def _is_num_grounded(num: float) -> bool:
+            if num in evidence_nums or num in safe_nums:
+                return True
+            for ev in evidence_nums:
+                if abs(num - ev) <= 1.0 or (ev != 0 and abs(num - ev) / abs(ev) < 0.05):
+                    return True
+            return False
+
+        ungrounded = {n for n in output_nums if not _is_num_grounded(n)}
 
         if ungrounded:
             logger.warning(f"Numeric grounding check failed. Ungrounded numbers: {ungrounded}. Falling back to template.")

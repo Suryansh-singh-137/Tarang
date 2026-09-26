@@ -55,25 +55,34 @@ def format_breach_alert_message(breach_data: Dict[str, Any]) -> str:
 def send_whatsapp_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     """
     Send an outbound WhatsApp message via Twilio API.
-    Normalizes phone format (e.g. "+91..." -> "whatsapp:+91...").
+    Normalizes phone format (e.g. "+91 92364 54423" -> "whatsapp:+919236454423").
     If Twilio credentials are not configured, operates in safe simulation mode.
     """
-    clean_phone = str(to_phone).strip()
-    if not clean_phone:
+    import os
+    import re
+    from pathlib import Path
+    from dotenv import dotenv_values
+
+    raw_phone = str(to_phone or "").strip()
+    if not raw_phone:
         return {"success": False, "error": "No phone number provided"}
 
-    if not clean_phone.startswith("whatsapp:"):
-        if not clean_phone.startswith("+"):
-            # Default to India country code if 10-digit number given
-            if len(clean_phone) == 10 and clean_phone.isdigit():
-                clean_phone = f"+91{clean_phone}"
-            else:
-                clean_phone = f"+{clean_phone}"
-        clean_phone = f"whatsapp:{clean_phone}"
+    # Strip whatsapp: prefix if already present for cleaner digit extraction
+    if raw_phone.lower().startswith("whatsapp:"):
+        raw_phone = raw_phone[len("whatsapp:"):]
 
-    import os
-    from dotenv import dotenv_values
-    from pathlib import Path
+    # Strip all non-digit and non-plus characters (e.g. spaces, dashes, parentheses)
+    clean_digits = re.sub(r"[^\d+]", "", raw_phone)
+    if not clean_digits:
+        return {"success": False, "error": "Invalid phone number"}
+
+    if not clean_digits.startswith("+"):
+        if len(clean_digits) == 10 and clean_digits.isdigit():
+            clean_digits = f"+91{clean_digits}"
+        else:
+            clean_digits = f"+{clean_digits}"
+
+    clean_phone = f"whatsapp:{clean_digits}"
 
     # Always read dynamically from .env on disk first, falling back to os.environ / config
     base_dir = Path(__file__).parent.parent
@@ -81,6 +90,8 @@ def send_whatsapp_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     account_sid = (env_dict.get("TWILIO_ACCOUNT_SID") or os.getenv("TWILIO_ACCOUNT_SID") or getattr(config, "TWILIO_ACCOUNT_SID", "")).strip()
     auth_token = (env_dict.get("TWILIO_AUTH_TOKEN") or os.getenv("TWILIO_AUTH_TOKEN") or getattr(config, "TWILIO_AUTH_TOKEN", "")).strip()
     sender = (env_dict.get("TWILIO_WHATSAPP_NUMBER") or os.getenv("TWILIO_WHATSAPP_NUMBER") or getattr(config, "TWILIO_WHATSAPP_NUMBER", "") or "whatsapp:+14155238886").strip()
+    if not sender.lower().startswith("whatsapp:"):
+        sender = f"whatsapp:{sender}"
 
     # If no credentials configured, simulate delivery safely
     if not account_sid or not auth_token:
@@ -118,7 +129,7 @@ def send_whatsapp_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     except Exception as exc:
         err_str = str(exc)
         if "63015" in err_str or "could not find" in err_str.lower():
-            friendly_err = f"Number {clean_phone} has not joined Twilio WhatsApp Sandbox. Send 'join <keyword>' to +14155238886 from this phone."
+            friendly_err = f"Number {clean_phone} is not connected to Twilio WhatsApp Sandbox (or 72-hour session expired). Send 'join basic-hearing' to +1 415 523 8886 from this WhatsApp phone."
         else:
             friendly_err = err_str
         logger.exception("[WhatsAppSender] Failed to send WhatsApp message via Twilio: %s", exc)
@@ -134,3 +145,37 @@ def send_geofence_breach_alert(to_phone: str, breach_data: Dict[str, Any]) -> Di
     """Convenience function: formats breach data and dispatches WhatsApp alert."""
     text = format_breach_alert_message(breach_data)
     return send_whatsapp_message(to_phone, text)
+
+
+_breach_alert_last_sent: dict[str, float] = {}
+
+
+def send_geofence_breach_alert_throttled(
+    to_phone: str,
+    breach_data: Dict[str, Any],
+    cooldown_s: int = 30,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """Dispatches a breach alert only if cooldown period has elapsed since last dispatch."""
+    import time
+    clean_key = str(to_phone or "").strip().lower()
+    now = time.time()
+    last = _breach_alert_last_sent.get(clean_key, 0.0)
+    elapsed = now - last
+
+    if not force and elapsed < cooldown_s:
+        remaining = int(cooldown_s - elapsed)
+        logger.info("[WhatsAppSender] Breach alert to %s throttled (cooldown remaining: %ds)", to_phone, remaining)
+        return {
+            "success": False,
+            "rate_limited": True,
+            "cooldown_seconds": cooldown_s,
+            "next_allowed_in_seconds": remaining,
+            "note": f"WhatsApp alert rate-limited. Next alert allowed in {remaining}s.",
+        }
+
+    res = send_geofence_breach_alert(to_phone, breach_data)
+    if res.get("success"):
+        _breach_alert_last_sent[clean_key] = now
+    return res
+

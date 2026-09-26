@@ -45,24 +45,30 @@ def send_sms_message(to_phone: str, message_body: str) -> Dict[str, Any]:
     Normalizes phone format (strips 'whatsapp:' prefix if present).
     If Twilio credentials or SMS number are not configured, operates in safe simulation mode.
     """
-    clean_phone = str(to_phone).strip()
-    if not clean_phone:
+    import os
+    import re
+    from dotenv import dotenv_values
+    from pathlib import Path
+
+    raw_phone = str(to_phone or "").strip()
+    if not raw_phone:
         return {"success": False, "error": "No phone number provided"}
 
     # Strip whatsapp: prefix if present — SMS uses plain E.164
-    if clean_phone.startswith("whatsapp:"):
-        clean_phone = clean_phone[len("whatsapp:"):]
+    if raw_phone.lower().startswith("whatsapp:"):
+        raw_phone = raw_phone[len("whatsapp:"):]
 
-    if not clean_phone.startswith("+"):
-        # Default to India country code if 10-digit number given
-        if len(clean_phone) == 10 and clean_phone.isdigit():
-            clean_phone = f"+91{clean_phone}"
+    clean_digits = re.sub(r"[^\d+]", "", raw_phone)
+    if not clean_digits:
+        return {"success": False, "error": "Invalid phone number"}
+
+    if not clean_digits.startswith("+"):
+        if len(clean_digits) == 10 and clean_digits.isdigit():
+            clean_digits = f"+91{clean_digits}"
         else:
-            clean_phone = f"+{clean_phone}"
+            clean_digits = f"+{clean_digits}"
 
-    import os
-    from dotenv import dotenv_values
-    from pathlib import Path
+    clean_phone = clean_digits
 
     # Always read dynamically from .env on disk first, falling back to os.environ / config
     base_dir = Path(__file__).parent.parent

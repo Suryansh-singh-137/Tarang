@@ -43,8 +43,12 @@ def _boundary_risk(dist_km: float) -> str:
 def geofence_agent(state: ORCAState) -> dict:
     """
     LangGraph node: compute geospatial distances to maritime boundaries.
-    Pure deterministic computation — no external API.
+    Evaluates proximity to all 7 international maritime boundaries, detects foreign
+    water breaches, and dispatches emergency WhatsApp alerts if breached.
     """
+    from tools.boundary_geo import evaluate_maritime_geofence
+    from tools.whatsapp_sender import send_geofence_breach_alert_throttled
+
     resolved = state.get("resolved_location")
     if not resolved or not resolved.get("coastal"):
         logger.info("[Geofence] Skipped: resolved_location is missing or non-coastal")
@@ -73,33 +77,55 @@ def geofence_agent(state: ORCAState) -> dict:
 
     retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    from pathlib import Path
-    _DATA_DIR = Path(__file__).parent.parent.parent / "data"
-    _IMBL_FILE = _DATA_DIR / "imbl_boundary.geojson"
-    used_geojson = _IMBL_FILE.exists()
+    # Evaluate against all 7 international maritime boundaries
+    eval_geo = evaluate_maritime_geofence(lat, lon, location_name=location_name)
+    is_breached = bool(eval_geo.get("is_breached", False))
+    dist_to_imbl_km = float(eval_geo.get("distance_km", 0.0))
+    boundary_name = str(eval_geo.get("boundary_name", "India–Sri Lanka Maritime Boundary Line (IMBL)"))
+    sector = str(eval_geo.get("sector", "Territorial Border Sector"))
+    bearing_to_safety = float(eval_geo.get("bearing_to_safety", 270.0))
+    bearing_cardinal = str(eval_geo.get("bearing_cardinal", "W"))
+    warning_title = str(eval_geo.get("warning_title", ""))
+    warning_message = str(eval_geo.get("warning_message", ""))
+    coastguard_number = str(eval_geo.get("coastguard_number", "1554"))
 
-    boundary_waypoints = load_imbl_waypoints()
-    dist_to_imbl_km = distance_to_polyline(lat, lon, boundary_waypoints)
-    boundary_risk = _boundary_risk(dist_to_imbl_km)
+    boundary_risk = "critical" if is_breached else _boundary_risk(dist_to_imbl_km)
 
     logger.info(
-        "[Geofence] %s → IMBL: %.1f km (risk=%s)",
-        location_name, dist_to_imbl_km, boundary_risk,
+        "[Geofence] %s (%.4f, %.4f) → %s: %.1f km (breached=%s, risk=%s)",
+        location_name, lat, lon, boundary_name, dist_to_imbl_km, is_breached, boundary_risk,
     )
 
-    # Variables per PRD §9
-    inside_boundary = True  # In Indian maritime waters
+    inside_boundary = not is_breached
     warning = None
-    if dist_to_imbl_km < 10.0:
-        warning = f"CRITICAL: Within {dist_to_imbl_km:.1f} km of India-Sri Lanka IMBL. High risk of boundary crossing."
+    if is_breached:
+        warning = warning_message or f"CRITICAL: Crossed {boundary_name}! Penetration: {dist_to_imbl_km:.1f} km into foreign waters."
+    elif dist_to_imbl_km < 10.0:
+        warning = f"CRITICAL: Within {dist_to_imbl_km:.1f} km of {boundary_name}. High risk of boundary crossing."
     elif dist_to_imbl_km < 20.0:
-        warning = f"ALERT: Within {dist_to_imbl_km:.1f} km of India-Sri Lanka IMBL. Exercise caution."
+        warning = f"ALERT: Within {dist_to_imbl_km:.1f} km of {boundary_name}. Exercise caution."
 
-    geometry_source = (
-        "data/imbl_boundary.geojson"
-        if used_geojson
-        else "Hardcoded IMBL waypoints (UNCLOS reference, public domain)"
-    )
+    # Dispatch emergency WhatsApp notification if border is breached
+    whatsapp_status = None
+    if is_breached:
+        import config
+        recipient_phone = (
+            state.get("user_phone")
+            or state.get("recipient_phone")
+            or getattr(config, "TWILIO_RECIPIENT_PHONE", "")
+            or os.environ.get("TWILIO_RECIPIENT_PHONE", "+919236454423")
+        )
+        if recipient_phone:
+            cooldown_s = int(os.environ.get("GEOFENCE_WHATSAPP_COOLDOWN_SECONDS", "30"))
+            whatsapp_status = send_geofence_breach_alert_throttled(
+                recipient_phone,
+                eval_geo,
+                cooldown_s=cooldown_s,
+            )
+            logger.warning(
+                "[Geofence Agent] Border breach alert dispatched to %s: result=%s",
+                recipient_phone, whatsapp_status,
+            )
 
     data = {
         "query_lat": lat,
@@ -107,34 +133,41 @@ def geofence_agent(state: ORCAState) -> dict:
         "distance_to_boundary_km": round(dist_to_imbl_km, 1),
         "distance_to_imbl_km": round(dist_to_imbl_km, 1),
         "inside_boundary": inside_boundary,
+        "is_breached": is_breached,
+        "boundary_name": boundary_name,
+        "sector": sector,
+        "bearing_to_safety": bearing_to_safety,
+        "bearing_cardinal": bearing_cardinal,
+        "coastguard_number": coastguard_number,
         "warning": warning,
-        "geometry_source": geometry_source,
+        "warning_title": warning_title,
+        "warning_message": warning_message,
         "boundary_risk": boundary_risk,
-        "boundary_name": "India–Sri Lanka Maritime Boundary Line (IMBL)",
-        "geojson_used": used_geojson,
-        "waypoint_count": len(boundary_waypoints),
+        "whatsapp_delivery": whatsapp_status,
+        "geometry_source": "UNCLOS International Maritime Boundary Geometries & Polygon Sector Engine",
     }
 
-    if warning:
+    if is_breached:
         summary = (
-            f"{location_name} is approximately {dist_to_imbl_km:.0f} km from the IMBL. "
+            f"🚨 EMERGENCY: Coordinates indicate vessel has CROSSED the {boundary_name} into foreign waters "
+            f"({dist_to_imbl_km:.1f} km penetration). Steer {bearing_cardinal} ({int(bearing_to_safety)}°) immediately."
+        )
+    elif warning:
+        summary = (
+            f"{location_name} is approximately {dist_to_imbl_km:.0f} km from the {boundary_name}. "
             f"Boundary proximity risk: {boundary_risk.upper()}. {warning}"
         )
     else:
         summary = (
-            f"{location_name} is approximately {dist_to_imbl_km:.0f} km from the IMBL. "
+            f"{location_name} is approximately {dist_to_imbl_km:.0f} km from the {boundary_name}. "
             f"Boundary proximity risk: {boundary_risk}."
         )
 
-    source = (
-        "Static IMBL GeoJSON (data/imbl_boundary.geojson)"
-        if used_geojson
-        else "Hardcoded IMBL waypoints (UNCLOS reference, public domain)"
-    )
+    source = f"Tarang Geofence Engine ({boundary_name})"
 
     evidence: list[EvidenceItem] = [
         EvidenceItem(
-            claim=f"Distance to India-Sri Lanka Maritime Boundary Line (IMBL) is {dist_to_imbl_km:.0f} km",
+            claim=f"Distance to {boundary_name} is {dist_to_imbl_km:.0f} km (breached={is_breached})",
             value=round(dist_to_imbl_km, 1),
             unit="km",
             source=source,
@@ -148,7 +181,7 @@ def geofence_agent(state: ORCAState) -> dict:
     ]
     if warning:
         evidence.append(EvidenceItem(
-            claim=f"Maritime boundary proximity warning: {warning}",
+            claim=f"Maritime boundary advisory: {warning}",
             value=warning,
             unit="",
             source=source,
@@ -170,8 +203,8 @@ def geofence_agent(state: ORCAState) -> dict:
         "data": data,
         "source": source,
         "summary": summary,
-        "used_fallback": not used_geojson,
-        "data_quality": "live" if used_geojson else "fallback",
+        "used_fallback": False,
+        "data_quality": "live",
         "timestamp": retrieved_at,
         "error": None,
         "evidence": evidence,

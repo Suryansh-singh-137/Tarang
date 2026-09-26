@@ -115,6 +115,25 @@ function AppWorkspace() {
     }
   }, []);
 
+  // Sync language selection from URL parameter or localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const validLangs: LanguageCode[] = ["en", "hi", "gu", "bn", "ta", "te", "ml", "mr", "od"];
+      const langParam = searchParams.get("lang") as LanguageCode | null;
+      if (langParam && validLangs.includes(langParam)) {
+        setCurrentLanguage(langParam);
+        setIsManualLanguageOverride(true);
+        localStorage.setItem("tarang_language", langParam);
+      } else {
+        const savedLang = localStorage.getItem("tarang_language") as LanguageCode | null;
+        if (savedLang && validLangs.includes(savedLang)) {
+          setCurrentLanguage(savedLang);
+          setIsManualLanguageOverride(true);
+        }
+      }
+    }
+  }, [searchParams]);
+
   // Check geofence whenever user coords or selected location changes
   const lastGeofenceKey = useRef<string>("");
   const geofenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -273,10 +292,12 @@ function AppWorkspace() {
   }, []);
 
   // Handle Query Submission
-  const handleSendMessage = async (queryText: string) => {
+  const handleSendMessage = async (queryText: string, langOverride?: LanguageCode) => {
     if (!queryText.trim() || isLoading) return;
 
     setActiveTab("chat");
+
+    const effectiveLanguage = langOverride || currentLanguage;
 
     const userMsgId = "user-" + Date.now();
     const assistantMsgId = "asst-" + Date.now();
@@ -418,6 +439,9 @@ function AppWorkspace() {
 
           if (isCoas && resolvedLoc) {
             setLocationStatus("coastal");
+            if (resolvedLoc.lat != null && resolvedLoc.lon != null) {
+              runGeofenceCheck(resolvedLoc.lat, resolvedLoc.lon, resolvedLoc.name || "Coastal Waters");
+            }
             const weatherResult = result.agents?.weather || result.last_results?.weather_agent;
             const wData = weatherResult?.data;
             setLiveConditions({
@@ -476,7 +500,7 @@ function AppWorkspace() {
         user_lat: userCoords ? userCoords.lat : (selectedLocation ? selectedLocation.lat : null),
         user_lon: userCoords ? userCoords.lon : (selectedLocation ? selectedLocation.lon : null),
         user_location_name: userCoords ? "Current Location" : (selectedLocation ? selectedLocation.name : null),
-        language: currentLanguage,
+        language: effectiveLanguage,
       }
     );
   };
@@ -486,13 +510,31 @@ function AppWorkspace() {
     const q = searchParams.get("q");
     if (q && !initialQueryHandled.current) {
       initialQueryHandled.current = true;
-      handleSendMessage(q);
+      const langParam = searchParams.get("lang") as LanguageCode | null;
+      const validLangs: LanguageCode[] = ["en", "hi", "gu", "bn", "ta", "te", "ml", "mr", "od"];
+      let activeLang = currentLanguage;
+      if (langParam && validLangs.includes(langParam)) {
+        activeLang = langParam;
+        setCurrentLanguage(langParam);
+        setIsManualLanguageOverride(true);
+      } else if (typeof window !== "undefined") {
+        const saved = localStorage.getItem("tarang_language") as LanguageCode | null;
+        if (saved && validLangs.includes(saved)) {
+          activeLang = saved;
+          setCurrentLanguage(saved);
+          setIsManualLanguageOverride(true);
+        }
+      }
+      handleSendMessage(q, activeLang);
     }
   }, [searchParams]);
 
   const handleSelectLanguage = (lang: LanguageCode) => {
     setCurrentLanguage(lang);
     setIsManualLanguageOverride(true);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("tarang_language", lang);
+    }
   };
 
   const handleSelectPrompt = (promptText: string) => {

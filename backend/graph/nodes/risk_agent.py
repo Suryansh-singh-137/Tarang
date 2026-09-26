@@ -368,12 +368,18 @@ def risk_agent(state: ORCAState) -> dict:
             override_active = True
             override_reason = "Moderate hazard advisory requires at least CAUTION"
             final_level = "MODERATE"
-
     # PRD §7 Mandatory Invariant: if severe_active_hazard, final_status != LOW
     if (critical_hazard or is_high_hazard or is_extreme_hazard) and final_level == "LOW":
         override_active = True
         override_reason = "Safety invariant: severe active hazard overrides LOW risk"
         final_level = "HIGH"
+
+    # Border breach invariant: if vessel crossed into foreign waters, override to EXTREME
+    if geofence and (geofence.get("data", {}).get("is_breached") or geofence.get("data", {}).get("inside_boundary") is False):
+        override_active = True
+        b_name = geofence.get("data", {}).get("boundary_name", "International Boundary")
+        override_reason = f"Vessel has crossed {b_name} into foreign waters"
+        final_level = "EXTREME"
 
     label = final_level
     data_completeness = round(available_signals / total_signals, 2)

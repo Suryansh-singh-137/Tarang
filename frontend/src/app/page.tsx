@@ -34,6 +34,16 @@ export default function Home() {
   });
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("tarang_language");
+      const validLangs: LanguageCode[] = ["en", "hi", "gu", "bn", "ta", "te", "ml", "mr", "od"];
+      if (saved && validLangs.includes(saved as LanguageCode)) {
+        setCurrentLanguage(saved as LanguageCode);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     if (selectedLocation) {
       setLiveConditions((prev) => ({
         ...prev,
@@ -44,8 +54,15 @@ export default function Home() {
     }
   }, [selectedLocation]);
 
+  const handleSelectLanguage = (lang: LanguageCode) => {
+    setCurrentLanguage(lang);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("tarang_language", lang);
+    }
+  };
+
   const handleLaunchAppWithQuery = (query: string) => {
-    router.push(`/app?q=${encodeURIComponent(query)}`);
+    router.push(`/app?q=${encodeURIComponent(query)}&lang=${currentLanguage}`);
   };
 
   return (
@@ -98,12 +115,12 @@ export default function Home() {
           {/* Language Toggle (EN / हिं / த) */}
           <LanguageToggle
             currentLanguage={currentLanguage}
-            onSelectLanguage={(lang) => setCurrentLanguage(lang)}
+            onSelectLanguage={handleSelectLanguage}
           />
 
           {/* Open App CTA button */}
           <Link
-            href="/app"
+            href={`/app?lang=${currentLanguage}`}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[var(--ink)] text-white text-xs font-sans font-medium hover:bg-[var(--current)] transition-all shadow-xs cursor-pointer"
           >
             <span>{t.launchApp}</span>

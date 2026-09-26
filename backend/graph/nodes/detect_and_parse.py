@@ -286,7 +286,7 @@ _EXPLAIN_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(why|explain|reason|because|breakdown|how.*calculated|what.*factors)\b", re.I),
     re.compile(r"\b(kyun|kyon|samjhao|batao|kyon|iska|woh)\b", re.I),   # Hindi romanised
     re.compile(r"\b(yen|vitham|eppadi)\b", re.I),                         # Tamil romanised
-    re.compile(r"[\u0915\u094D\u092F\u0942\u0928]"),                      # Devanagari कयून/कयों
+    re.compile(r"(क्यों|क्यूं|क्यो|समझाओ|कारण|विवरण|स्पष्ट\s*करें)"),       # Devanagari explanation words
     re.compile(r"explain.*risk|risk.*explain|score.*why|why.*score", re.I),
 ]
 
@@ -353,7 +353,7 @@ _LOCATION_QUERY_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(mera|meri) location\b", re.I),
     re.compile(r"\b(kahan (hoon|hu|hai|hain)|main kahan|hum kahan|mera sthan|sthan kya hai|sthan batao)\b", re.I),
     re.compile(r"\b(en idam|naan enge|idam enna|engae irukkiren|enathu idam)\b", re.I),
-    re.compile(r"[\u0915\u0939\u093E\u0901][\u0939\u0948\u0902]?"),  # कहाँ / स्थान
+    re.compile(r"(कहाँ\s*(हूँ|हु|है|हैं)?|मेरा\s*स्थान|स्थान\s*क्या\s*है)"),  # कहाँ / स्थान
 ]
 
 _PRESSURE_PATTERNS: list[re.Pattern] = [
@@ -1026,7 +1026,15 @@ def detect_and_parse(state: ORCAState) -> dict:
     mode, q_loc, resolved = LocationResolver.resolve(raw, device_loc, session)
 
     # 4. Language Detection
-    detected_lang = language_override if language_override in SUPPORTED_LANGUAGES else _detect_language(raw)
+    query_detected_lang = _detect_language(raw)
+    if query_detected_lang != "en":
+        detected_lang = query_detected_lang
+    elif language_override in SUPPORTED_LANGUAGES and language_override != "en":
+        detected_lang = language_override
+    elif language_override in SUPPORTED_LANGUAGES:
+        detected_lang = language_override
+    else:
+        detected_lang = "en"
 
     # 4b. Message Quality Gate (PRD §5.1)
     mq = classify_message_quality(raw)

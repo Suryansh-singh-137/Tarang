@@ -280,6 +280,10 @@ export const BorderBreachAlert: React.FC<BorderBreachAlertProps> = ({
                 </button>
               </form>
 
+              <p className="text-[10px] text-yellow-300/80 bg-red-950/60 p-1.5 rounded border border-red-800/40">
+                💡 <strong>Twilio WhatsApp Sandbox:</strong> Send <code className="bg-black/40 px-1 rounded text-white font-mono">join basic-hearing</code> to <strong>+1 415 523 8886</strong> on WhatsApp to connect or renew your 72h sandbox session.
+              </p>
+
               {feedbackMsg && (
                 <div className="text-[11px] text-yellow-200 mt-1">{feedbackMsg}</div>
               )}
